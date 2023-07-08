@@ -3,6 +3,8 @@ USER root
 
 #RUN apt-get update && apt-get install -y \
 #    libfontconfig1 fontconfig libfontconfig1-dev
+RUN  apt-get install -y \
+    libfontconfig1 fontconfig libfontconfig1-dev
 
 RUN rustup component add rustfmt
 
