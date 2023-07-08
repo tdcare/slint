@@ -1,0 +1,26 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "tdcareos-demo"
+version = "1.1.1"
+edition = "2021"
+license = "MIT"
+build = "build.rs"
+publish = false
+
+[[bin]]
+path = "main.rs"
+name = "tdcareos-demo"
+
+[dependencies]
+
+slint = { path = "../../api/rs/slint", default-features = false, features = [
+    "compat-1-0",
+    "std",
+] }
+
+libloading = { version = "0.8.0", optional = true }
+
+[build-dependencies]
+slint-build = { path = "../../api/rs/build" }

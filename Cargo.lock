@@ -5662,6 +5662,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdcareos-demo"
+version = "1.1.1"
+dependencies = [
+ "libloading 0.8.0",
+ "slint",
+ "slint-build",
+]
+
+[[package]]
 name = "temp-dir"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
