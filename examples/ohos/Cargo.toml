@@ -20,7 +20,7 @@ slint = { path = "../../api/rs/slint", default-features = false, features = [
     "std",
 ] }
 
-libloading = { version = "0.8.0", optional = true }
+libloading = { version = "0.8.0" }
 
 [build-dependencies]
 slint-build = { path = "../../api/rs/build" }

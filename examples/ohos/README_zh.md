@@ -4,7 +4,11 @@
 
 ![Screenshot](https://user-images.githubusercontent.com/1486/231705364-8c490e25-48cf-4626-a34b-2bf7239c1245.jpg)
 
-To build this example a suitable UEFI rust target must be installed first:
+## 技术路线
+1. 编写一个鸿蒙系统后端，参考Slint Qt winint 以及 mcu-board 的实现。
+2. 调用鸿蒙C++实现的 图像子系统 编入子系统 等子系统中的方法。
+3. 用 libloading = { version = "0.8.0" } create 加载子系统中的方法。
+4. 用 zigbuild 进行跨平台编译成能在鸿蒙下运行的运行程序。
 
 ```
 rustup target install x86_64-unknown-uefi
