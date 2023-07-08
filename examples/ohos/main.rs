@@ -43,4 +43,5 @@ impl slint::platform::Platform for OHOSPlatform {
 
 fn main()  {
     slint::platform::set_platform(Box::<OHOSPlatform>::default()).unwrap();
+    println!("Slint执行成功！");
 }
