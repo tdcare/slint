@@ -1,10 +1,11 @@
 FROM swr.cn-south-1.myhuaweicloud.com/tdcare/zig-build:v1.70.0 as builder
 USER root
 
-#RUN apt-get update && apt-get install -y \
-#    libfontconfig1 fontconfig libfontconfig1-dev
-RUN  apt-get install -y \
+RUN apt-get update && apt-get install -y \
     libfontconfig1 fontconfig libfontconfig1-dev
+
+#RUN  apt-get install -y \
+#    libfontconfig1 fontconfig libfontconfig1-dev
 
 RUN rustup component add rustfmt
 
