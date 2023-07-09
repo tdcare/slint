@@ -44,7 +44,7 @@ impl slint::platform::Platform for OHOSPlatform {
 fn main()  {
     slint::platform::set_platform(Box::<OHOSPlatform>::default()).unwrap();
     unsafe {
-        let fontconfig = libloading::Library::new("/system/lib/libpng.z.so");
+        let fontconfig = libloading::Library::new("libpng.z.so");
         // if fontconfig.is_ok() {
         //     println!("加载成功");
         // }else {
