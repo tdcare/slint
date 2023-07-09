@@ -43,5 +43,15 @@ impl slint::platform::Platform for OHOSPlatform {
 
 fn main()  {
     slint::platform::set_platform(Box::<OHOSPlatform>::default()).unwrap();
+    unsafe {
+        let fontconfig = libloading::Library::new("libwm.z.so");
+        if fontconfig.is_ok() {
+            println!("加载成功");
+        }else {
+            println!("加载失败！");
+
+        }
+    }
+
     println!("Slint执行成功！");
 }

@@ -21,6 +21,7 @@ slint = { path = "../../api/rs/slint", default-features = false, features = [
 ] }
 
 libloading = { version = "0.8.0" }
+libloader = "0.1.4"
 
 [build-dependencies]
 slint-build = { path = "../../api/rs/build" }
