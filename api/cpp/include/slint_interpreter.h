@@ -1,21 +1,21 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 #pragma once
 
 #include "slint.h"
 
-#include "slint_interpreter_internal.h"
+#ifndef SLINT_FEATURE_INTERPRETER
+#    warning "slint_interpreter.h API only available when SLINT_FEATURE_INTERPRETER is activated"
+#else
 
-#include <optional>
+#    include "slint_interpreter_internal.h"
 
-#if !defined(DOXYGEN)
-#    define SLINT_QT_INTEGRATION // In the future, should be defined by cmake only if this is
-                                 // enabled
-#endif
-#ifdef SLINT_QT_INTEGRATION
+#    include <optional>
+
+#    ifdef SLINT_FEATURE_BACKEND_QT
 class QWidget;
-#endif
+#    endif
 
 namespace slint::cbindgen_private {
 //  This has to stay opaque, but VRc don't compile if it is just forward declared
@@ -96,7 +96,7 @@ public:
     /// advanced until it equals \a end.
     template<typename InputIterator
 // Doxygen doesn't understand this template wizardry
-#if !defined(DOXYGEN)
+#    if !defined(DOXYGEN)
              ,
              typename std::enable_if_t<
                      std::is_convertible<decltype(std::get<0>(*std::declval<InputIterator>())),
@@ -105,7 +105,7 @@ public:
                                             Value>::value
 
                      > * = nullptr
-#endif
+#    endif
              >
     Struct(InputIterator it, InputIterator end) : Struct()
     {
@@ -576,7 +576,7 @@ public:
         cbindgen_private::slint_run_event_loop();
         hide();
     }
-#if defined(SLINT_QT_INTEGRATION) || defined(DOXYGEN)
+#    if defined(SLINT_FEATURE_BACKEND_QT) || defined(DOXYGEN)
     /// Return a QWidget for this instance.
     /// This function is only available if the qt graphical backend was compiled in, and
     /// it may return nullptr if the Qt backend is not used at runtime.
@@ -588,7 +588,7 @@ public:
                 reinterpret_cast<const cbindgen_private::WindowAdapterRc *>(win_ptr)));
         return wid;
     }
-#endif
+#    endif
 
     /// Set the value for a public property of this component
     ///
@@ -832,7 +832,7 @@ public:
         return u.result;
     }
 
-    /// Returns a vector of that contains PropertyDescriptor instances that describe the list of
+    /// Returns a vector of PropertyDescriptor instances that describe the list of
     /// public properties that can be read and written using ComponentInstance::set_property and
     /// ComponentInstance::get_property.
     slint::SharedVector<PropertyDescriptor> properties() const
@@ -1029,3 +1029,5 @@ inline void send_keyboard_string_sequence(const slint::interpreter::ComponentIns
             &str, reinterpret_cast<const cbindgen_private::WindowAdapterRc *>(win_ptr));
 }
 }
+
+#endif

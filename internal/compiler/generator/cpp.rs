@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 /*! module for the C++ code generator
 */
@@ -309,7 +309,7 @@ mod cpp_ast {
     }
 }
 
-use crate::expression_tree::{BuiltinFunction, EasingCurve};
+use crate::expression_tree::{BuiltinFunction, EasingCurve, MinMaxOp};
 use crate::langtype::{ElementType, Enumeration, EnumerationValue, NativeClass, Type};
 use crate::layout::Orientation;
 use crate::llr::{
@@ -567,7 +567,7 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
                 }));
                 let texture_name = format!("slint_embedded_resource_{}_texture", er.id);
                 file.declarations.push(Declaration::Var(Var {
-                    ty: "inline slint::cbindgen_private::types::StaticTexture".into(),
+                    ty: "inline const slint::cbindgen_private::types::StaticTexture".into(),
                     name: texture_name.clone(),
                     array_size: None,
                     init: Some(format!(
@@ -586,20 +586,125 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
                         .textures = slint::cbindgen_private::Slice<slint::cbindgen_private::types::StaticTexture>{{ &{texture_name}, 1 }}
                     }}");
                 file.declarations.push(Declaration::Var(Var {
-                    ty: "inline slint::cbindgen_private::types::StaticTextures".into(),
+                    ty: "inline const slint::cbindgen_private::types::StaticTextures".into(),
                     name: format!("slint_embedded_resource_{}", er.id),
                     array_size: None,
                     init: Some(init),
                 }))
             }
             #[cfg(feature = "software-renderer")]
-            crate::embedded_resources::EmbeddedResourcesKind::BitmapFontData(_) => {
-                // FIXME! TODO
+            crate::embedded_resources::EmbeddedResourcesKind::BitmapFontData(
+                crate::embedded_resources::BitmapFont {
+                    family_name,
+                    character_map,
+                    units_per_em,
+                    ascent,
+                    descent,
+                    glyphs,
+                    weight,
+                    italic,
+                },
+            ) => {
+                let family_name_var = format!("slint_embedded_resource_{}_family_name", er.id);
+                let family_name_size = family_name.len();
                 file.declarations.push(Declaration::Var(Var {
-                    ty: "inline int".into(),
+                    ty: "inline const uint8_t".into(),
+                    name: family_name_var.clone(),
+                    array_size: Some(family_name_size),
+                    init: Some(format!(
+                        "{{ {} }}",
+                        family_name.as_bytes().iter().map(ToString::to_string).join(", ")
+                    )),
+                }));
+
+                let charmap_var = format!("slint_embedded_resource_{}_charmap", er.id);
+                let charmap_size = character_map.len();
+                file.declarations.push(Declaration::Var(Var {
+                    ty: "inline const slint::cbindgen_private::CharacterMapEntry".into(),
+                    name: charmap_var.clone(),
+                    array_size: Some(charmap_size),
+                    init: Some(format!(
+                        "{{ {} }}",
+                        character_map
+                            .iter()
+                            .map(|entry| format!(
+                                "{{ .code_point = {}, .glyph_index = {} }}",
+                                entry.code_point as u32, entry.glyph_index
+                            ))
+                            .join(", ")
+                    )),
+                }));
+
+                for (glyphset_index, glyphset) in glyphs.iter().enumerate() {
+                    for (glyph_index, glyph) in glyphset.glyph_data.iter().enumerate() {
+                        file.declarations.push(Declaration::Var(Var {
+                            ty: "inline const uint8_t".into(),
+                            name: format!(
+                                "slint_embedded_resource_{}_gs_{}_gd_{}",
+                                er.id, glyphset_index, glyph_index
+                            ),
+                            array_size: Some(glyph.data.len()),
+                            init: Some(format!(
+                                "{{ {} }}",
+                                glyph.data.iter().map(ToString::to_string).join(", ")
+                            )),
+                        }));
+                    }
+
+                    file.declarations.push(Declaration::Var(Var{
+                        ty: "inline const slint::cbindgen_private::BitmapGlyph".into(),
+                        name: format!("slint_embedded_resource_{}_glyphset_{}", er.id, glyphset_index),
+                        array_size: Some(glyphset.glyph_data.len()),
+                        init: Some(format!("{{ {} }}", glyphset.glyph_data.iter().enumerate().map(|(glyph_index, glyph)| {
+                            format!("{{ .x = {}, .y = {}, .width = {}, .height = {}, .x_advance = {}, .data = slint::cbindgen_private::Slice<uint8_t>{{ {}, {} }} }}",
+                            glyph.x, glyph.y, glyph.width, glyph.height, glyph.x_advance,
+                            format!("slint_embedded_resource_{}_gs_{}_gd_{}", er.id, glyphset_index, glyph_index),
+                            glyph.data.len()
+                        )
+                        }).join(", \n"))),
+                    }));
+                }
+
+                let glyphsets_var = format!("slint_embedded_resource_{}_glyphsets", er.id);
+                let glyphsets_size = glyphs.len();
+                file.declarations.push(Declaration::Var(Var {
+                    ty: "inline const slint::cbindgen_private::BitmapGlyphs".into(),
+                    name: glyphsets_var.clone(),
+                    array_size: Some(glyphsets_size),
+                    init: Some(format!(
+                        "{{ {} }}",
+                        glyphs
+                            .iter()
+                            .enumerate()
+                            .map(|(glyphset_index, glyphset)| format!(
+                                "{{ .pixel_size = {}, .glyph_data = slint::cbindgen_private::Slice<slint::cbindgen_private::BitmapGlyph>{{
+                                    {}, {}
+                                }}
+                                 }}",
+                                glyphset.pixel_size, format!("slint_embedded_resource_{}_glyphset_{}", er.id, glyphset_index), glyphset.glyph_data.len()
+                            ))
+                            .join(", \n")
+                    )),
+                }));
+
+                let init = format!(
+                    "slint::cbindgen_private::BitmapFont {{
+                        .family_name = slint::cbindgen_private::Slice<uint8_t>{{ {family_name_var} , {family_name_size} }},
+                        .character_map = slint::cbindgen_private::Slice<slint::cbindgen_private::CharacterMapEntry>{{ {charmap_var}, {charmap_size} }},
+                        .units_per_em = {units_per_em},
+                        .ascent = {ascent},
+                        .descent = {descent},
+                        .glyphs = slint::cbindgen_private::Slice<slint::cbindgen_private::BitmapGlyphs>{{ {glyphsets_var}, {glyphsets_size} }},
+                        .weight = {weight},
+                        .italic = {italic},
+                }}"
+                );
+
+                file.declarations.push(Declaration::Var(Var {
+                    ty: "inline const slint::cbindgen_private::BitmapFont".into(),
                     name: format!("slint_embedded_resource_{}", er.id),
                     array_size: None,
-                    init: Some("0".into()),
+                    init: Some(init),
                 }))
             }
         }
@@ -1227,7 +1332,7 @@ fn generate_item_tree(
 
     create_code.extend([
         format!(
-            "if (auto &window = {}->m_window) window->window_handle().register_component(self, self->item_array());",
+            "slint::private_api::register_component({}->m_window, self, self->item_array());",
             root_access
         ),
         format!("self->init({}, self->self_weak, 0, 1 {});", root_access, init_parent_parameters),
@@ -2671,6 +2776,21 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
                 )
 
         }
+        Expression::MinMax { ty, op, lhs, rhs } => {
+            let ident = match op {
+                MinMaxOp::Min => "min",
+                MinMaxOp::Max => "max",
+            };
+            let lhs_code = compile_expression(lhs, ctx);
+            let rhs_code = compile_expression(rhs, ctx);
+            format!(
+                r#"std::{ident}<{ty}>({lhs_code}, {rhs_code})"#,
+                ty = ty.cpp_type().unwrap_or_default(),
+                ident = ident,
+                lhs_code = lhs_code,
+                rhs_code = rhs_code
+            )
+        }
     }
 }
 
@@ -2856,8 +2976,14 @@ fn compile_builtin_function_call(
             }
         }
         BuiltinFunction::RegisterBitmapFont => {
-            // TODO
-            "/*TODO: REGISTER FONT*/".into()
+            if let [llr::Expression::NumberLiteral(resource_id)] = &arguments {
+                let window = access_window_field(ctx);
+                let resource_id: usize = *resource_id as _;
+                let symbol = format!("slint_embedded_resource_{}", resource_id);
+                format!("{window}.register_bitmap_font({symbol});")
+            } else {
+                panic!("internal error: invalid args to RegisterBitmapFont {:?}", arguments)
+            }
         }
         BuiltinFunction::ImplicitLayoutInfo(orient) => {
             if let [llr::Expression::PropertyReference(pr)] = arguments {

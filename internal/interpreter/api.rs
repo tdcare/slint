@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use core::convert::TryFrom;
 use i_slint_compiler::langtype::Type as LangType;
@@ -641,7 +641,8 @@ impl ComponentDefinition {
         self.inner.unerase(guard).properties()
     }
 
-    /// List of publicly declared properties.
+    /// Returns an interator over all publicly declared properties. Each iterator item is a tuple of property name
+    /// and property type for each of them.
     pub fn properties(&self) -> impl Iterator<Item = (String, ValueType)> + '_ {
         // We create here a 'static guard, because unfortunately the returned type would be restricted to the guard lifetime
         // which is not required, but this is safe because there is only one instance of the unerased type

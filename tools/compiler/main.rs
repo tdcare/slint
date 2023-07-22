@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use clap::{Parser, ValueEnum};
 use i_slint_compiler::diagnostics::BuildDiagnostics;
@@ -17,6 +17,7 @@ enum Embedding {
     /// Embed in a format optimized for the software renderer. This
     /// option falls back to `embed-files` if the software-renderer is not
     /// used
+    #[cfg(feature = "software-renderer")]
     EmbedForSoftwareRenderer,
 }
 
@@ -76,8 +77,6 @@ fn main() -> std::io::Result<()> {
             Embedding::EmbedFiles => EmbedResourcesKind::EmbedAllResources,
             #[cfg(feature = "software-renderer")]
             Embedding::EmbedForSoftwareRenderer => EmbedResourcesKind::EmbedTextures,
-            #[cfg(not(feature = "software-renderer"))]
-            Embedding::EmbedForSoftwareRenderer => EmbedResourcesKind::EmbedAllResources,
         };
     }
 

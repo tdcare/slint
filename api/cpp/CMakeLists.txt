@@ -1,5 +1,5 @@
 # Copyright © SixtyFPS GmbH <info@slint.dev>
-# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 cmake_minimum_required(VERSION 3.21)
 project(Slint HOMEPAGE_URL "https://slint.dev/" LANGUAGES CXX VERSION 1.0.0)
@@ -18,14 +18,32 @@ FetchContent_MakeAvailable(Corrosion)
 list(PREPEND CMAKE_MODULE_PATH ${Corrosion_SOURCE_DIR}/cmake)
 find_package(Rust 1.66 REQUIRED MODULE)
 
+option(BUILD_SHARED_LIBS "Build Slint as shared library" ON)
 option(SLINT_FEATURE_COMPILER "Enable support for compiling .slint files to C++ ahead of time" ON)
 
 if(SLINT_FEATURE_COMPILER)
     set(slint_compiler_crate "slint-compiler")
 endif()
 
+if(BUILD_SHARED_LIBS)
+    set(rustc_lib_type "cdylib")
+    set(slint_cpp_impl "slint-cpp-shared")
+    set(cmake_lib_type "SHARED")
+else()
+    set(rustc_lib_type "staticlib")
+    set(slint_cpp_impl "slint-cpp-static")
+    set(cmake_lib_type "STATIC")
+endif()
+
 corrosion_import_crate(MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../Cargo.toml"
-    CRATES slint-cpp ${slint_compiler_crate})
+    CRATES slint-cpp ${slint_compiler_crate} CRATE_TYPES bin ${rustc_lib_type})
+
+set(SLINT_TARGET_CARGO_FLAGS "" CACHE STRING
+    "Flags to pass to cargo when building the Slint runtime library")
+if(SLINT_TARGET_CARGO_FLAGS)
+    corrosion_set_cargo_flags(slint-cpp ${SLINT_TARGET_CARGO_FLAGS})
+endif()
+
 
 # When doing "make install" package builds, set install_name to rpath, so that the installed
 # binaries don't have a load-command pointing back to their build directory.
@@ -33,7 +51,7 @@ corrosion_import_crate(MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../Cargo.to
 # include the binary dir and thus our examples would have the correct rpath set, binaries
 # outside (i.e. applications using Slint via FetchContent) would not and the BUILD_RPATH
 # target property doesn't propagate :(
-if (APPLE AND SLINT_IS_TOPLEVEL_BUILD)
+if (APPLE AND SLINT_IS_TOPLEVEL_BUILD AND BUILD_SHARED_LIBS)
     # corrosion could provide the Cargo.toml package version as a CMake target property.
     corrosion_add_target_local_rustflags(slint-cpp -Clink-arg=-Wl,-install_name,@rpath/libslint_cpp.dylib,-current_version,${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR},-compatibility_version,${PROJECT_VERSION_MAJOR}.0)
     # Set this one to false again explicitely because Corrosion will starting setting this property to true by default.
@@ -92,23 +110,26 @@ endfunction()
 
 # Features that are mapped to features in the Rust crate. These and their
 # defaults need to be kept in sync with the Rust bit.
-define_cargo_feature(interpreter "Enable support for the Slint interpeter to load .slint files at run-time" ON)
 
-define_cargo_feature(backend-winit "Enable support for the winit crate to interaction with all windowing systems." ON)
-define_cargo_feature(backend-winit-x11 "Enable support for the winit create to interact only with the X11 windowing system on Unix. Enable this option and turn off SLINT_FEATURE_BACKEND_WINIT for a smaller build with just X11 support on Unix." OFF)
-define_cargo_feature(backend-winit-wayland "Enable support for the winit create to interact only with the wayland windowing system on Unix. Enable this option and turn off SLINT_FEATURE_BACKEND_WINIT for a smaller build with just wayland support." OFF)
+define_cargo_feature(std "Enable use of the Rust standard library. This is required unless you are targetting bare-metal systems" ON)
 
-define_cargo_feature(renderer-winit-femtovg "Enable support for the OpenGL ES 2.0 based FemtoVG rendering engine." ON)
-define_cargo_feature(renderer-winit-skia "Enable support for the Skia based rendering engine." OFF)
-define_cargo_feature(renderer-winit-skia-opengl "Enable support for the Skia based rendering engine with its OpenGL backend." OFF)
-define_cargo_feature(renderer-winit-skia-vulkan "Enable support for the Skia based rendering engine with its Vulkan backend." OFF)
-define_cargo_feature(renderer-winit-software "Enable support for the software renderer with the winit backend" OFF)
+define_cargo_dependent_feature(interpreter "Enable support for the Slint interpeter to load .slint files at run-time" ON SLINT_FEATURE_STD)
 
-define_cargo_feature(backend-qt "Enable Qt based rendering backend" ON)
+define_cargo_dependent_feature(backend-winit "Enable support for the winit crate to interaction with all windowing systems." ON SLINT_FEATURE_STD)
+define_cargo_dependent_feature(backend-winit-x11 "Enable support for the winit create to interact only with the X11 windowing system on Unix. Enable this option and turn off SLINT_FEATURE_BACKEND_WINIT for a smaller build with just X11 support on Unix." OFF SLINT_FEATURE_STD)
+define_cargo_dependent_feature(backend-winit-wayland "Enable support for the winit create to interact only with the wayland windowing system on Unix. Enable this option and turn off SLINT_FEATURE_BACKEND_WINIT for a smaller build with just wayland support." OFF SLINT_FEATURE_STD)
+
+define_cargo_dependent_feature(renderer-winit-femtovg "Enable support for the OpenGL ES 2.0 based FemtoVG rendering engine." ON SLINT_FEATURE_STD)
+define_cargo_dependent_feature(renderer-winit-skia "Enable support for the Skia based rendering engine." OFF SLINT_FEATURE_STD)
+define_cargo_dependent_feature(renderer-winit-skia-opengl "Enable support for the Skia based rendering engine with its OpenGL backend." OFF SLINT_FEATURE_STD)
+define_cargo_dependent_feature(renderer-winit-skia-vulkan "Enable support for the Skia based rendering engine with its Vulkan backend." OFF SLINT_FEATURE_STD)
+define_cargo_dependent_feature(renderer-winit-software "Enable support for the software renderer with the winit backend" OFF SLINT_FEATURE_STD)
+
+define_cargo_dependent_feature(backend-qt "Enable Qt based rendering backend" ON SLINT_FEATURE_STD)
 
 define_cargo_feature(experimental "Enable experimental features (no compatibility guarantees)" OFF)
-define_cargo_feature(gettext "Enable support of translations using gettext" OFF)
-define_cargo_feature(accessibility "Enable integration with operating system provided accessibility APIs" ON)
+define_cargo_dependent_feature(gettext "Enable support of translations using gettext" OFF SLINT_FEATURE_STD)
+define_cargo_dependent_feature(accessibility "Enable integration with operating system provided accessibility APIs" ON SLINT_FEATURE_STD)
 
 # Compat options
 option(SLINT_FEATURE_BACKEND_GL_ALL "This feature is an alias for SLINT_FEATURE_BACKEND_WINIT and SLINT_FEATURE_RENDERER_WINIT_FEMTOVG." OFF)
@@ -130,16 +151,23 @@ if(SLINT_FEATURE_BACKEND_GL_WAYLAND)
     set(SLINT_FEATURE_RENDERER_WINIT_FEMTOVG ON)
 endif()
 
+if (NOT SLINT_FEATURE_STD)
+    list(APPEND features i-slint-core/libm i-slint-core/unsafe-single-threaded)
+endif()
+
+if (SLINT_FEATURE_STD AND SLINT_FEATURE_EXPERIMENTAL)
+    list(APPEND features experimental-skia)
+endif()
+
 set_property(
     TARGET slint-cpp
     PROPERTY CORROSION_FEATURES
     ${features}
-    std
 )
 set_property(
     TARGET slint-cpp
     PROPERTY CORROSION_NO_DEFAULT_FEATURES
-    ${features}
+    ON
 )
 
 if(SLINT_FEATURE_BACKEND_QT)
@@ -214,10 +242,6 @@ if((SLINT_FEATURE_RENDERER_WINIT_SKIA OR SLINT_FEATURE_RENDERER_WINIT_SKIA_OPENG
     endif()
 endif()
 
-if(SLINT_FEATURE_EXPERIMENTAL)
-    target_compile_definitions(Slint INTERFACE SLINT_FEATURE_EXPERIMENTAL)
-endif()
-
 file(GLOB api_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/include/"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h")
 
@@ -272,10 +296,10 @@ install(TARGETS Slint slint-cpp
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-install(FILES $<TARGET_FILE:slint-cpp-shared> TYPE LIB)
+install(FILES $<TARGET_FILE:${slint_cpp_impl}> TYPE LIB)
 
 if(WIN32)
-    install(FILES $<TARGET_LINKER_FILE:slint-cpp-shared> TYPE LIB)
+    install(FILES $<TARGET_LINKER_FILE:${slint_cpp_impl}> TYPE LIB)
 endif()
 
 if(SLINT_FEATURE_COMPILER)
@@ -292,7 +316,7 @@ function(_slint_write_configure_file)
         IMPORTED_LOCATION_RELWITHDEBINFO IMPORTED_LOCATION_MINSIZEREL
         IMPORTED_IMPLIB IMPORTED_IMPLIB_DEBUG IMPORTED_IMPLIB_RELEASE
         IMPORTED_IMPLIB_RELWITHDEBINFO IMPORTED_IMPLIB_MINSIZEREL)
-        get_target_property(value slint-cpp-shared ${prop})
+        get_target_property(value ${slint_cpp_impl} ${prop})
 
         if(value)
             get_filename_component(value ${value} NAME)

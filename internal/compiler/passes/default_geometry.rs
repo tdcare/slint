@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 /*! Set the width and height of Rectangle, TouchArea, ... to 100%,
     the implicit width or aspect ratio preserving for Images.
@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use crate::diagnostics::{BuildDiagnostics, Spanned};
 use crate::expression_tree::{
-    BindingExpression, BuiltinFunction, Expression, NamedReference, Unit,
+    BindingExpression, BuiltinFunction, Expression, MinMaxOp, NamedReference, Unit,
 };
 use crate::langtype::{BuiltinElement, DefaultSizeBinding, PropertyLookupResult, Type};
 use crate::layout::{implicit_layout_info_call, LayoutConstraints, Orientation};
@@ -297,7 +297,7 @@ fn make_default_implicit(elem: &ElementRc, property: &str) {
             &format!("preferred-{}", property),
         )),
         Expression::PropertyReference(NamedReference::new(elem, &format!("min-{}", property))),
-        '>',
+        MinMaxOp::Max,
     );
     elem.borrow_mut().set_binding_if_not_set(property.into(), || e);
 }

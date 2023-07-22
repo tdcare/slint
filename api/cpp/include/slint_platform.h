@@ -1,13 +1,14 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 #pragma once
+
+#include "slint.h"
 
 #ifndef SLINT_FEATURE_EXPERIMENTAL
 #    warning "slint_platform.h API only available when SLINT_FEATURE_EXPERIMENTAL is activated"
 #else
 
-#    include "slint.h"
 #    include <utility>
 
 struct xcb_connection_t;
@@ -156,6 +157,46 @@ public:
     }
 };
 
+/// An event that is passed to the Platform::invoke_from_event_loop function and needs to be invoked
+/// in the event loop.
+class PlatformEvent
+{
+    cbindgen_private::PlatformEventOpaque inner { nullptr, nullptr };
+    friend class Platform;
+
+    explicit PlatformEvent(cbindgen_private::PlatformEventOpaque inner) : inner(inner) { }
+
+public:
+    ~PlatformEvent()
+    {
+        if (inner._0) {
+            cbindgen_private::slint_platform_event_drop(std::exchange(inner, { nullptr, nullptr }));
+        }
+    }
+    PlatformEvent(const PlatformEvent &) = delete;
+    PlatformEvent &operator=(const PlatformEvent &) = delete;
+    PlatformEvent(PlatformEvent &&other) : inner(other.inner)
+    {
+        other.inner = { nullptr, nullptr };
+    }
+    PlatformEvent &operator=(PlatformEvent &&other)
+    {
+        std::swap(other.inner, inner);
+        return *this;
+    }
+
+    /// Invoke the event.
+    ///
+    /// Can only be invoked once and should only be called from the event loop.
+    void invoke() &&
+    {
+        if (inner._0) {
+            cbindgen_private::slint_platform_event_invoke(
+                    std::exchange(inner, { nullptr, nullptr }));
+        }
+    };
+};
+
 /// The platform is acting like a factory to create a WindowAdapter
 ///
 /// Platform::register_platform() need to be called before any other Slint handle
@@ -172,8 +213,31 @@ public:
     /// Returns a new WindowAdapter
     virtual std::unique_ptr<WindowAdapter> create_window_adapter() const = 0;
 
-    /// Register the platform to Slint. Must be called before Slint window are created. Can only
-    /// be called once in an application.
+    /// Returns the amount of milliseconds since start of the application.
+    ///
+    /// This function should only be implemented  if the runtime is compiled with no_std
+    virtual std::chrono::milliseconds duration_since_start() const { return {}; }
+
+    /// Spins an event loop and renders the visible windows.
+    virtual void run_event_loop() { }
+
+    /// Exits the event loop.
+    ///
+    /// This is what is called by slint::quit_event_loop() and can be called from a different thread
+    /// or re-enter from the event loop
+    virtual void quit_event_loop() { }
+
+    /// Invokes the event from the event loop.
+    ///
+    /// This function is called by slint::invoke_from_event_loop().
+    /// It can be called from any thread, but the passed function must only be called
+    /// from the event loop.
+    /// Reimplements this function and move the event to the event loop before calling
+    /// PlatformEvent::invoke()
+    virtual void invoke_from_event_loop(PlatformEvent) { }
+
+    /// Registers the platform with Slint. Must be called before Slint windows are created.
+    /// Can only be called once in an application.
     static void register_platform(std::unique_ptr<Platform> platform)
     {
         cbindgen_private::slint_platform_register(
@@ -182,6 +246,15 @@ public:
                     auto w = reinterpret_cast<const Platform *>(p)->create_window_adapter();
                     *out = w->initialize();
                     (void)w.release();
+                },
+                [](void *p) -> uint64_t {
+                    return reinterpret_cast<const Platform *>(p)->duration_since_start().count();
+                },
+                [](void *p) { return reinterpret_cast<Platform *>(p)->run_event_loop(); },
+                [](void *p) { return reinterpret_cast<Platform *>(p)->quit_event_loop(); },
+                [](void *p, cbindgen_private::PlatformEventOpaque event) {
+                    return reinterpret_cast<Platform *>(p)->invoke_from_event_loop(
+                            PlatformEvent(event));
                 });
     }
 };
@@ -222,6 +295,19 @@ public:
         cbindgen_private::slint_software_renderer_render_rgb8(
                 inner, &window.window_handle().inner, buffer.data(), buffer.size(), pixel_stride);
     }
+
+    /// Render the window scene into an RGB 565 encoded pixel buffer
+    ///
+    /// The buffer must be at least as large as the associated slint::Window
+    ///
+    /// The stride is the amount of pixels between two lines in the buffer.
+    /// It is must be at least as large as the width of the window.
+    void render_rgb565(const Window &window, std::span<uint16_t> buffer,
+                       std::size_t pixel_stride) const
+    {
+        cbindgen_private::slint_software_renderer_render_rgb565(
+                inner, &window.window_handle().inner, buffer.data(), buffer.size(), pixel_stride);
+    }
 };
 
 /// An opaque, low-level window handle that internalizes everything necessary to exchange messages
@@ -255,13 +341,22 @@ public:
     }
 
 #    if !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)
-    static NativeWindowHandle from_x11(uint32_t /*xcb_window_t*/ window,
-                                       uint32_t /*xcb_visualid_t*/ visual_id,
-                                       xcb_connection_t *connection, int screen)
+    static NativeWindowHandle from_x11_xcb(uint32_t /*xcb_window_t*/ window,
+                                           uint32_t /*xcb_visualid_t*/ visual_id,
+                                           xcb_connection_t *connection, int screen)
     {
 
-        return { cbindgen_private::slint_new_raw_window_handle_x11(window, visual_id, connection,
-                                                                   screen) };
+        return { cbindgen_private::slint_new_raw_window_handle_x11_xcb(window, visual_id,
+                                                                       connection, screen) };
+    }
+
+    static NativeWindowHandle from_x11_xlib(uint32_t /*Window*/ window,
+                                            unsigned long /*VisualID*/ visual_id,
+                                            void /*Display*/ *display, int screen)
+    {
+
+        return { cbindgen_private::slint_new_raw_window_handle_x11_xlib(window, visual_id, display,
+                                                                        screen) };
     }
 
     static NativeWindowHandle from_wayland(wl_surface *surface, wl_display *display)
@@ -343,6 +438,19 @@ public:
 inline void update_timers_and_animations()
 {
     cbindgen_private::slint_platform_update_timers_and_animations();
+}
+
+/// Returns the duration until the next timer if there are  pending timers
+inline std::optional<std::chrono::milliseconds> duration_until_next_timer_update()
+{
+    uint64_t val = cbindgen_private::slint_platform_duration_until_next_timer_update();
+    if (val == std::numeric_limits<uint64_t>::max()) {
+        return std::nullopt;
+    } else if (val >= uint64_t(std::chrono::milliseconds::max().count())) {
+        return std::chrono::milliseconds::max();
+    } else {
+        return std::chrono::milliseconds(val);
+    }
 }
 
 }

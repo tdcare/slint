@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 // cSpell: ignore conv gdata powf punct vref
 
@@ -12,7 +12,7 @@ Some convention used in the generated code:
     this is usually a local variable to the init code that shouldn't rbe relied upon by the binding code.
 */
 
-use crate::expression_tree::{BuiltinFunction, EasingCurve, OperatorClass};
+use crate::expression_tree::{BuiltinFunction, EasingCurve, MinMaxOp, OperatorClass};
 use crate::langtype::{ElementType, Enumeration, EnumerationValue, Type};
 use crate::layout::Orientation;
 use crate::llr::{
@@ -192,7 +192,7 @@ pub fn generate(doc: &Document) -> TokenStream {
          // These make code generation easier
         #[allow(clippy::style)]
         #[allow(clippy::complexity)]
-        #[allow(unused_braces)]
+        #[allow(unused_braces, unused_parens)]
         #[allow(clippy::erasing_op)]
         #[allow(clippy::approx_constant)] // We may get those from .slint inputs!
         #[allow(clippy::eq_op)] // The generated code will compare/subtract/etc. equal values
@@ -929,7 +929,6 @@ fn generate_sub_component(
                     root : &sp::VRc<sp::ComponentVTable, #root_component_id>,
                     tree_index: u32, tree_index_of_first_child: u32) {
                 #![allow(unused)]
-                #![allow(unused)]
                 let _self = self_rc.as_pin_ref();
                 _self.self_weak.set(VRcMapped::downgrade(&self_rc));
                 _self.root.set(VRc::downgrade(root));
@@ -1244,7 +1243,7 @@ fn generate_item_tree(
             quote!(
                 #[allow(unused)]
                 fn window_adapter(&self) -> Rc<dyn sp::WindowAdapter> {
-                    self.window_adapter_ref().unwrap().clone()
+                    Rc::clone(self.window_adapter_ref().unwrap())
                 }
 
                 fn window_adapter_ref(
@@ -2188,6 +2187,23 @@ fn compile_expression(expr: &Expression, ctx: &EvaluationContext) -> TokenStream
                 let mut #cells_variable = [#(#cells),*];
                 sp::reorder_dialog_button_layout(&mut #cells_variable, &#roles);
                 let #cells_variable = sp::Slice::from_slice(&#cells_variable);
+            }
+        }
+        Expression::MinMax { ty, op, lhs, rhs } => {
+            let t = rust_primitive_type(ty);
+            let wrap = |expr| match &t {
+                Some(t) => quote!((#expr as #t)),
+                None => expr,
+            };
+            let lhs = wrap(compile_expression(lhs, ctx));
+            let rhs = wrap(compile_expression(rhs, ctx));
+            match op {
+                MinMaxOp::Min => {
+                    quote!(#lhs.min(#rhs))
+                }
+                MinMaxOp::Max => {
+                    quote!(#lhs.max(#rhs))
+                }
             }
         }
     }

@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 import { Palette, Typography, Icons } from "styling.slint";
 
@@ -59,6 +59,8 @@ component SpinBoxButton inherits Rectangle {
 
 // Increment and decrement a value in the given range.
 export component SpinBox {
+    callback edited(int /* value */);
+
     in property <int> minimum;
     in property <int> maximum: 100;
     in property <bool> enabled <=> i-focus-scope.enabled;
@@ -80,9 +82,11 @@ export component SpinBox {
         key-pressed(event) => {
             if (root.enabled && event.text == Key.UpArrow && root.value < root.maximum) {
                 root.value += 1;
+                root.edited(value);
                 accept
             } else if (root.enabled && event.text == Key.DownArrow && root.value > root.minimum) {
                 root.value -= 1;
+                root.edited(value);
                 accept
             } else {
                 reject
@@ -105,15 +109,37 @@ export component SpinBox {
         padding-right: 12px;
         spacing: 16px;
 
-        i-text := Text {
-            text: root.value;
-            height: 100%;
-            color: Palette.on-surface;
-            vertical-alignment: center;
-            // FIXME after Roboto font can be loaded
-            //font-family: Typography.body-large.font;
-            font-size: Typography.body-large.font-size;
-            font-weight: Typography.body-large.font-weight;
+        Rectangle {
+            clip: true;
+
+            i-text-input := TextInput {
+                text: root.value;
+                height: 100%;
+                color: Palette.on-surface;
+                vertical-alignment: center;
+                // FIXME after Roboto font can be loaded
+                //font-family: Typography.body-large.font;
+                font-size: Typography.body-large.font-size;
+                font-weight: Typography.body-large.font-weight;
+
+                accepted => {
+                    if (!self.text.is-float()) {
+                        self.text = root.value;
+                    }
+                }
+
+                edited => {
+                    if (self.text.is-float()) {
+                        root.update-value(self.text.to-float());
+                    }
+                }
+            }
+
+            i-touch-area := TouchArea {
+                clicked => {
+                    i-text-input.focus();
+                }
+            }
         }
 
         VerticalLayout {
@@ -131,11 +157,7 @@ export component SpinBox {
                 }
 
                 clicked => {
-                    if (root.value < root.maximum) {
-                        root.value += 1;
-                    }
-
-                    root.focus();
+                    root.increment();
                 }
             }
 
@@ -151,26 +173,39 @@ export component SpinBox {
                 }
 
                 clicked => {
-                    if (root.value > root.minimum) {
-                        root.value -= 1;
-                    }
-
-                    root.focus();
+                    root.decrement();
                 }
             }
         }
+    }
+
+    function update-value(value: int) {
+        if (value >= root.minimum && value <= root.maximum) {
+            root.value = value;
+            root.edited(value);
+        }
+
+        i-text-input.text = root.value;
+    }
+
+    function increment() {
+        root.update-value(root.value + 1);
+    }
+
+    function decrement() {
+        root.update-value(root.value - 1);
     }
 
     states [
         disabled when !root.enabled : {
             i-background.border-color: Palette.on-surface;
             i-background.opacity: 0.38;
-            i-text.opacity: 0.38;
+            i-text-input.opacity: 0.38;
         }
         focused when root.has-focus : {
             i-background.border-width: 2px;
             i-background.border-color: Palette.primary;
-            i-text.color: Palette.primary;
+            i-text-input.color: Palette.primary;
         }
     ]
 }

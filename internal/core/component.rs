@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 #![warn(missing_docs)]
 
@@ -165,11 +165,11 @@ pub(crate) mod ffi {
         item_array: Slice<vtable::VOffset<u8, ItemVTable, vtable::AllowPin>>,
         window_handle: *const crate::window::ffi::WindowAdapterRcOpaque,
     ) {
-        let window_adapter = &*(window_handle as *const Rc<dyn WindowAdapter>);
+        let window_adapter = (window_handle as *const Rc<dyn WindowAdapter>).as_ref().cloned();
         super::register_component(
             core::pin::Pin::new_unchecked(&*(component.as_ptr() as *const u8)),
             item_array.as_slice(),
-            Some(window_adapter.clone()),
+            window_adapter,
         )
     }
 

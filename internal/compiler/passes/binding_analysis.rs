@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 //! Compute binding analysis and attempt to find binding loops
 
@@ -171,6 +171,23 @@ fn analyze_element(
                 });
             }
         }
+    }
+
+    if let Some(repeated) = &elem.borrow().repeated {
+        recurse_expression(&repeated.model, &mut |prop| {
+            process_property(prop, context, reverse_aliases, diag);
+        });
+        if let Some(lv) = &repeated.is_listview {
+            process_property(&lv.viewport_y.clone().into(), context, reverse_aliases, diag);
+            process_property(&lv.viewport_height.clone().into(), context, reverse_aliases, diag);
+            process_property(&lv.viewport_width.clone().into(), context, reverse_aliases, diag);
+            process_property(&lv.listview_height.clone().into(), context, reverse_aliases, diag);
+            process_property(&lv.listview_width.clone().into(), context, reverse_aliases, diag);
+        }
+    }
+    if let Some((h, v)) = &elem.borrow().layout_info_prop {
+        process_property(&h.clone().into(), context, reverse_aliases, diag);
+        process_property(&v.clone().into(), context, reverse_aliases, diag);
     }
 }
 

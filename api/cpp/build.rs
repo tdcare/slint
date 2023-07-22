@@ -1,6 +1,7 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
+use crate::cbindgen::EnabledFeatures;
 use std::path::Path;
 mod cbindgen;
 
@@ -20,7 +21,14 @@ fn main() -> Result<(), anyhow::Error> {
 
     println!("cargo:GENERATED_INCLUDE_DIR={}", output_dir.display());
 
-    let dependencies = cbindgen::gen_all(&root_dir, &output_dir)?;
+    let enabled_features = EnabledFeatures {
+        interpreter: std::env::var("CARGO_FEATURE_SLINT_INTERPRETER").is_ok(),
+        experimental: std::env::var("CARGO_FEATURE_EXPERIMENTAL").is_ok(),
+        backend_qt: std::env::var("CARGO_FEATURE_BACKEND_QT").is_ok(),
+        std: std::env::var("CARGO_FEATURE_STD").is_ok(),
+    };
+
+    let dependencies = cbindgen::gen_all(&root_dir, &output_dir, enabled_features)?;
     for path in dependencies {
         println!("cargo:rerun-if-changed={}", path.display());
     }

@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use crate::api::{SetPropertyError, Struct, Value};
 use crate::dynamic_component::InstanceRef;
@@ -11,7 +11,8 @@ use corelib::model::{Model, ModelRc};
 use corelib::rtti::AnimatedBindingKind;
 use corelib::{Brush, Color, PathData, SharedString, SharedVector};
 use i_slint_compiler::expression_tree::{
-    BuiltinFunction, EasingCurve, Expression, Path as ExprPath, PathElement as ExprPathElement,
+    BuiltinFunction, EasingCurve, Expression, MinMaxOp, Path as ExprPath,
+    PathElement as ExprPathElement,
 };
 use i_slint_compiler::langtype::Type;
 use i_slint_compiler::object_tree::ElementRc;
@@ -386,6 +387,18 @@ pub fn eval_expression(expression: &Expression, local_context: &mut EvalLocalCon
         }
         Expression::ComputeLayoutInfo(lay, o) => crate::eval_layout::compute_layout_info(lay, *o, local_context),
         Expression::SolveLayout(lay, o) => crate::eval_layout::solve_layout(lay, *o, local_context),
+        Expression::MinMax { ty: _, op, lhs, rhs } => {
+            let Value::Number(lhs) = eval_expression(lhs, local_context) else {
+                return local_context.return_value.clone().expect("minmax lhs expression did not evaluate to number");
+            };
+            let Value::Number(rhs) =  eval_expression(rhs, local_context) else {
+                return local_context.return_value.clone().expect("minmax rhs expression did not evaluate to number");
+            };
+            match op {
+                MinMaxOp::Min => Value::Number(lhs.min(rhs)),
+                MinMaxOp::Max => Value::Number(lhs.max(rhs)),
+            }
+        }
     }
 }
 

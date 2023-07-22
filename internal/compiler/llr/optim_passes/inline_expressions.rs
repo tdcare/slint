@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 //! Inline properties that are simple enough to be inlined
 //!
@@ -54,6 +54,7 @@ fn expression_cost(exp: &Expression, ctx: &EvaluationContext) -> isize {
         Expression::LayoutCacheAccess { .. } => PROPERTY_ACCESS_COST,
         Expression::BoxLayoutFunction { .. } => return isize::MAX,
         Expression::ComputeDialogLayoutCells { .. } => return isize::MAX,
+        Expression::MinMax { .. } => 10,
     };
 
     exp.visit(|e| cost = cost.saturating_add(expression_cost(e, ctx)));

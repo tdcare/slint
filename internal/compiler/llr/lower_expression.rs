@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -197,6 +197,12 @@ pub fn lower_expression(
         }
         tree_Expression::ComputeLayoutInfo(l, o) => compute_layout_info(l, *o, ctx),
         tree_Expression::SolveLayout(l, o) => solve_layout(l, *o, ctx),
+        tree_Expression::MinMax { ty, op, lhs, rhs } => llr_Expression::MinMax {
+            ty: ty.clone(),
+            op: *op,
+            lhs: Box::new(lower_expression(lhs, ctx)),
+            rhs: Box::new(lower_expression(rhs, ctx)),
+        },
     }
 }
 

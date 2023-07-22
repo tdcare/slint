@@ -350,6 +350,10 @@ export component Example inherits Window {
 -   **`minimum`** (_in_ _int_): The minimum value (default: 0).
 -   **`maximum`** (_in_ _int_): The maximum value (default: 100).
 
+### Callbacks
+
+- **`edited(`_`int`_`)`**: Emitted when the value has changed because the user modified it
+
 ### Example
 
 ```slint
@@ -447,6 +451,7 @@ Same as [`ListView`](#listview), and in addition:
 
 -   **`sort-ascending(`_`int`_`)`**: Emitted if the model should be sorted by the given column in ascending order.
 -   **`sort-descending(`_`int`_`)`**: Emitted if the model should be sorted by the given column in descending order.
+-   **`row-pointer-event(`_`index: int`_`, `_`event: PointerEvent`_`, `_`pos: Point`_`)`**: Emitted on any mouse pointer event similar to `TouchArea`. Arguments are row index associated with the event, the `PointerEvent` itself and the mouse position within the tableview.
 
 ### Functions
 

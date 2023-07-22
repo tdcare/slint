@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 #pragma once
 
@@ -8,29 +8,27 @@
 #    pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
 
-#include <vector>
-#include <memory>
-#include <algorithm>
-#include <iostream> // FIXME: remove: iostream always bring it lots of code so we should not have it in this header
-#include <chrono>
-#include <optional>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <span>
-#include <functional>
-#include <concepts>
-
-namespace slint::cbindgen_private {
-// Workaround https://github.com/eqrion/cbindgen/issues/43
-struct ComponentVTable;
-struct ItemVTable;
-}
 #include "slint_internal.h"
 #include "slint_size.h"
 #include "slint_point.h"
 #include "slint_backend_internal.h"
 #include "slint_qt_internal.h"
+
+#include <vector>
+#include <memory>
+#include <algorithm>
+#include <chrono>
+#include <optional>
+#include <span>
+#include <functional>
+#include <concepts>
+
+#ifdef SLINT_FEATURE_STD
+#    include <iostream>
+#    include <thread>
+#    include <mutex>
+#    include <condition_variable>
+#endif
 
 /// \rst
 /// The :code:`slint` namespace is the primary entry point into the Slint C++ API.
@@ -81,7 +79,8 @@ using cbindgen_private::TableColumn;
 /// use slint::invoke_from_event_loop
 inline void assert_main_thread()
 {
-#ifndef NDEBUG
+#ifdef SLINT_FEATURE_STD
+#    ifndef NDEBUG
     static auto main_thread_id = std::this_thread::get_id();
     if (main_thread_id != std::this_thread::get_id()) {
         std::cerr << "A function that should be only called from the main thread was called from a "
@@ -92,6 +91,7 @@ inline void assert_main_thread()
                   << std::endl;
         std::abort();
     }
+#    endif
 #endif
 }
 
@@ -144,13 +144,6 @@ public:
     {
         cbindgen_private::ItemRc item_rc { component_rc, item_index };
         cbindgen_private::slint_windowrc_set_focus_item(&inner, &item_rc);
-    }
-
-    template<typename Component, typename ItemArray>
-    void register_component(Component *c, ItemArray items) const
-    {
-        cbindgen_private::slint_register_component(
-                vtable::VRef<ComponentVTable> { &Component::static_vtable, c }, items, &inner);
     }
 
     template<typename Component>
@@ -268,8 +261,14 @@ public:
         }
     }
 
+    /// Registers a bitmap font for use with the software renderer.
+    inline void register_bitmap_font(const cbindgen_private::BitmapFont &font)
+    {
+        cbindgen_private::slint_register_bitmap_font(&inner, &font);
+    }
+
     /// \private
-    const cbindgen_private::WindowAdapterRcOpaque &handle() { return inner; }
+    const cbindgen_private::WindowAdapterRcOpaque &handle() const { return inner; }
 
 private:
     friend class slint::experimental::platform::SkiaRenderer;
@@ -608,6 +607,16 @@ inline LayoutInfo LayoutInfo::merge(const LayoutInfo &other) const
 
 namespace private_api {
 
+template<typename Component, typename ItemArray>
+static void register_component(const std::optional<slint::Window> &maybe_window, Component *c,
+                               ItemArray items)
+{
+    const cbindgen_private::WindowAdapterRcOpaque *window_ptr =
+            maybe_window.has_value() ? &maybe_window->window_handle().handle() : nullptr;
+    cbindgen_private::slint_register_component(
+            vtable::VRef<ComponentVTable> { &Component::static_vtable, c }, items, window_ptr);
+}
+
 inline SharedVector<float> solve_box_layout(const cbindgen_private::BoxLayoutData &data,
                                             cbindgen_private::Slice<int> repeater_indexes)
 {
@@ -678,10 +687,9 @@ auto access_array_index(const M &model, size_t index)
 } // namespace private_api
 
 /// \rst
-/// A Model is providing Data for
-/// `for - in<../../slint/src/reference/repetitions.html>`_ repetitions or
-/// `ListView<../../slint/src/builtins/widgets.html#listview>`_ elements of the :code:`.slint`
-/// language \endrst
+/// A Model is providing Data for |Repetition|_ repetitions or |ListView|_ elements of the
+/// :code:`.slint` language
+/// \endrst
 template<typename ModelData>
 class Model
 {
@@ -706,17 +714,25 @@ public:
     /// If the model can update the data, it should also call `row_changed`
     virtual void set_row_data(size_t, const ModelData &)
     {
+#ifdef SLINT_FEATURE_STD
         std::cerr << "Model::set_row_data was called on a read-only model" << std::endl;
+#endif
     };
 
     /// \private
     /// Internal function called by the view to register itself
-    void attach_peer(private_api::ModelPeer p) { peers.push_back(std::move(p)); }
+    void attach_peer(private_api::ModelPeer p)
+    {
+        peers.push_back(std::move(p));
+    }
 
     /// \private
     /// Internal function called from within bindings to register with the currently
     /// evaluating dependency and get notified when this model's row count changes.
-    void track_row_count_changes() const { model_row_count_dirty_property.get(); }
+    void track_row_count_changes() const
+    {
+        model_row_count_dirty_property.get();
+    }
 
     /// \private
     /// Internal function called from within bindings to register with the currently
@@ -1579,6 +1595,8 @@ void invoke_from_event_loop(Functor f)
             [](void *data) { delete reinterpret_cast<Functor *>(data); });
 }
 
+#ifdef SLINT_FEATURE_STD
+
 /// Blocking version of invoke_from_event_loop()
 ///
 /// Just like invoke_from_event_loop(), this will run the specified functor from the thread running
@@ -1631,7 +1649,7 @@ auto blocking_invoke_from_event_loop(Functor f) -> std::invoke_result_t<Functor>
     return std::move(*result);
 }
 
-#if !defined(DOXYGEN) // Doxygen doesn't see this as an overload of the previous one
+#    if !defined(DOXYGEN) // Doxygen doesn't see this as an overload of the previous one
 // clang-format off
 template<std::invocable Functor>
     requires(std::is_void_v<std::invoke_result_t<Functor>>)
@@ -1650,6 +1668,7 @@ void blocking_invoke_from_event_loop(Functor f)
     std::unique_lock lock(mtx);
     cv.wait(lock, [&] { return ok; });
 }
+#    endif
 #endif
 
 } // namespace slint

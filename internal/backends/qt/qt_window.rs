@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 // cSpell: ignore antialiasing frameless qbrush qpointf qreal qwidgetsize svgz
 
@@ -1370,7 +1370,7 @@ impl QtItemRenderer<'_> {
     }
 }
 
-cpp_class!(unsafe struct QWidgetPtr as "std::unique_ptr<QWidget>");
+cpp_class!(pub(crate) unsafe struct QWidgetPtr as "std::unique_ptr<QWidget>");
 
 pub struct QtWindow {
     widget_ptr: QWidgetPtr,

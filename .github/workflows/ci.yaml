@@ -1,5 +1,5 @@
 # Copyright © SixtyFPS GmbH <info@slint.dev>
-# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 name: CI
 
@@ -62,6 +62,13 @@ jobs:
       with:
         toolchain: ${{ matrix.rust_version }}
         key: x-v2
+    - name: Pin dependencies to make it build with our MSRV
+      if: matrix.rust_version == '1.66'
+      shell: bash
+      run: |
+        if [ ! -f ./Cargo.lock ]; then
+          cargo update -p half --precise 2.2.1
+        fi
     - name: Run tests
       run: DYLD_FRAMEWORK_PATH=$Qt5_DIR/lib cargo test --verbose --all-features --workspace ${{ matrix.extra_args }} --exclude slint-node --exclude test-driver-nodejs --exclude test-driver-cpp --exclude mcu-board-support --exclude printerdemo_mcu --exclude uefi-demo
       env:
@@ -258,7 +265,7 @@ jobs:
         buildDirectory: ${{ runner.workspace }}/examples/build
         buildWithCMakeArgs: '--config Release'
 
-  # test to compile the mcu backend with nightly and for the armv6 target (no_std)
+  # test to compile the mcu backend for the armv6 target (no_std)
   mcu:
     env:
       SLINT_EMBED_GLYPHS: 1
@@ -271,7 +278,6 @@ jobs:
     - uses: actions/checkout@v3
     - uses: ./.github/actions/setup-rust
       with:
-        toolchain: nightly
         target: thumbv6m-none-eabi
     - name: Check
       run: cargo check --target=thumbv6m-none-eabi -p printerdemo_mcu --no-default-features --features=mcu-board-support/pico-st7789
@@ -287,7 +293,7 @@ jobs:
       with:
         crate: cross
     - name: Check
-      run: cross check --target=armv7-unknown-linux-gnueabihf -p slint-cpp --no-default-features --features=testing,interpreter
+      run: cross check --target=armv7-unknown-linux-gnueabihf -p slint-cpp --no-default-features --features=testing,interpreter,std
 
   uefi-demo:
     env:

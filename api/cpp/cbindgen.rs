@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use anyhow::Context;
 use std::io::Write;
@@ -110,6 +110,7 @@ fn gen_corelib(
     root_dir: &Path,
     include_dir: &Path,
     dependencies: &mut Vec<PathBuf>,
+    enabled_features: EnabledFeatures,
 ) -> anyhow::Result<()> {
     let mut config = default_config();
 
@@ -154,6 +155,7 @@ fn gen_corelib(
         "PointerEvent",
         "Rect",
         "SortOrder",
+        "BitmapFont",
     ]
     .iter()
     .chain(items.iter())
@@ -231,7 +233,13 @@ fn gen_corelib(
     string_config.export.exclude = vec!["SharedString".into()];
     string_config.export.body.insert(
         "Slice".to_owned(),
-        "    const T &operator[](int i) const { return ptr[i]; }".to_owned(),
+        "    const T &operator[](int i) const { return ptr[i]; }
+        /// Note: this doesn't initialize Slice properly, but we need to keep the struct as compatible with C
+        constexpr Slice() = default;
+        /// Rust uses a NonNull, so even empty slices shouldn't use nullptr
+        constexpr Slice(const T *ptr, uintptr_t len) : ptr(ptr ? const_cast<T*>(ptr) : reinterpret_cast<T*>(sizeof(T))), len(len) {}
+        "
+            .to_owned(),
     );
     cbindgen::Builder::new()
         .with_config(string_config)
@@ -448,10 +456,13 @@ fn gen_corelib(
 /// This macro expands to the string representation of the version of Slint you're developing against.
 /// For example if you're using version 1.5.2, this macro will expand to "1.5.2".
 #define SLINT_VERSION_STRING "{x}.{y}.{z}"
+
+{features}
 "#,
             x = env!("CARGO_PKG_VERSION_MAJOR"),
             y = env!("CARGO_PKG_VERSION_MINOR"),
             z = env!("CARGO_PKG_VERSION_PATCH"),
+            features = enabled_features.defines()
         ))
         .generate()
         .context("Unable to generate bindings for slint_generated_public.h")?
@@ -519,6 +530,8 @@ namespace slint {
         using LogicalRect = Rect;
         using LogicalPoint = Point2D<float>;
         using LogicalLength = float;
+        struct ComponentVTable;
+        struct ItemVTable;
     }
 }",
         )
@@ -573,6 +586,22 @@ fn gen_backend_qt(
         .with_config(config)
         .with_crate(crate_dir)
         .with_include("slint_internal.h")
+        .with_after_include(
+            r"
+            namespace slint::cbindgen_private {
+                // HACK ALERT: This struct declaration is duplicated in internal/backend/qt/qt_widgets.rs - keep in sync.
+                struct SlintTypeErasedWidget
+                {
+                    virtual ~SlintTypeErasedWidget() = 0;
+                    SlintTypeErasedWidget(const SlintTypeErasedWidget&) = delete;
+                    SlintTypeErasedWidget& operator=(const SlintTypeErasedWidget&) = delete;
+
+                    virtual void *qwidget() const = 0;
+                };
+                using SlintTypeErasedWidgetPtr = std::unique_ptr<SlintTypeErasedWidget>;
+            }
+            ",
+        )
         .with_trailer(gen_item_declarations(&items))
         .generate()
         .context("Unable to generate bindings for slint_qt_internal.h")?
@@ -672,20 +701,52 @@ fn gen_interpreter(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+pub struct EnabledFeatures {
+    pub interpreter: bool,
+    pub experimental: bool,
+    pub backend_qt: bool,
+    pub std: bool,
+}
+
+impl EnabledFeatures {
+    /// Generate the `#define`
+    fn defines(self) -> String {
+        let mut defines = String::new();
+        if self.interpreter {
+            defines += "#define SLINT_FEATURE_INTERPRETER\n";
+        }
+        if self.experimental {
+            defines += "#define SLINT_FEATURE_EXPERIMENTAL\n";
+        }
+        if self.backend_qt {
+            defines += "#define SLINT_FEATURE_BACKEND_QT\n";
+        }
+        if self.std {
+            defines += "#define SLINT_FEATURE_STD\n";
+        }
+        defines
+    }
+}
+
 /// Generate the headers.
 /// `root_dir` is the root directory of the slint git repo
 /// `include_dir` is the output directory
 /// Returns the list of all paths that contain dependencies to the generated output. If you call this
 /// function from build.rs, feed each entry to stdout prefixed with `cargo:rerun-if-changed=`.
-pub fn gen_all(root_dir: &Path, include_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+pub fn gen_all(
+    root_dir: &Path,
+    include_dir: &Path,
+    enabled_features: EnabledFeatures,
+) -> anyhow::Result<Vec<PathBuf>> {
     proc_macro2::fallback::force(); // avoid a abort if panic=abort is set
     std::fs::create_dir_all(include_dir).context("Could not create the include directory")?;
     let mut deps = Vec::new();
     enums(&include_dir.join("slint_enums_internal.h"))?;
-    gen_corelib(root_dir, include_dir, &mut deps)?;
+    gen_corelib(root_dir, include_dir, &mut deps, enabled_features)?;
     gen_backend_qt(root_dir, include_dir, &mut deps)?;
     gen_backend(root_dir, include_dir, &mut deps)?;
-    if std::env::var("CARGO_FEATURE_SLINT_INTERPRETER").is_ok() {
+    if enabled_features.interpreter {
         gen_interpreter(root_dir, include_dir, &mut deps)?;
     }
     Ok(deps)

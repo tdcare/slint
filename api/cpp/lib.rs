@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 /*! This crate just expose the function used by the C++ integration */
 
@@ -122,8 +122,62 @@ pub unsafe extern "C" fn slint_register_font_from_data(
     )
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn slint_register_bitmap_font(
+    win: *const WindowAdapterRcOpaque,
+    font_data: &'static i_slint_core::graphics::BitmapFont,
+) {
+    let window_adapter = &*(win as *const Rc<dyn WindowAdapter>);
+    window_adapter.renderer().register_bitmap_font(font_data);
+}
+
 #[cfg(feature = "testing")]
 #[no_mangle]
 pub unsafe extern "C" fn slint_testing_init_backend() {
     i_slint_backend_testing::init();
+}
+
+#[cfg(not(feature = "std"))]
+mod allocator {
+    use core::alloc::Layout;
+    use core::ffi::c_void;
+    extern "C" {
+        pub fn free(p: *mut c_void);
+        pub fn malloc(size: usize) -> *mut c_void;
+    }
+
+    struct CAlloc;
+    unsafe impl core::alloc::GlobalAlloc for CAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let align = layout.align();
+            if align <= core::mem::size_of::<usize>() {
+                malloc(layout.size()) as *mut u8
+            } else {
+                // Ideally we'd use alligned_alloc, but that function caused heap corruption with esp-idf
+                let ptr = malloc(layout.size() + align) as *mut u8;
+                let shift = align - (ptr as usize % align);
+                let ptr = ptr.add(shift);
+                core::ptr::write(ptr.sub(1), shift as u8);
+                ptr
+            }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            let align = layout.align();
+            if align <= core::mem::size_of::<usize>() {
+                free(ptr as *mut c_void);
+            } else {
+                let shift = core::ptr::read(ptr.sub(1)) as usize;
+                free(ptr.sub(shift) as *mut c_void);
+            }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: CAlloc = CAlloc;
+}
+
+#[cfg(not(feature = "std"))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
 }

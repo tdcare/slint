@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 //! Pass that lowers synthetic properties such as `opacity` and `layer` properties to their corresponding elements.
 //! For example `f := Foo { opacity: <some float>; }` is mapped to `Opacity { opacity <=> f.opacity; f := Foo { ... } }`
@@ -102,21 +102,15 @@ fn create_property_element(
 ) -> ElementRc {
     let bindings = core::iter::once(property_name)
         .chain(extra_properties)
-        .filter_map(|property_name| {
-            if child.borrow().bindings.contains_key(property_name) {
-                Some((
-                    property_name.to_string(),
-                    BindingExpression::new_two_way(NamedReference::new(child, property_name))
-                        .into(),
-                ))
-            } else {
-                default_value_for_extra_properties.map(|f| {
-                    (
-                        property_name.to_string(),
-                        BindingExpression::from(f(child, property_name)).into(),
-                    )
-                })
+        .map(|property_name| {
+            let mut bind =
+                BindingExpression::new_two_way(NamedReference::new(child, property_name));
+            if let Some(default_value_for_extra_properties) = default_value_for_extra_properties {
+                if !child.borrow().bindings.contains_key(property_name) {
+                    bind.expression = default_value_for_extra_properties(child, property_name)
+                }
             }
+            (property_name.to_string(), bind.into())
         })
         .collect();
 

@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 
 ### General
 
+ - Fixed accessibility tree on Linux when UI has no repeaters
+ - Fixed native style animations
+ - Fixed setting rotation-angle and opacity from a callback
+ - Fixed touch in the Flickable not resulting in a click
+
+### Slint language
+
+ - In case of error, still attempt to run more pass to report more diagnostics
+ - Fixed compiler panic when an unresolved alias has a binding
+ - Added `edited` callback to `SpinBox`
+ - Added `row-pointer-event` callback to `StandardTableView`
+ - Fixed enabled does not work properly on `fluent` `ComboBox`
+
+### Rust API
+
+ - Implemented `Default` for `slint::Weak`
+ - Added `ReverseModel` and `ModelExt::reverse`
+
+### C++
+
+ - Added `SLINT_TARGET_CARGO_FLAGS` cmake variable
+
+## [1.1.1] - 2023-07-10
+
+### General
+
+ - Fixed panic in accesskit at startup on Linux. (#3055)
  - Fixed compiler panics when some complex expressions are used for the model expression in `for` (#2977)
  - Native style: Fixed support for floating point ranges in Slider.
  - Fixed panics in the software renderer related to text rendering.
@@ -13,8 +40,6 @@ All notable changes to this project are documented in this file.
 
 - Added `clear-selection()` to `TextInput`, `LineEdit`, and `TextEdit`.
 - The `PointerEvent` struct now has the `modifiers: KeyboardModifiers` field.
-
-### Rust
 
 ### C++
 
@@ -886,3 +911,4 @@ as well as the [Rust migration guide for the `sixtyfps` crate](api/rs/slint/migr
 [1.0.1]: https://github.com/slint-ui/slint/releases/tag/v1.0.1
 [1.0.2]: https://github.com/slint-ui/slint/releases/tag/v1.0.2
 [1.1.0]: https://github.com/slint-ui/slint/releases/tag/v1.1.0
+[1.1.1]: https://github.com/slint-ui/slint/releases/tag/v1.1.1

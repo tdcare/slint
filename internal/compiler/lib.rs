@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 #![doc = include_str!("README.md")]
 #![doc(html_logo_url = "https://slint.dev/logo/slint-logo-square-light.svg")]
@@ -181,8 +181,10 @@ pub async fn compile_syntax_node(
     }
 
     if !diagnostics.has_error() {
-        // FIXME: ideally we would be able to run more passes, but currently we panic because invariant are not met.
         passes::run_passes(&doc, &mut diagnostics, &mut loader, &compiler_config).await;
+    } else {
+        // Don't run all the passes in case of errors because because some invariants are not met.
+        passes::run_import_passes(&doc, &mut loader, &mut diagnostics);
     }
 
     diagnostics.all_loaded_files = loader.all_files().cloned().collect();

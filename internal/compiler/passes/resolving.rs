@@ -1,5 +1,5 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
-// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.0 OR LicenseRef-Slint-commercial
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 //! Passes that resolve the property binding expression.
 //!
@@ -155,7 +155,13 @@ impl Expression {
                 return Expression::Invalid;
             }
         };
-        e.maybe_convert_to(ctx.property_type.clone(), &node, ctx.diag)
+        if !matches!(ctx.property_type, Type::Callback { .. } | Type::Function { .. }) {
+            e.maybe_convert_to(ctx.property_type.clone(), &node, ctx.diag)
+        } else {
+            // Binding to a callback or function shouldn't happen
+            assert!(ctx.diag.has_error());
+            e
+        }
     }
 
     fn from_codeblock_node(node: syntax_nodes::CodeBlock, ctx: &mut LookupCtx) -> Expression {
