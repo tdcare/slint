@@ -15,7 +15,7 @@ name = "tdcareos-demo"
 
 [dependencies]
 
-slint = { path = "../../api/rs/slint", default-features = false, features = [
+slint = { path = "../api/rs/slint", default-features = false, features = [
     "compat-1-0",
     "std",
 ] }
@@ -24,4 +24,4 @@ libloading = { version = "0.8.0" }
 libloader = "0.1.4"
 
 [build-dependencies]
-slint-build = { path = "../../api/rs/build" }
+slint-build = { path = "../api/rs/build" }

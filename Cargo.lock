@@ -3295,6 +3295,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
 
 [[package]]
+name = "libloader"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d39e73d63036eb973937a3d247e8c9799b1cd0e131079ae8aba294cb0328073"
+dependencies = [
+ "libloading 0.7.4",
+]
+
+[[package]]
 name = "libloading"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5665,6 +5674,7 @@ dependencies = [
 name = "tdcareos-demo"
 version = "1.1.1"
 dependencies = [
+ "libloader",
  "libloading 0.8.0",
  "slint",
  "slint-build",
