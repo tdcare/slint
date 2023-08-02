@@ -43,22 +43,7 @@ impl slint::platform::Platform for OHOSPlatform {
 
 fn main()  {
     slint::platform::set_platform(Box::<OHOSPlatform>::default()).unwrap();
-    unsafe {
-        let fontconfig = libloading::Library::new("./libpng.z.so");
-        // if fontconfig.is_ok() {
-        //     println!("加载成功");
-        // }else {
-        //     println!("加载失败！");
-        // }
-        match fontconfig {
-            Ok(f)=>{
-                println!("加载成功");
-            }
-            Err(e)=>{
-                println!("加载失败！{}",e);
-            }
-        }
-    }
+
 
     println!("Slint执行成功！");
 }

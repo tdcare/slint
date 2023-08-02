@@ -11,7 +11,7 @@ COPY . .
 #RUN rustup target add \
 #     aarch64-linux-android \
 #     arm-linux-androideabi
-RUN  cd examples/ohos &&  cargo zigbuild --release --target aarch64-unknown-linux-musl
+RUN  cd ohos &&  cargo zigbuild --release --target aarch64-unknown-linux-musl
 
 
 # Need cacerts
