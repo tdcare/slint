@@ -3,7 +3,7 @@
 
 [package]
 name = "slint-viewer"
-version = "1.1.1"
+version = "1.2.0"
 authors = ["Slint Developers <info@slint.dev>"]
 edition = "2021"
 license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial"
@@ -15,18 +15,31 @@ keywords = ["viewer", "gui", "ui", "toolkit"]
 
 [features]
 backend-qt = ["slint-interpreter/backend-qt"]
-eventloop-qt = ["backend-qt"]
-renderer-winit-qt = ["backend-qt"]
 
 backend-winit = ["slint-interpreter/backend-winit"]
-backend-winit-wayland = ["slint-interpreter/backend-winit-wayland"]
 backend-winit-x11 = ["slint-interpreter/backend-winit-x11"]
+backend-winit-wayland = ["slint-interpreter/backend-winit-wayland"]
 
-renderer-winit-software = ["slint-interpreter/renderer-winit-software"]
-renderer-winit-femtovg = ["slint-interpreter/renderer-winit-femtovg"]
-renderer-winit-skia = ["slint-interpreter/renderer-winit-skia"]
-renderer-winit-skia-opengl = ["slint-interpreter/renderer-winit-skia-opengl"]
-renderer-winit-skia-vulkan = ["slint-interpreter/renderer-winit-skia-vulkan"]
+renderer-femtovg = ["slint-interpreter/renderer-femtovg"]
+renderer-skia = ["slint-interpreter/renderer-skia"]
+renderer-skia-opengl = ["slint-interpreter/renderer-skia-opengl"]
+renderer-skia-vulkan = ["slint-interpreter/renderer-skia-vulkan"]
+renderer-software = ["slint-interpreter/renderer-software"]
+
+# Compat
+backend-gl-all = ["backend-winit", "renderer-femtovg"]
+backend-gl-wayland = ["backend-winit-wayland", "renderer-femtovg"]
+backend-gl-x11 = ["backend-winit-x11", "renderer-femtovg"]
+eventloop-qt = ["backend-qt"]
+renderer-winit-qt = ["backend-qt"]
+renderer-winit-femtovg = ["renderer-femtovg"]
+renderer-winit-skia = ["renderer-skia"]
+renderer-winit-skia-opengl= ["renderer-skia-opengl"]
+renderer-winit-skia-vulkan= ["renderer-skia-vulkan"]
+renderer-winit-software = ["renderer-software"]
+
+
+backend-linuxkms = ["slint-interpreter/backend-linuxkms"]
 
 ## Enable the translations using [gettext](https://www.gnu.org/software/gettext/gettext)
 ##
@@ -35,18 +48,13 @@ renderer-winit-skia-vulkan = ["slint-interpreter/renderer-winit-skia-vulkan"]
 ## so that the viewer can find the translation
 gettext = ["i-slint-core/gettext-rs"]
 
-# Compat
-backend-gl-all = ["backend-winit", "renderer-winit-femtovg"]
-backend-gl-wayland = ["backend-winit-wayland", "renderer-winit-femtovg"]
-backend-gl-x11 = ["backend-winit-x11", "renderer-winit-femtovg"]
-
-default = ["backend-qt", "backend-winit", "renderer-winit-femtovg"]
+default = ["backend-qt", "backend-winit", "renderer-femtovg"]
 
 [dependencies]
-i-slint-compiler = { version = "=1.1.1", path = "../../internal/compiler" }
-i-slint-core = { version = "=1.1.1", path="../../internal/core" }
-slint-interpreter = { version = "=1.1.1", path = "../../internal/interpreter", default-features = false, features = ["display-diagnostics", "compat-1-0"] }
-i-slint-backend-selector = { version = "=1.1.1", path="../../internal/backends/selector" }
+i-slint-compiler = { version = "=1.2.0", path = "../../internal/compiler" }
+i-slint-core = { version = "=1.2.0", path="../../internal/core" }
+slint-interpreter = { version = "=1.2.0", path = "../../internal/interpreter", default-features = false, features = ["display-diagnostics", "compat-1-2"] }
+i-slint-backend-selector = { version = "=1.2.0", path="../../internal/backends/selector" }
 
 vtable = { version = "0.1.6", path="../../helper_crates/vtable" }
 

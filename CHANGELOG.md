@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file.
  - Fixed native style animations
  - Fixed setting rotation-angle and opacity from a callback
  - Fixed touch in the Flickable not resulting in a click
+ - Added support for a new experimental backend that renders fullscreen on Linux using KMS (`backend-linuxkms`).
 
 ### Slint language
 
@@ -17,15 +18,34 @@ All notable changes to this project are documented in this file.
  - Added `edited` callback to `SpinBox`
  - Added `row-pointer-event` callback to `StandardTableView`
  - Fixed enabled does not work properly on `fluent` `ComboBox`
+ - Fixed duplicated import when importing file relative to the project instead of the current path. Deprecated importing files relative to the project path.
+ - Added `current-item-changed` to `StandardListView`
+ - Added `current-row-changed` to `StandardTableView`
+ - Added `item-pointer-event` to `StandardListView`
 
 ### Rust API
 
  - Implemented `Default` for `slint::Weak`
  - Added `ReverseModel` and `ModelExt::reverse`
+ - Added `fn set_visible(&self, _visible: bool)` to the `slint::platform::WindowAdapter` trait.
+ - Added ways to create a `SoftwareRenderer` without a `MinimalSoftwareWindow`
+ - The features `renderer-winit-*` were renamed to `renderer-*`
+ - Added `BorrowedOpenGLTextureBuilder` to configure more aspects of borrowed OpenGL textures.
 
 ### C++
 
+ - Added Platform API to write your own platform that drives its own event loop.
  - Added `SLINT_TARGET_CARGO_FLAGS` cmake variable
+ - Added `ReverseModel`
+ - Added functions in Window to dispatch pointer events
+ - The `slint_interpreter.h` file was renamed `slint-interpreter.h`, a deprecated header was added
+ - The features `SLINT_FEATURE_RENDERER_WINIT_*` were renamed to `SLINT_FEATURE_RENDERER_*`
+ - Extended `slint::Image::create_from_borrowed_gl_2d_rgba_texture` with an option to configure more aspects
+   of texture rendering.
+
+### LSP
+
+ - Fixed termination of the lsp process.
 
 ## [1.1.1] - 2023-07-10
 

@@ -22,8 +22,8 @@ When adding an item or a property, it needs to be kept in sync with different pl
 
 use crate::graphics::{Brush, Color, Point};
 use crate::input::{
-    FocusEvent, FocusEventResult, InputEventFilterResult, InputEventResult, KeyEvent,
-    KeyEventResult, KeyEventType, KeyboardModifiers, MouseEvent,
+    FocusEvent, FocusEventResult, InputEventFilterResult, InputEventResult, KeyEventResult,
+    KeyEventType, MouseEvent,
 };
 use crate::item_rendering::CachedRenderingData;
 pub use crate::item_tree::ItemRc;
@@ -42,6 +42,8 @@ use core::pin::Pin;
 use i_slint_core_macros::*;
 use vtable::*;
 
+mod component_container;
+pub use self::component_container::*;
 mod flickable;
 pub use flickable::*;
 mod text;
@@ -107,7 +109,7 @@ pub struct ItemVTable {
     /// This function is called by the run-time after the memory for the item
     /// has been allocated and initialized. It will be called before any user specified
     /// bindings are set.
-    pub init: extern "C" fn(core::pin::Pin<VRef<ItemVTable>>),
+    pub init: extern "C" fn(core::pin::Pin<VRef<ItemVTable>>, my_item: &ItemRc),
 
     /// Returns the geometry of this item (relative to its parent item)
     pub geometry: extern "C" fn(core::pin::Pin<VRef<ItemVTable>>) -> LogicalRect,
@@ -183,7 +185,7 @@ pub struct Empty {
 }
 
 impl Item for Empty {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -271,7 +273,7 @@ pub struct Rectangle {
 }
 
 impl Item for Rectangle {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -363,7 +365,7 @@ pub struct BorderRectangle {
 }
 
 impl Item for BorderRectangle {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -470,7 +472,7 @@ pub struct TouchArea {
 }
 
 impl Item for TouchArea {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -652,7 +654,7 @@ pub struct FocusScope {
 }
 
 impl Item for FocusScope {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -773,7 +775,7 @@ pub struct Clip {
 }
 
 impl Item for Clip {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -870,7 +872,7 @@ pub struct Opacity {
 }
 
 impl Item for Opacity {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -986,7 +988,7 @@ pub struct Layer {
 }
 
 impl Item for Layer {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -1076,7 +1078,7 @@ pub struct Rotate {
 }
 
 impl Item for Rotate {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -1201,7 +1203,7 @@ pub struct WindowItem {
 }
 
 impl Item for WindowItem {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -1322,7 +1324,7 @@ pub struct BoxShadow {
 }
 
 impl Item for BoxShadow {
-    fn init(self: Pin<&Self>) {}
+    fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
     fn geometry(self: Pin<&Self>) -> LogicalRect {
         LogicalRect::new(
@@ -1396,6 +1398,10 @@ declare_item_vtable! {
 }
 
 declare_item_vtable! {
+    fn slint_get_ComponentContainerVTable() -> ComponentContainerVTable for ComponentContainer
+}
+
+declare_item_vtable! {
     fn slint_get_TextVTable() -> TextVTable for Text
 }
 
@@ -1439,14 +1445,38 @@ macro_rules! declare_enums {
 
 i_slint_common::for_each_enums!(declare_enums);
 
-/// Represents a Pointer event sent by the windowing system.
-#[derive(Debug, Clone, PartialEq, Default)]
-#[repr(C)]
-pub struct PointerEvent {
-    pub button: PointerEventButton,
-    pub kind: PointerEventKind,
-    pub modifiers: KeyboardModifiers,
+macro_rules! declare_builtin_structs {
+    ($(
+        $(#[$struct_attr:meta])*
+        struct $Name:ident {
+            @name = $inner_name:literal
+            export {
+                $( $(#[$pub_attr:meta])* $pub_field:ident : $pub_type:ty, )*
+            }
+            private {
+                $( $(#[$pri_attr:meta])* $pri_field:ident : $pri_type:ty, )*
+            }
+        }
+    )*) => {
+        $(
+            #[derive(Clone, Debug, Default, PartialEq)]
+            #[repr(C)]
+            $(#[$struct_attr])*
+            pub struct $Name {
+                $(
+                    $(#[$pub_attr])*
+                    pub $pub_field : $pub_type,
+                )*
+                $(
+                    $(#[$pri_attr])*
+                    pub $pri_field : $pri_type,
+                )*
+            }
+        )*
+    };
 }
+
+i_slint_common::for_each_builtin_structs!(declare_builtin_structs);
 
 #[cfg(feature = "ffi")]
 #[no_mangle]

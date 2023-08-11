@@ -74,6 +74,7 @@ fn rust_primitive_type(ty: &Type) -> Option<proc_macro2::TokenStream> {
         Type::Float32 => Some(quote!(f32)),
         Type::String => Some(quote!(sp::SharedString)),
         Type::Color => Some(quote!(sp::Color)),
+        Type::ComponentFactory => Some(quote!(slint::ComponentFactory)),
         Type::Duration => Some(quote!(i64)),
         Type::Angle => Some(quote!(f32)),
         Type::PhysicalLength => Some(quote!(sp::Coord)),
@@ -225,7 +226,7 @@ fn generate_public_component(llr: &llr::PublicComponent) -> TokenStream {
         None,
         quote!(
             globals: #global_container_id,
-            window_adapter_: sp::OnceCell<sp::Rc<dyn sp::WindowAdapter>>,
+            window_adapter_: sp::OnceCell<sp::WindowAdapterRc>,
         ),
         None,
     );
@@ -752,6 +753,45 @@ fn generate_sub_component(
         repeated_element_components.push(rep_inner_component_id);
     }
 
+    for container in component.component_containers.iter() {
+        let items_index = container.component_container_items_index;
+        let repeater_index = container.component_container_item_tree_index.as_repeater_index();
+
+        let embed_item = access_member(
+            &llr::PropertyReference::InNativeItem {
+                sub_component_path: vec![],
+                item_index: items_index,
+                prop_name: String::new(),
+            },
+            &ctx,
+        );
+
+        let ensure_updated = {
+            quote! {
+                #embed_item.ensure_updated();
+            }
+        };
+
+        repeated_visit_branch.push(quote!(
+            #repeater_index => {
+                #ensure_updated
+                #embed_item.visit_children_item(-1, order, visitor)
+            }
+        ));
+        repeated_subtree_ranges.push(quote!(
+            #repeater_index => {
+                #ensure_updated
+               #embed_item.subtree_range()
+            }
+        ));
+        repeated_subtree_components.push(quote!(
+            #repeater_index => {
+                #ensure_updated
+                *result = #embed_item.subtree_component()
+            }
+        ));
+    }
+
     let mut accessible_role_branch = vec![];
     let mut accessible_string_property_branch = vec![];
     for ((index, what), expr) in &component.accessible_prop {
@@ -1215,16 +1255,16 @@ fn generate_item_tree(
         (
             quote!(
                 #[allow(unused)]
-                fn window_adapter(&self) -> Rc<dyn sp::WindowAdapter> {
-                    self.root.get().unwrap().upgrade().unwrap().window_adapter()
+                fn window_adapter_impl(&self) -> Rc<dyn sp::WindowAdapter> {
+                    self.root.get().unwrap().upgrade().unwrap().window_adapter_impl()
                 }
 
                 #[allow(unused)]
-                fn maybe_window_adapter(&self) -> Option<Rc<dyn sp::WindowAdapter>> {
+                fn maybe_window_adapter_impl(&self) -> Option<Rc<dyn sp::WindowAdapter>> {
                     self.root
                         .get()
                         .and_then(|root_weak| root_weak.upgrade())
-                        .and_then(|root| root.maybe_window_adapter())
+                        .and_then(|root| root.maybe_window_adapter_impl())
                 }
             ),
             quote!(vtable::VRc<sp::ComponentVTable, Self>),
@@ -1242,7 +1282,7 @@ fn generate_item_tree(
         (
             quote!(
                 #[allow(unused)]
-                fn window_adapter(&self) -> Rc<dyn sp::WindowAdapter> {
+                fn window_adapter_impl(&self) -> Rc<dyn sp::WindowAdapter> {
                     Rc::clone(self.window_adapter_ref().unwrap())
                 }
 
@@ -1259,7 +1299,7 @@ fn generate_item_tree(
                 }
 
                 #[allow(unused)]
-                fn maybe_window_adapter(&self) -> Option<Rc<dyn sp::WindowAdapter>> {
+                fn maybe_window_adapter_impl(&self) -> Option<Rc<dyn sp::WindowAdapter>> {
                     self.window_adapter_.get().cloned()
                 }
             ),
@@ -1268,6 +1308,12 @@ fn generate_item_tree(
             ),
             quote!(core::result::Result::Ok(self_rc)),
         )
+    };
+
+    let embedding_function = if parent_ctx.is_some() {
+        quote!(todo!("Components written in Rust can not get embedded yet."))
+    } else {
+        quote!(false)
     };
 
     let parent_item_expression = parent_ctx.and_then(|parent| {
@@ -1344,8 +1390,8 @@ fn generate_item_tree(
                 let mut _self = Self::default();
                 #(_self.parent = parent.clone() as #parent_component_type;)*
                 let self_rc = VRc::new(_self);
-                let _self = self_rc.as_pin_ref();
-                sp::register_component(_self, Self::item_array(), (*#root_token).maybe_window_adapter());
+                let self_dyn_rc = vtable::VRc::into_dyn(self_rc.clone());
+                sp::register_component(&self_dyn_rc, (*#root_token).maybe_window_adapter_impl());
                 Self::init(sp::VRc::map(self_rc.clone(), |x| x), #root_token, 0, 1);
                 #new_end
             }
@@ -1371,7 +1417,7 @@ fn generate_item_tree(
                 use slint::private_unstable_api::re_exports::*;
                 ComponentVTable_static!(static VT for self::#inner_component_id);
                 new_vref!(let vref : VRef<ComponentVTable> for Component = self.as_ref().get_ref());
-                if let Some(wa) = self.maybe_window_adapter() {
+                if let Some(wa) = self.maybe_window_adapter_impl() {
                     sp::unregister_component(self.as_ref(), vref, Self::item_array(), &wa);
                 }
             }
@@ -1426,6 +1472,10 @@ fn generate_item_tree(
                 #parent_item_expression
             }
 
+            fn embed_component(self: ::core::pin::Pin<&Self>, _parent_component: &sp::ComponentWeak, _item_tree_index: usize) -> bool {
+                #embedding_function
+            }
+
             fn layout_info(self: ::core::pin::Pin<&Self>, orientation: sp::Orientation) -> sp::LayoutInfo {
                 self.layout_info(orientation)
             }
@@ -1441,6 +1491,18 @@ fn generate_item_tree(
                 result: &mut sp::SharedString,
             ) {
                 *result = self.accessible_string_property(index, what);
+            }
+
+            fn window_adapter(
+                self: ::core::pin::Pin<&Self>,
+                do_create: bool,
+                result: &mut Option<Rc<dyn WindowAdapter>>,
+            ) {
+                if do_create {
+                    *result = Some(self.window_adapter_impl());
+                } else {
+                    *result = self.maybe_window_adapter_impl();
+                }
             }
         }
 
@@ -1747,7 +1809,7 @@ fn follow_sub_component_path<'a>(
 
 fn access_window_adapter_field(ctx: &EvaluationContext) -> TokenStream {
     let root = &ctx.generator_state;
-    quote!((&#root.window_adapter()))
+    quote!((&#root.window_adapter_impl()))
 }
 
 /// Given a property reference to a native item (eg, the property name is empty)
@@ -1771,9 +1833,14 @@ fn access_item_rc(pr: &llr::PropertyReference, ctx: &EvaluationContext) -> Token
     match pr {
         llr::PropertyReference::InNativeItem { sub_component_path, item_index, prop_name } => {
             assert!(prop_name.is_empty());
-            let (sub_compo_path, sub_component) =
-                follow_sub_component_path(ctx.current_sub_component.unwrap(), sub_component_path);
-            component_access_tokens = quote!(#component_access_tokens #sub_compo_path);
+
+            let root = ctx.current_sub_component.unwrap();
+            let mut sub_component = root;
+            for i in sub_component_path {
+                let sub_component_name = ident(&sub_component.sub_components[*i].name);
+                component_access_tokens = quote!(#component_access_tokens . #sub_component_name);
+                sub_component = &sub_component.sub_components[*i].ty;
+            }
             let component_rc_tokens = quote!(VRcMapped::origin(&#component_access_tokens.self_weak.get().unwrap().upgrade().unwrap()));
             let item_index_in_tree = sub_component.items[*item_index].index_in_tree;
             let item_index_tokens = if item_index_in_tree == 0 {

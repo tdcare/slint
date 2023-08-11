@@ -26,7 +26,7 @@ copyright = "SixtyFPS GmbH"
 author = "Slint Developers <info@slint.dev>"
 
 # The full version, including alpha/beta/rc tags
-version = "1.1.1"
+version = "1.2.0"
 
 cpp_index_common_prefix = ["slint::", "slint::interpreter::"]
 
@@ -53,7 +53,7 @@ exhale_args = {
             If you choose to load :code:`.slint` files dynamically at run-time, then
             you can use the classes in :ref:`slint::interpreter<namespace_slint__interpreter>`, starting at
             :cpp:class:`slint::interpreter::ComponentCompiler`. You need to include
-            the :code:`slint_interpreter.h` header file.
+            the :code:`slint-interpreter.h` header file.
         """
     ),
     "doxygenStripFromPath": "..",
@@ -65,6 +65,7 @@ EXCLUDE_SYMBOLS = slint::cbindgen_private* slint::private_api* vtable* slint::te
 EXCLUDE = ../../api/cpp/include/vtable.h ../../api/cpp/include/slint_testing.h
 ENABLE_PREPROCESSING = YES
 PREDEFINED += DOXYGEN
+INCLUDE_PATH = generated_include
 WARN_AS_ERROR = YES""",
 }
 

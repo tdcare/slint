@@ -9,26 +9,149 @@ use std::path::{Path, PathBuf};
 // cSpell: ignore compat constexpr corelib deps sharedvector pathdata
 
 fn enums(path: &Path) -> anyhow::Result<()> {
-    let mut enums =
-        std::fs::File::create(path).context("Error creating slint_internal_enums.h file")?;
-    writeln!(enums, "#pragma once")?;
-    writeln!(enums, "// This file is auto-generated from {}", file!())?;
-    writeln!(enums, "namespace slint::cbindgen_private {{")?;
+    let mut enums_priv = std::fs::File::create(path.join("slint_enums_internal.h"))
+        .context("Error creating slint_enums_internal.h file")?;
+    writeln!(enums_priv, "#pragma once")?;
+    writeln!(enums_priv, "// This file is auto-generated from {}", file!())?;
+    writeln!(enums_priv, "#include \"slint_enums.h\"")?;
+    writeln!(enums_priv, "namespace slint::cbindgen_private {{")?;
+    let mut enums_pub = std::fs::File::create(path.join("slint_enums.h"))
+        .context("Error creating slint_enums.h file")?;
+    writeln!(enums_pub, "#pragma once")?;
+    writeln!(enums_pub, "// This file is auto-generated from {}", file!())?;
+    writeln!(enums_pub, "namespace slint {{")?;
+    macro_rules! enum_file {
+        (PointerEventButton) => {{
+            writeln!(enums_priv, "using slint::PointerEventButton;")?;
+            &mut enums_pub
+        }};
+        ($_:ident) => {
+            &mut enums_priv
+        };
+    }
     macro_rules! print_enums {
          ($( $(#[doc = $enum_doc:literal])* $(#[non_exhaustive])? enum $Name:ident { $( $(#[doc = $value_doc:literal])* $Value:ident,)* })*) => {
              $(
-                $(writeln!(enums, "///{}", $enum_doc)?;)*
-                writeln!(enums, "enum class {} {{", stringify!($Name))?;
+                let file = enum_file!($Name);
+                $(writeln!(file, "///{}", $enum_doc)?;)*
+                writeln!(file, "enum class {} {{", stringify!($Name))?;
                 $(
-                    $(writeln!(enums, "    ///{}", $value_doc)?;)*
-                    writeln!(enums, "    {},", stringify!($Value).trim_start_matches("r#"))?;
+                    $(writeln!(file, "    ///{}", $value_doc)?;)*
+                    writeln!(file, "    {},", stringify!($Value).trim_start_matches("r#"))?;
                 )*
-                writeln!(enums, "}};")?;
+                writeln!(file, "}};")?;
              )*
          }
     }
     i_slint_common::for_each_enums!(print_enums);
-    writeln!(enums, "}}")?;
+
+    writeln!(enums_pub, "}}")?;
+    writeln!(enums_priv, "}}")?;
+
+    // Print the key codes constants
+    // This is not an enum, but fits well in that file
+    writeln!(
+        enums_pub,
+        r#"
+/// This namespace contains constants for each special non-printable key.
+///
+/// Each constant can be converted to SharedString.
+/// The constants are meant to be used with the slint::Window::dispatch_key_press_event() and
+/// slint::Window::dispatch_key_release_event() functions.
+///
+/// Example:
+/// ```
+/// window.dispatch_key_press_event(slint::platform::key_codes::Tab);
+/// ```
+namespace slint::platform::key_codes {{
+"#
+    )?;
+    macro_rules! print_key_codes {
+        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident)|* # $($_xkb:ident)|*;)*) => {
+            $(
+                writeln!(enums_pub, "/// A constant that represents the key code to be used in slint::Window::dispatch_key_press_event()")?;
+                writeln!(enums_pub, r#"constexpr std::u8string_view {} = u8"\u{:04x}";"#, stringify!($name), $char as u32)?;
+            )*
+        };
+    }
+    i_slint_common::for_each_special_keys!(print_key_codes);
+    writeln!(enums_pub, "}}")?;
+
+    Ok(())
+}
+
+fn builtin_structs(path: &Path) -> anyhow::Result<()> {
+    let mut structs_pub = std::fs::File::create(path.join("slint_builtin_structs.h"))
+        .context("Error creating slint_builtin_structs.h file")?;
+    writeln!(structs_pub, "#pragma once")?;
+    writeln!(structs_pub, "// This file is auto-generated from {}", file!())?;
+    writeln!(structs_pub, "namespace slint {{")?;
+
+    let mut structs_priv = std::fs::File::create(path.join("slint_builtin_structs_internal.h"))
+        .context("Error creating slint_builtin_structs_internal.h file")?;
+    writeln!(structs_priv, "#pragma once")?;
+    writeln!(structs_priv, "// This file is auto-generated from {}", file!())?;
+    writeln!(structs_priv, "#include \"slint_builtin_structs.h\"")?;
+    writeln!(structs_priv, "#include \"slint_enums_internal.h\"")?;
+    writeln!(structs_priv, "namespace slint::cbindgen_private {{")?;
+    writeln!(structs_priv, "enum class KeyEventType;")?;
+    macro_rules! struct_file {
+        (StandardListViewItem) => {{
+            writeln!(structs_priv, "using slint::StandardListViewItem;")?;
+            &mut structs_pub
+        }};
+        ($_:ident) => {
+            &mut structs_priv
+        };
+    }
+    macro_rules! print_structs {
+        ($(
+            $(#[doc = $struct_doc:literal])*
+            $(#[non_exhaustive])?
+            $(#[derive(Copy, Eq)])?
+            struct $Name:ident {
+                @name = $inner_name:literal
+                export {
+                    $( $(#[doc = $pub_doc:literal])* $pub_field:ident : $pub_type:ty, )*
+                }
+                private {
+                    $( $(#[doc = $pri_doc:literal])* $pri_field:ident : $pri_type:ty, )*
+                }
+            }
+        )*) => {
+            $(
+                let file = struct_file!($Name);
+                $(writeln!(file, "///{}", $struct_doc)?;)*
+                writeln!(file, "struct {} {{", stringify!($Name))?;
+                $(
+                    $(writeln!(file, "    ///{}", $pub_doc)?;)*
+                    let pub_type = match stringify!($pub_type) {
+                        "i32" => "int32_t",
+                        "f32" | "Coord" => "float",
+                        other => other,
+                    };
+                    writeln!(file, "    {} {};", pub_type, stringify!($pub_field))?;
+                )*
+                $(
+                    $(writeln!(file, "    ///{}", $pri_doc)?;)*
+                    let pri_type = match stringify!($pri_type) {
+                        "usize" => "uintptr_t",
+                        "crate::animations::Instant" => "uint64_t",
+                        other => other,
+                    };
+                    writeln!(file, "    {} {};", pri_type, stringify!($pri_field))?;
+                )*
+                writeln!(file, "    /// \\private")?;
+                writeln!(file, "    {}", format!("friend bool operator==(const {name}&, const {name}&) = default;", name = stringify!($Name)))?;
+                writeln!(file, "    /// \\private")?;
+                writeln!(file, "    {}", format!("friend bool operator!=(const {name}&, const {name}&) = default;", name = stringify!($Name)))?;
+                writeln!(file, "}};")?;
+            )*
+        };
+    }
+    i_slint_common::for_each_builtin_structs!(print_structs);
+    writeln!(structs_priv, "}}")?;
+    writeln!(structs_pub, "}}")?;
     Ok(())
 }
 
@@ -260,11 +383,6 @@ fn gen_corelib(
 
     let mut properties_config = config.clone();
     properties_config.export.exclude.clear();
-    properties_config.export.include.push("StateInfo".into());
-    properties_config
-        .export
-        .pre_body
-        .insert("StateInfo".to_owned(), "    using Instant = uint64_t;".into());
     properties_config.structure.derive_eq = true;
     properties_config.structure.derive_neq = true;
     private_exported_types.extend(properties_config.export.include.iter().cloned());
@@ -294,6 +412,7 @@ fn gen_corelib(
                 "SharedPixelBuffer",
                 "SharedImageBuffer",
                 "StaticTextures",
+                "BorrowedOpenGLTextureOrigin"
             ],
             vec!["Color"],
             "slint_image_internal.h",
@@ -419,10 +538,6 @@ fn gen_corelib(
     public_config.export.exclude.push("Point".into());
     public_config.export.include = public_exported_types.into_iter().map(str::to_string).collect();
     public_config.export.body.insert(
-        "StandardListViewItem".to_owned(),
-        "/// \\private\nfriend bool operator==(const StandardListViewItem&, const StandardListViewItem&) = default;".into(),
-    );
-    public_config.export.body.insert(
         "Rgb8Pixel".to_owned(),
         "/// \\private\nfriend bool operator==(const Rgb8Pixel&, const Rgb8Pixel&) = default;"
             .into(),
@@ -489,16 +604,11 @@ fn gen_corelib(
     friend inline LayoutInfo operator+(const LayoutInfo &a, const LayoutInfo &b) { return a.merge(b); }
     friend bool operator==(const LayoutInfo&, const LayoutInfo&) = default;".into(),
     );
-    config.export.body.insert(
-        "TableColumn".to_owned(),
-        "friend bool operator==(const TableColumn&, const TableColumn&) = default;".into(),
-    );
     config
         .export
         .body
         .insert("Flickable".to_owned(), "    inline Flickable(); inline ~Flickable();".into());
     config.export.pre_body.insert("FlickableDataBox".to_owned(), "struct FlickableData;".into());
-    config.export.include.push("TableColumn".into());
     cbindgen::Builder::new()
         .with_config(config)
         .with_src(crate_dir.join("lib.rs"))
@@ -515,6 +625,7 @@ fn gen_corelib(
         .with_include("slint_generated_public.h")
         .with_include("slint_enums_internal.h")
         .with_include("slint_point.h")
+        .with_include("slint_builtin_structs_internal.h")
         .with_after_include(
             r"
 namespace slint {
@@ -532,6 +643,7 @@ namespace slint {
         using LogicalLength = float;
         struct ComponentVTable;
         struct ItemVTable;
+        using types::IntRect;
     }
 }",
         )
@@ -701,33 +813,38 @@ fn gen_interpreter(
     Ok(())
 }
 
-#[derive(Clone, Copy)]
-pub struct EnabledFeatures {
-    pub interpreter: bool,
-    pub experimental: bool,
-    pub backend_qt: bool,
-    pub std: bool,
+macro_rules! declare_features {
+    ($($f:ident)+) => {
+        #[derive(Clone, Copy)]
+        pub struct EnabledFeatures {
+            $(pub $f: bool,)*
+        }
+        impl EnabledFeatures {
+            /// Generate the `#define`
+            pub fn defines(self) -> String {
+                let mut defines = String::new();
+                $(
+                    if self.$f {
+                        defines = format!("{defines}#define SLINT_FEATURE_{}\n", stringify!($f).to_ascii_uppercase());
+                    };
+                )*
+                defines
+            }
+
+            /// Get the feature from the environment variable set by cargo when building running the slint-cpp's build script
+            #[allow(unused)]
+            pub fn from_env() -> Self {
+                Self {
+                    $(
+                        $f: std::env::var(format!("CARGO_FEATURE_{}", stringify!($f).to_ascii_uppercase())).is_ok(),
+                    )*
+                }
+            }
+        }
+    };
 }
 
-impl EnabledFeatures {
-    /// Generate the `#define`
-    fn defines(self) -> String {
-        let mut defines = String::new();
-        if self.interpreter {
-            defines += "#define SLINT_FEATURE_INTERPRETER\n";
-        }
-        if self.experimental {
-            defines += "#define SLINT_FEATURE_EXPERIMENTAL\n";
-        }
-        if self.backend_qt {
-            defines += "#define SLINT_FEATURE_BACKEND_QT\n";
-        }
-        if self.std {
-            defines += "#define SLINT_FEATURE_STD\n";
-        }
-        defines
-    }
-}
+declare_features! {interpreter backend_qt std renderer_software renderer_skia}
 
 /// Generate the headers.
 /// `root_dir` is the root directory of the slint git repo
@@ -742,7 +859,8 @@ pub fn gen_all(
     proc_macro2::fallback::force(); // avoid a abort if panic=abort is set
     std::fs::create_dir_all(include_dir).context("Could not create the include directory")?;
     let mut deps = Vec::new();
-    enums(&include_dir.join("slint_enums_internal.h"))?;
+    enums(include_dir)?;
+    builtin_structs(include_dir)?;
     gen_corelib(root_dir, include_dir, &mut deps, enabled_features)?;
     gen_backend_qt(root_dir, include_dir, &mut deps)?;
     gen_backend(root_dir, include_dir, &mut deps)?;

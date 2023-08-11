@@ -214,7 +214,7 @@ impl SwapChain {
             let backend_texture =
                 skia_safe::gpu::BackendRenderTarget::new_d3d((width, height), &texture_info);
 
-            skia_safe::Surface::from_backend_render_target(
+            skia_safe::gpu::surfaces::wrap_backend_render_target(
                 gr_context,
                 &backend_texture,
                 skia_safe::gpu::SurfaceOrigin::TopLeft,
@@ -283,13 +283,13 @@ impl SwapChain {
     }
 }
 
+/// This surface renders into the given window using Direct 3D. The provided display
+/// arugment is ignored, as it has no meaning on Windows.
 pub struct D3DSurface {
     swap_chain: RefCell<SwapChain>,
 }
 
 impl super::Surface for D3DSurface {
-    const SUPPORTS_GRAPHICS_API: bool = false;
-
     fn new(
         window_handle: raw_window_handle::WindowHandle<'_>,
         _display_handle: raw_window_handle::DisplayHandle<'_>,
@@ -430,10 +430,6 @@ impl super::Surface for D3DSurface {
         "d3d"
     }
 
-    fn with_graphics_api(&self, _cb: impl FnOnce(i_slint_core::api::GraphicsAPI<'_>)) {
-        unimplemented!()
-    }
-
     fn resize_event(
         &self,
         size: PhysicalWindowSize,
@@ -444,7 +440,7 @@ impl super::Surface for D3DSurface {
     fn render(
         &self,
         _size: PhysicalWindowSize,
-        callback: impl FnOnce(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
+        callback: &dyn Fn(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
     ) -> Result<(), i_slint_core::platform::PlatformError> {
         self.swap_chain
             .borrow_mut()

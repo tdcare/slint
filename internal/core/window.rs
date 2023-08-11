@@ -52,13 +52,16 @@ fn input_as_key_event(input: KeyInputEvent, modifiers: KeyboardModifiers) -> Key
 /// internal type from the backend that provides functionality such as device-independent pixels,
 /// window resizing, and other typically windowing system related tasks.
 ///
-/// You are not expected to implement this trait
-/// yourself, but you should use the provided window adapter. Use
-/// [`MinimalSoftwareWindow`](crate::software_renderer::MinimalSoftwareWindow) when
-/// implementing your own [`platform`](crate::platform).
+/// See also [`MinimalSoftwareWindow`](crate::software_renderer::MinimalSoftwareWindow)
+/// for a minimal implementation of this trait using the software renderer
 pub trait WindowAdapter {
     /// Returns the window API.
     fn window(&self) -> &Window;
+
+    /// Show the window if the argument is true, hide otherwise.
+    fn set_visible(&self, _visible: bool) -> Result<(), PlatformError> {
+        Ok(())
+    }
 
     /// Returns the position of the window on the screen, in physical screen coordinates and including
     /// a window frame (if present).
@@ -111,7 +114,6 @@ pub trait WindowAdapter {
     /// In your implementation you should return a reference to an instance of one of the renderers provided by Slint.
     ///
     /// Currently, the only public struct that implement renderer is [`SoftwareRenderer`](crate::software_renderer::SoftwareRenderer).
-    #[doc(hidden)]
     fn renderer(&self) -> &dyn Renderer;
 
     #[doc(hidden)]
@@ -128,18 +130,6 @@ pub trait WindowAdapter {
 // TODO: add events for window receiving and loosing focus
 #[doc(hidden)]
 pub trait WindowAdapterInternal {
-    /// Registers the window with the windowing system.
-    // TODO: make public, consider renaming to set_visible with a bool
-    fn show(&self) -> Result<(), PlatformError> {
-        Ok(())
-    }
-
-    /// De-registers the window from the windowing system.
-    // TODO: make public
-    fn hide(&self) -> Result<(), PlatformError> {
-        Ok(())
-    }
-
     /// This function is called by the generated code when a component and therefore its tree of items are created.
     fn register_component(&self) {}
 
@@ -371,6 +361,7 @@ impl WindowInner {
         self.component.replace(ComponentRc::downgrade(component));
         self.pinned_fields.window_properties_tracker.set_dirty(); // component changed, layout constraints for sure must be re-calculated
         let window_adapter = self.window_adapter();
+        window_adapter.renderer().set_window_adapter(&window_adapter);
         {
             let component = ComponentRc::borrow_pin(component);
             let root_item = component.as_ref().get_item_ref(0);
@@ -670,7 +661,7 @@ impl WindowInner {
     /// for example, with the properties known to the windowing system.
     pub fn update_window_properties(&self) {
         let window_adapter = self.window_adapter();
-        let Some(window_adapter) = window_adapter.internal(crate::InternalToken) else {return};
+        let Some(window_adapter) = window_adapter.internal(crate::InternalToken) else { return };
 
         // No `if !dirty { return; }` check here because the backend window may be newly mapped and not up-to-date, so force
         // an evaluation.
@@ -730,9 +721,7 @@ impl WindowInner {
     /// to input events once the event loop spins.
     pub fn show(&self) -> Result<(), PlatformError> {
         self.update_window_properties();
-        if let Some(window_adapter) = self.window_adapter().internal(crate::InternalToken) {
-            window_adapter.show()?;
-        }
+        self.window_adapter().set_visible(true)?;
         // Make sure that the window's inner size is in sync with the root window item's
         // width/height.
         self.set_window_item_geometry(
@@ -744,10 +733,7 @@ impl WindowInner {
 
     /// De-registers the window with the windowing system.
     pub fn hide(&self) -> Result<(), PlatformError> {
-        if let Some(window_adapter) = self.window_adapter().internal(crate::InternalToken) {
-            window_adapter.hide()?;
-        }
-        Ok(())
+        self.window_adapter().set_visible(false)
     }
 
     /// returns wether a dark theme is used
@@ -978,18 +964,15 @@ pub mod ffi {
     #[no_mangle]
     pub unsafe extern "C" fn slint_windowrc_show(handle: *const WindowAdapterRcOpaque) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
-        if let Some(window_adapter) = window_adapter.internal(crate::InternalToken) {
-            window_adapter.show().unwrap();
-        }
+
+        window_adapter.set_visible(true).unwrap();
     }
 
     /// Spins an event loop and renders the items of the provided component in this window.
     #[no_mangle]
     pub unsafe extern "C" fn slint_windowrc_hide(handle: *const WindowAdapterRcOpaque) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
-        if let Some(window_adapter) = window_adapter.internal(crate::InternalToken) {
-            window_adapter.hide().unwrap();
-        }
+        window_adapter.set_visible(false).unwrap();
     }
 
     /// Returns the visibility state of the window. This function can return false even if you previously called show()
@@ -1291,10 +1274,15 @@ fn test_empty_window() {
         crate::software_renderer::RepaintBufferType::NewBuffer,
     );
     msw.window().request_redraw();
-    msw.draw_if_needed(|renderer| {
+    let mut region = None;
+    let render_called = msw.draw_if_needed(|renderer| {
         let mut buffer =
             crate::graphics::SharedPixelBuffer::<crate::graphics::Rgb8Pixel>::new(100, 100);
         let stride = buffer.width() as usize;
-        renderer.render(buffer.make_mut_slice(), stride);
+        region = Some(renderer.render(buffer.make_mut_slice(), stride));
     });
+    assert!(render_called);
+    let region = region.unwrap();
+    assert_eq!(region.bounding_box_size(), PhysicalSize::default());
+    assert_eq!(region.bounding_box_origin(), PhysicalPosition::default());
 }

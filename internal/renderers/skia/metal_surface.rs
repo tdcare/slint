@@ -13,6 +13,8 @@ use skia_safe::gpu::mtl;
 
 use std::cell::RefCell;
 
+/// This surface renders into the given window using Metal. The provided display argument
+/// is ignored, as it has no meaning on macOS.
 pub struct MetalSurface {
     command_queue: metal::CommandQueue,
     layer: metal::MetalLayer,
@@ -20,8 +22,6 @@ pub struct MetalSurface {
 }
 
 impl super::Surface for MetalSurface {
-    const SUPPORTS_GRAPHICS_API: bool = false;
-
     fn new(
         window_handle: raw_window_handle::WindowHandle<'_>,
         _display_handle: raw_window_handle::DisplayHandle<'_>,
@@ -70,10 +70,6 @@ impl super::Surface for MetalSurface {
         "metal"
     }
 
-    fn with_graphics_api(&self, _cb: impl FnOnce(i_slint_core::api::GraphicsAPI<'_>)) {
-        unimplemented!()
-    }
-
     fn resize_event(
         &self,
         size: PhysicalWindowSize,
@@ -85,7 +81,7 @@ impl super::Surface for MetalSurface {
     fn render(
         &self,
         _size: PhysicalWindowSize,
-        callback: impl FnOnce(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
+        callback: &dyn Fn(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
     ) -> Result<(), i_slint_core::platform::PlatformError> {
         autoreleasepool(|| {
             let drawable = match self.layer.next_drawable() {
@@ -112,7 +108,7 @@ impl super::Surface for MetalSurface {
                     &texture_info,
                 );
 
-                skia_safe::Surface::from_backend_render_target(
+                skia_safe::gpu::surfaces::wrap_backend_render_target(
                     gr_context,
                     &backend_render_target,
                     skia_safe::gpu::SurfaceOrigin::TopLeft,

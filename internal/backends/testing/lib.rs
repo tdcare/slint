@@ -61,16 +61,6 @@ pub struct TestingWindow {
 }
 
 impl WindowAdapterInternal for TestingWindow {
-    fn show(&self) -> Result<(), PlatformError> {
-        self.shown.set(true);
-        Ok(())
-    }
-
-    fn hide(&self) -> Result<(), i_slint_core::platform::PlatformError> {
-        self.shown.set(false);
-        Ok(())
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -87,6 +77,11 @@ impl WindowAdapterInternal for TestingWindow {
 impl WindowAdapter for TestingWindow {
     fn window(&self) -> &i_slint_core::api::Window {
         &self.window
+    }
+
+    fn set_visible(&self, visible: bool) -> Result<(), PlatformError> {
+        self.shown.set(visible);
+        Ok(())
     }
 
     fn size(&self) -> PhysicalSize {
@@ -157,6 +152,10 @@ impl RendererSealed for TestingWindow {
 
     fn default_font_size(&self) -> LogicalLength {
         LogicalLength::new(10.)
+    }
+
+    fn set_window_adapter(&self, _window_adapter: &Rc<dyn WindowAdapter>) {
+        // No-op since TestingWindow is also the WindowAdapter
     }
 }
 

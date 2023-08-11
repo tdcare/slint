@@ -4,23 +4,22 @@
 #![doc = include_str!("README.md")]
 #![doc(html_logo_url = "https://slint.dev/logo/slint-logo-square-light.svg")]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::num::NonZeroU32;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use i_slint_common::sharedfontdb;
-use i_slint_core::api::{
-    PhysicalSize as PhysicalWindowSize, RenderingNotifier, RenderingState,
-    SetRenderingNotifierError,
-};
+use i_slint_core::api::{RenderingNotifier, RenderingState, SetRenderingNotifierError};
 use i_slint_core::graphics::FontRequest;
 use i_slint_core::graphics::{euclid, rendering_metrics_collector::RenderingMetricsCollector};
+use i_slint_core::item_rendering::ItemRenderer;
 use i_slint_core::lengths::{
     LogicalLength, LogicalPoint, LogicalRect, LogicalSize, PhysicalPx, ScaleFactor,
 };
-use i_slint_core::platform::PlatformError;
+use i_slint_core::platform::{OpenGLInterface, PlatformError};
 use i_slint_core::renderer::RendererSealed;
-use i_slint_core::window::WindowInner;
+use i_slint_core::window::{WindowAdapter, WindowInner};
 use i_slint_core::Brush;
 
 type PhysicalLength = euclid::Length<f32, PhysicalPx>;
@@ -34,61 +33,53 @@ mod fonts;
 mod images;
 mod itemrenderer;
 
-/// Trait that the FemtoVGRenderer uses to ensure that the OpenGL context is current, before running
-/// OpenGL commands. The trait also provides access to the symbols of the OpenGL implementation.
-///
-/// # Safety
-///
-/// This trait is unsafe because an implementation of get_proc_address could return dangling
-/// pointers. In practice an implementation of this trait should just forward to the EGL/WGL/CGL
-/// C library that implements EGL/CGL/WGL.
-pub unsafe trait OpenGLContextWrapper {
-    /// Ensures that the GL context is current.
-    fn ensure_current(&self) -> Result<(), PlatformError>;
-    fn swap_buffers(&self) -> Result<(), PlatformError>;
-    fn resize(&self, size: PhysicalWindowSize) -> Result<(), PlatformError>;
-    #[cfg(not(target_arch = "wasm32"))]
-    fn get_proc_address(&self, name: &std::ffi::CStr) -> *const std::ffi::c_void;
-}
-
 #[cfg(target_arch = "wasm32")]
 struct WebGLNeedsNoCurrentContext;
 #[cfg(target_arch = "wasm32")]
-unsafe impl OpenGLContextWrapper for WebGLNeedsNoCurrentContext {
-    fn ensure_current(&self) -> Result<(), PlatformError> {
+unsafe impl OpenGLInterface for WebGLNeedsNoCurrentContext {
+    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
-    fn swap_buffers(&self) -> Result<(), PlatformError> {
+    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
-    fn resize(&self, _size: PhysicalWindowSize) -> Result<(), PlatformError> {
+    fn resize(
+        &self,
+        _width: NonZeroU32,
+        _height: NonZeroU32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
+    }
+
+    fn get_proc_address(&self, _: &std::ffi::CStr) -> *const std::ffi::c_void {
+        unreachable!()
     }
 }
 
 /// Use the FemtoVG renderer when implementing a custom Slint platform where you deliver events to
-/// Slint and want the scene to be rendered using OpenGL and the FemtoVG renderer.
+/// Slint and want the scene to be rendered using OpenGL. The rendering is done using the [FemtoVG](https://github.com/femtovg/femtovg)
+/// library.
 pub struct FemtoVGRenderer {
+    maybe_window_adapter: RefCell<Option<Weak<dyn WindowAdapter>>>,
     rendering_notifier: RefCell<Option<Box<dyn RenderingNotifier>>>,
     canvas: CanvasRc,
     graphics_cache: itemrenderer::ItemGraphicsCache,
     texture_cache: RefCell<images::TextureCache>,
     rendering_metrics_collector: RefCell<Option<Rc<RenderingMetricsCollector>>>,
+    rendering_first_time: Cell<bool>,
     // Last field, so that it's dropped last and context exists and is current when destroying the FemtoVG canvas
-    opengl_context: Box<dyn OpenGLContextWrapper>,
+    opengl_context: Box<dyn OpenGLInterface>,
     #[cfg(target_arch = "wasm32")]
     canvas_id: String,
 }
 
 impl FemtoVGRenderer {
-    /// Creates a new renderer is associated with an implementation
-    /// of the OpenGLContextWrapper trait. The trait serves the purpose of giving the renderer control
-    /// over when the make the context current, how to retrieve the address of GL functions, and when
-    /// to swap back and front buffers.
+    /// Creates a new renderer that renders using OpenGL. An implementation of the OpenGLInterface
+    /// trait needs to supplied.
     pub fn new(
-        #[cfg(not(target_arch = "wasm32"))] opengl_context: impl OpenGLContextWrapper + 'static,
+        #[cfg(not(target_arch = "wasm32"))] opengl_context: impl OpenGLInterface + 'static,
         #[cfg(target_arch = "wasm32")] html_canvas: web_sys::HtmlCanvasElement,
     ) -> Result<Self, PlatformError> {
         #[cfg(target_arch = "wasm32")]
@@ -134,52 +125,51 @@ impl FemtoVGRenderer {
         let canvas = Rc::new(RefCell::new(femtovg_canvas));
 
         Ok(Self {
+            maybe_window_adapter: Default::default(),
             rendering_notifier: Default::default(),
             canvas,
             graphics_cache: Default::default(),
             texture_cache: Default::default(),
             rendering_metrics_collector: Default::default(),
+            rendering_first_time: Cell::new(true),
             opengl_context,
             #[cfg(target_arch = "wasm32")]
             canvas_id: html_canvas.id(),
         })
     }
 
-    /// Notifiers the renderer that the underlying window is becoming visible.
-    pub fn show(&self) -> Result<(), PlatformError> {
-        self.opengl_context.ensure_current()?;
-        *self.rendering_metrics_collector.borrow_mut() =
-            RenderingMetricsCollector::new("FemtoVG renderer");
-
-        if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
-            self.with_graphics_api(|api| callback.notify(RenderingState::RenderingSetup, &api))?;
-        }
-
-        Ok(())
+    /// Render the scene using OpenGL.
+    pub fn render(&self) -> Result<(), i_slint_core::platform::PlatformError> {
+        self.internal_render_with_post_callback(None)
     }
 
-    /// Notifiers the renderer that the underlying window will be hidden soon.
-    pub fn hide(&self) -> Result<(), PlatformError> {
-        self.opengl_context.ensure_current()?;
-        self.rendering_metrics_collector.borrow_mut().take();
-
-        if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
-            self.with_graphics_api(|api| callback.notify(RenderingState::RenderingTeardown, &api))?;
-        }
-
-        Ok(())
-    }
-
-    /// Render the scene using OpenGL. This function assumes that the context is current.
-    pub fn render(
+    fn internal_render_with_post_callback(
         &self,
-        window: &i_slint_core::api::Window,
+        post_render_cb: Option<&dyn Fn(&mut dyn ItemRenderer)>,
     ) -> Result<(), i_slint_core::platform::PlatformError> {
         self.opengl_context.ensure_current()?;
 
+        if self.rendering_first_time.take() {
+            *self.rendering_metrics_collector.borrow_mut() =
+                RenderingMetricsCollector::new("FemtoVG renderer");
+
+            if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
+                self.with_graphics_api(|api| {
+                    callback.notify(RenderingState::RenderingSetup, &api)
+                })?;
+            }
+        }
+
+        let window_adapter = self.window_adapter()?;
+        let window = window_adapter.window();
         let size = window.size();
-        let width = size.width;
-        let height = size.height;
+
+        let Some((width, height)): Option<(NonZeroU32, NonZeroU32)> =
+            size.width.try_into().ok().zip(size.height.try_into().ok())
+        else {
+            // Nothing to render
+            return Ok(());
+        };
 
         let window_inner = WindowInner::from_pub(window);
         let scale = window_inner.scale_factor().ceil();
@@ -194,15 +184,15 @@ impl FemtoVGRenderer {
                     // We pass an integer that is greater than or equal to the scale factor as
                     // dpi / device pixel ratio as the anti-alias of femtovg needs that to draw text clearly.
                     // We need to care about that `ceil()` when calculating metrics.
-                    femtovg_canvas.set_size(width, height, scale);
+                    femtovg_canvas.set_size(width.get(), height.get(), scale);
 
                     // Clear with window background if it is a solid color otherwise it will drawn as gradient
                     if let Some(Brush::SolidColor(clear_color)) = window_background_brush {
                         femtovg_canvas.clear_rect(
                             0,
                             0,
-                            width,
-                            height,
+                            width.get(),
+                            height.get(),
                             self::itemrenderer::to_femtovg_color(&clear_color),
                         );
                     }
@@ -216,7 +206,7 @@ impl FemtoVGRenderer {
 
                     femtovg_canvas.flush();
 
-                    femtovg_canvas.set_size(width, height, scale);
+                    femtovg_canvas.set_size(width.get(), height.get(), scale);
                     drop(femtovg_canvas);
 
                     self.with_graphics_api(|api| {
@@ -229,8 +219,8 @@ impl FemtoVGRenderer {
                     &self.graphics_cache,
                     &self.texture_cache,
                     window,
-                    width,
-                    height,
+                    width.get(),
+                    height.get(),
                 );
 
                 // Draws the window background as gradient
@@ -254,6 +244,10 @@ impl FemtoVGRenderer {
                     );
                 }
 
+                if let Some(cb) = post_render_cb.as_ref() {
+                    cb(&mut item_renderer)
+                }
+
                 if let Some(collector) = &self.rendering_metrics_collector.borrow().as_ref() {
                     collector.measure_frame_rendered(&mut item_renderer);
                 }
@@ -272,12 +266,8 @@ impl FemtoVGRenderer {
             self.with_graphics_api(|api| callback.notify(RenderingState::AfterRendering, &api))?;
         }
 
-        self.opengl_context.swap_buffers()
-    }
-
-    /// Inform the renderer about the new size of the underlying window.
-    pub fn resize(&self, size: PhysicalWindowSize) -> Result<(), PlatformError> {
-        self.opengl_context.resize(size)
+        self.opengl_context.swap_buffers()?;
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -308,6 +298,14 @@ impl FemtoVGRenderer {
         };
         callback(api);
         Ok(())
+    }
+
+    fn window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
+        self.maybe_window_adapter
+            .borrow()
+            .as_ref()
+            .and_then(|w| w.upgrade())
+            .ok_or_else(|| format!("Renderer must be associated with component before use").into())
     }
 }
 
@@ -475,12 +473,36 @@ impl RendererSealed for FemtoVGRenderer {
         self.graphics_cache.component_destroyed(component);
         Ok(())
     }
+
+    fn set_window_adapter(&self, window_adapter: &Rc<dyn WindowAdapter>) {
+        *self.maybe_window_adapter.borrow_mut() = Some(Rc::downgrade(window_adapter));
+        if self.opengl_context.ensure_current().is_ok() {
+            self.graphics_cache.clear_all();
+            self.texture_cache.borrow_mut().clear();
+        }
+    }
+
+    fn resize(&self, size: i_slint_core::api::PhysicalSize) -> Result<(), PlatformError> {
+        if let Some((width, height)) = size.width.try_into().ok().zip(size.height.try_into().ok()) {
+            self.opengl_context.resize(width, height)?;
+        };
+        return Ok(());
+    }
 }
 
 impl Drop for FemtoVGRenderer {
     fn drop(&mut self) {
         // Ensure the context is current before the renderer is destroyed
-        self.opengl_context.ensure_current().ok();
+        if self.opengl_context.ensure_current().is_ok() {
+            drop(self.rendering_metrics_collector.borrow_mut().take());
+
+            if let Some(callback) = self.rendering_notifier.borrow_mut().as_mut() {
+                self.with_graphics_api(|api| {
+                    callback.notify(RenderingState::RenderingTeardown, &api)
+                })
+                .ok();
+            }
+        }
 
         // Clear these manually to drop any Rc<Canvas>.
         self.graphics_cache.clear_all();
@@ -489,5 +511,21 @@ impl Drop for FemtoVGRenderer {
         if Rc::strong_count(&self.canvas) != 1 {
             i_slint_core::debug_log!("internal warning: there are canvas references left when destroying the window. OpenGL resources will be leaked.")
         }
+    }
+}
+
+pub trait FemtoVGRendererExt {
+    fn render_with_post_callback(
+        &self,
+        post_render_cb: Option<&dyn Fn(&mut dyn ItemRenderer)>,
+    ) -> Result<(), i_slint_core::platform::PlatformError>;
+}
+
+impl FemtoVGRendererExt for FemtoVGRenderer {
+    fn render_with_post_callback(
+        &self,
+        post_render_cb: Option<&dyn Fn(&mut dyn ItemRenderer)>,
+    ) -> Result<(), i_slint_core::platform::PlatformError> {
+        self.internal_render_with_post_callback(post_render_cb)
     }
 }

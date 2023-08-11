@@ -47,11 +47,6 @@ slint_test(models)
 
 add_subdirectory(multiple-includes)
 
-if(SLINT_FEATURE_EXPERIMENTAL)
-    slint_test(platform_eventloop)
-    target_link_libraries(test_platform_eventloop PRIVATE Threads::Threads)
-    if(Qt6_FOUND)
-        add_subdirectory(manual/platform_qt)
-    endif(Qt6_FOUND)
-    add_subdirectory(manual/platform_native)
-endif(SLINT_FEATURE_EXPERIMENTAL)
+slint_test(platform_eventloop)
+target_link_libraries(test_platform_eventloop PRIVATE Threads::Threads)
+

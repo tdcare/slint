@@ -1,7 +1,6 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
 use i_slint_core::platform::PlatformError;
 use i_slint_core::renderer::Renderer;
 use i_slint_renderer_femtovg::FemtoVGRenderer;
@@ -45,23 +44,11 @@ impl super::WinitCompatibleRenderer for GlutinFemtoVGRenderer {
         Ok((Self { renderer }, winit_window))
     }
 
-    fn show(&self) -> Result<(), PlatformError> {
-        self.renderer.show()
-    }
-
-    fn hide(&self) -> Result<(), PlatformError> {
-        self.renderer.hide()
-    }
-
-    fn render(&self, window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
-        self.renderer.render(window)
+    fn render(&self, _window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
+        self.renderer.render()
     }
 
     fn as_core_renderer(&self) -> &dyn Renderer {
         &self.renderer
-    }
-
-    fn resize_event(&self, size: PhysicalWindowSize) -> Result<(), PlatformError> {
-        self.renderer.resize(size)
     }
 }

@@ -54,11 +54,9 @@ using cbindgen_private::TraversalOrder;
 }
 
 #if !defined(DOXYGEN)
-namespace experimental {
 namespace platform {
 class SkiaRenderer;
 class SoftwareRenderer;
-}
 }
 #endif
 
@@ -233,6 +231,13 @@ public:
         cbindgen_private::slint_windowrc_dispatch_key_event(&inner, &event);
     }
 
+    /// Send a pointer event to this window
+    void dispatch_pointer_event(const cbindgen_private::MouseEvent &event)
+    {
+        private_api::assert_main_thread();
+        cbindgen_private::slint_windowrc_dispatch_pointer_event(&inner, event);
+    }
+
     /// Registers a font by the specified path. The path must refer to an existing
     /// TrueType font.
     /// \returns an empty optional on success, otherwise an error string
@@ -271,8 +276,8 @@ public:
     const cbindgen_private::WindowAdapterRcOpaque &handle() const { return inner; }
 
 private:
-    friend class slint::experimental::platform::SkiaRenderer;
-    friend class slint::experimental::platform::SoftwareRenderer;
+    friend class slint::platform::SkiaRenderer;
+    friend class slint::platform::SoftwareRenderer;
     cbindgen_private::WindowAdapterRcOpaque inner;
 };
 
@@ -523,6 +528,112 @@ public:
         inner.dispatch_key_event(event);
     }
 
+    /// Dispatches a pointer or mouse press event to the scene.
+    ///
+    /// Use this function when you're implementing your own backend and want to forward user
+    /// pointer/mouse events.
+    ///
+    /// \a pos represents the logical position of the pointer relative to the window.
+    /// \a button is the button that was pressed.
+    void dispatch_pointer_press_event(LogicalPosition pos, PointerEventButton button)
+    {
+        using slint::cbindgen_private::MouseEvent;
+        MouseEvent event { .tag = MouseEvent::Tag::Pressed,
+                           .pressed = MouseEvent::Pressed_Body { .position = { pos.x, pos.y },
+                                                                 .button = button,
+                                                                 .click_count = 0 } };
+        inner.dispatch_pointer_event(event);
+    }
+    /// Dispatches a pointer or mouse release event to the scene.
+    ///
+    /// Use this function when you're implementing your own backend and want to forward user
+    /// pointer/mouse events.
+    ///
+    /// \a pos represents the logical position of the pointer relative to the window.
+    /// \a button is the button that was released.
+    void dispatch_pointer_release_event(LogicalPosition pos, PointerEventButton button)
+    {
+        using slint::cbindgen_private::MouseEvent;
+        MouseEvent event { .tag = MouseEvent::Tag::Released,
+                           .released = MouseEvent::Released_Body { .position = { pos.x, pos.y },
+                                                                   .button = button,
+                                                                   .click_count = 0 } };
+        inner.dispatch_pointer_event(event);
+    }
+    /// Dispatches a pointer exit event to the scene.
+    ///
+    /// Use this function when you're implementing your own backend and want to forward user
+    /// pointer/mouse events.
+    ///
+    /// This event is triggered when the pointer exits the window.
+    void dispatch_pointer_exit_event()
+    {
+        using slint::cbindgen_private::MouseEvent;
+        MouseEvent event { .tag = MouseEvent::Tag::Exit, .moved = {} };
+        inner.dispatch_pointer_event(event);
+    }
+
+    /// Dispatches a pointer move event to the scene.
+    ///
+    /// Use this function when you're implementing your own backend and want to forward user
+    /// pointer/mouse events.
+    ///
+    /// \a pos represents the logical position of the pointer relative to the window.
+    void dispatch_pointer_move_event(LogicalPosition pos)
+    {
+        using slint::cbindgen_private::MouseEvent;
+        MouseEvent event { .tag = MouseEvent::Tag::Moved,
+                           .moved = MouseEvent::Moved_Body { .position = { pos.x, pos.y } } };
+        inner.dispatch_pointer_event(event);
+    }
+
+    /// Dispatches a scroll (or wheel) event to the scene.
+    ///
+    /// Use this function when you're implementing your own backend and want to forward user wheel
+    /// events.
+    ///
+    /// \a parameter represents the logical position of the pointer relative to the window.
+    /// \a delta_x and \a delta_y represent the scroll delta values in the X and Y
+    /// directions in logical pixels.
+    void dispatch_pointer_scroll_event(LogicalPosition pos, float delta_x, float delta_y)
+    {
+        using slint::cbindgen_private::MouseEvent;
+        MouseEvent event { .tag = MouseEvent::Tag::Wheel,
+                           .wheel = MouseEvent::Wheel_Body { .position = { pos.x, pos.y },
+                                                             .delta_x = delta_x,
+                                                             .delta_y = delta_y } };
+        inner.dispatch_pointer_event(event);
+    }
+
+    /// Set the logical size of this window after a resize event
+    ///
+    /// The backend must send this event to ensure that the `width` and `height` property of the
+    /// root Window element are properly set.
+    void dispatch_resize_event(slint::LogicalSize s)
+    {
+        private_api::assert_main_thread();
+        cbindgen_private::slint_windowrc_dispatch_resize_event(&inner.handle(), s.width, s.height);
+    }
+
+    /// The window's scale factor has changed. This can happen for example when the display's
+    /// resolution changes, the user selects a new scale factor in the system settings, or the
+    /// window is moved to a different screen. Platform implementations should dispatch this event
+    /// also right after the initial window creation, to set the initial scale factor the windowing
+    /// system provided for the window.
+    void dispatch_scale_factor_change_event(float factor)
+    {
+        private_api::assert_main_thread();
+        cbindgen_private::slint_windowrc_dispatch_scale_factor_change_event(&inner.handle(),
+                                                                            factor);
+    }
+
+    /// Returns true if there is an animation currently active on any property in the Window.
+    bool has_active_animations() const
+    {
+        private_api::assert_main_thread();
+        return cbindgen_private::slint_windowrc_has_active_animations(&inner.handle());
+    }
+
     /// \private
     private_api::WindowAdapterRc &window_handle() { return inner; }
     /// \private
@@ -607,14 +718,12 @@ inline LayoutInfo LayoutInfo::merge(const LayoutInfo &other) const
 
 namespace private_api {
 
-template<typename Component, typename ItemArray>
-static void register_component(const std::optional<slint::Window> &maybe_window, Component *c,
-                               ItemArray items)
+inline static void register_component(const vtable::VRc<ComponentVTable> *c,
+                                      const std::optional<slint::Window> &maybe_window)
 {
     const cbindgen_private::WindowAdapterRcOpaque *window_ptr =
             maybe_window.has_value() ? &maybe_window->window_handle().handle() : nullptr;
-    cbindgen_private::slint_register_component(
-            vtable::VRef<ComponentVTable> { &Component::static_vtable, c }, items, window_ptr);
+    cbindgen_private::slint_register_component(c, window_ptr);
 }
 
 inline SharedVector<float> solve_box_layout(const cbindgen_private::BoxLayoutData &data,
@@ -1231,6 +1340,7 @@ struct SortModelInner : private_api::ModelChangeListener
             target_model.row_removed(removed_row, 1);
         }
     }
+
     void reset() override
     {
         sorted_rows_dirty = true;
@@ -1295,6 +1405,7 @@ public:
     {
         inner->source_model->set_row_data(inner->sorted_rows[i], value);
     }
+
     /// Re-applies the model's sort function on each row of the source model. Use this if state
     /// external to the sort function has changed.
     void reset() { inner->reset(); }
@@ -1312,6 +1423,87 @@ public:
 
 private:
     std::shared_ptr<private_api::SortModelInner<ModelData>> inner;
+};
+
+template<typename ModelData>
+class ReverseModel;
+
+namespace private_api {
+template<typename ModelData>
+struct ReverseModelInner : private_api::ModelChangeListener
+{
+    ReverseModelInner(std::shared_ptr<slint::Model<ModelData>> source_model,
+                      slint::ReverseModel<ModelData> &target_model)
+        : source_model(source_model), target_model(target_model)
+    {
+    }
+
+    void row_added(size_t first_inserted_row, size_t count) override
+    {
+        auto row_count = source_model->row_count();
+        auto old_row_count = row_count - count;
+        auto row = old_row_count - first_inserted_row;
+
+        target_model.row_added(row, count);
+    }
+
+    void row_changed(size_t changed_row) override
+    {
+        target_model.row_changed(source_model->row_count() - 1 - changed_row);
+    }
+
+    void row_removed(size_t first_removed_row, size_t count) override
+    {
+        auto row_count = source_model->row_count();
+        auto old_row_count = row_count + count;
+        auto row = old_row_count - first_removed_row - 1;
+
+        target_model.row_removed(row, count);
+    }
+
+    void reset() override { source_model.reset(); }
+
+    std::shared_ptr<slint::Model<ModelData>> source_model;
+    slint::ReverseModel<ModelData> &target_model;
+};
+}
+
+/// The ReverseModel acts as an adapter model for a given source model by reserving all rows.
+/// This means that the first row in the source model is the last row of this model, the second
+/// row is the second last, and so on.
+template<typename ModelData>
+class ReverseModel : public Model<ModelData>
+{
+    friend struct private_api::ReverseModelInner<ModelData>;
+
+public:
+    /// Constructs a new ReverseModel that provides a reversed view on the \a source_model.
+    ReverseModel(std::shared_ptr<Model<ModelData>> source_model)
+        : inner(std::make_shared<private_api::ReverseModelInner<ModelData>>(std::move(source_model),
+                                                                            *this))
+    {
+        inner->source_model->attach_peer(inner);
+    }
+
+    size_t row_count() const override { return inner->source_model->row_count(); }
+
+    std::optional<ModelData> row_data(size_t i) const override
+    {
+        auto count = inner->source_model->row_count();
+        return inner->source_model->row_data(count - i - 1);
+    }
+
+    void set_row_data(size_t i, const ModelData &value) override
+    {
+        auto count = inner->source_model->row_count();
+        inner->source_model->set_row_data(count - i - 1, value);
+    }
+
+    /// Returns the source model of this reserve model.
+    std::shared_ptr<Model<ModelData>> source_model() const { return inner->source_model; }
+
+private:
+    std::shared_ptr<private_api::ReverseModelInner<ModelData>> inner;
 };
 
 namespace private_api {

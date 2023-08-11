@@ -7,11 +7,11 @@ use i_slint_core::platform::PlatformError;
 use raw_window_handle::HasRawDisplayHandle;
 use raw_window_handle::HasRawWindowHandle;
 
-pub struct SkiaRenderer {
+pub struct WinitSkiaRenderer {
     renderer: i_slint_renderer_skia::SkiaRenderer,
 }
 
-impl super::WinitCompatibleRenderer for SkiaRenderer {
+impl super::WinitCompatibleRenderer for WinitSkiaRenderer {
     fn new(
         window_builder: winit::window::WindowBuilder,
     ) -> Result<(Self, winit::window::Window), PlatformError> {
@@ -62,23 +62,11 @@ impl super::WinitCompatibleRenderer for SkiaRenderer {
         Ok((Self { renderer }, winit_window))
     }
 
-    fn show(&self) -> Result<(), PlatformError> {
-        self.renderer.show()
-    }
-
-    fn hide(&self) -> Result<(), PlatformError> {
-        self.renderer.hide()
-    }
-
-    fn render(&self, window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
-        self.renderer.render(window)
+    fn render(&self, _window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
+        self.renderer.render()
     }
 
     fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer {
         &self.renderer
-    }
-
-    fn resize_event(&self, size: PhysicalWindowSize) -> Result<(), PlatformError> {
-        self.renderer.resize_event(size)
     }
 }

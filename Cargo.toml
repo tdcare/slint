@@ -5,6 +5,7 @@
 members = [
     'api/cpp',
     'api/node/native',
+    'api/napi',
     'api/rs/build',
     'api/rs/macros',
     'api/rs/slint',
@@ -36,6 +37,7 @@ members = [
     'internal/backends/qt',
     'internal/backends/selector',
     'internal/backends/testing',
+    'internal/backends/linuxkms',
     'internal/renderers/skia',
     'internal/renderers/femtovg',
     'internal/common',
@@ -63,6 +65,7 @@ members = [
 default-members = [
     'api/rs/build',
     'api/rs/slint',
+    'api/napi',
     'examples/gallery',
     'examples/memory',
     'examples/printerdemo_old/rust',

@@ -3,7 +3,6 @@
 
 //! Delegate the rendering to the [`i_slint_core::software_renderer::SoftwareRenderer`]
 
-use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
 use i_slint_core::graphics::Rgb8Pixel;
 use i_slint_core::platform::PlatformError;
 use i_slint_core::software_renderer::PremultipliedRgbaColor;
@@ -37,9 +36,7 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
 
         Ok((
             Self {
-                renderer: SoftwareRenderer::new_without_window(
-                    i_slint_core::software_renderer::RepaintBufferType::NewBuffer,
-                ),
+                renderer: SoftwareRenderer::new(),
                 _context: context,
                 surface: RefCell::new(surface),
             },
@@ -47,31 +44,14 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
         ))
     }
 
-    fn show(&self) -> Result<(), PlatformError> {
-        Ok(())
-    }
-
-    fn hide(&self) -> Result<(), PlatformError> {
-        Ok(())
-    }
-
     fn render(&self, window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
         let size = window.size();
 
-        let width = size.width.try_into().map_err(|_| {
-            format!(
-                "Attempting to resize softbuffer window surface with an invalid width: {}",
-                size.width
-            )
-        })?;
-        let height = size.height.try_into().map_err(|_| {
-            format!(
-                "Attempting to resize softbuffer window surface with an invalid height: {}",
-                size.height
-            )
-        })?;
-
-        self.renderer.set_window(window);
+        let Some((width, height)) = size.width.try_into().ok().zip(size.height.try_into().ok())
+        else {
+            // Nothing to render
+            return Ok(());
+        };
 
         let mut surface = self.surface.borrow_mut();
 
@@ -129,26 +109,6 @@ impl super::WinitCompatibleRenderer for WinitSoftwareRenderer {
         target_buffer.present().map_err(|e| format!("Error presenting softbuffer buffer: {e}"))?;
 
         Ok(())
-    }
-
-    fn resize_event(&self, size: PhysicalWindowSize) -> Result<(), PlatformError> {
-        let width = size.width.try_into().map_err(|_| {
-            format!(
-                "Attempting to resize softbuffer window surface with an invalid width: {}",
-                size.width
-            )
-        })?;
-        let height = size.height.try_into().map_err(|_| {
-            format!(
-                "Attempting to resize softbuffer window surface with an invalid height: {}",
-                size.height
-            )
-        })?;
-
-        self.surface
-            .borrow_mut()
-            .resize(width, height)
-            .map_err(|e| format!("Error resizing softbuffer surface: {e}").into())
     }
 
     fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer {

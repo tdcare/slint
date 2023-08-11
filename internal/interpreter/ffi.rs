@@ -561,13 +561,7 @@ pub extern "C" fn slint_interpreter_component_instance_show(
 ) {
     generativity::make_guard!(guard);
     let comp = inst.unerase(guard);
-    if let Some(w) = comp.borrow_instance().window_adapter().internal(i_slint_core::InternalToken) {
-        if is_visible {
-            w.show().unwrap();
-        } else {
-            w.hide().unwrap();
-        }
-    }
+    comp.borrow_instance().window_adapter().set_visible(is_visible).unwrap();
 }
 
 /// Return a window for the component
@@ -585,7 +579,7 @@ pub unsafe extern "C" fn slint_interpreter_component_instance_window(
     );
     core::ptr::write(
         out as *mut *const Rc<dyn WindowAdapter>,
-        inst.window_adapter().unwrap() as *const _,
+        inst.window_adapter_ref().unwrap() as *const _,
     )
 }
 

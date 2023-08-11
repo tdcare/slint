@@ -31,8 +31,7 @@ impl OpaqueImage for SkiaCachedImage {
 
 pub(crate) fn as_skia_image(
     image: Image,
-    target_width: std::pin::Pin<&i_slint_core::Property<LogicalLength>>,
-    target_height: std::pin::Pin<&i_slint_core::Property<LogicalLength>>,
+    target_size_fn: &dyn Fn() -> (LogicalLength, LogicalLength),
     image_fit: ImageFit,
     scale_factor: ScaleFactor,
     _canvas: &mut skia_safe::Canvas,
@@ -54,8 +53,8 @@ pub(crate) fn as_skia_image(
         }
         ImageInner::Svg(svg) => {
             // Query target_width/height here again to ensure that changes will invalidate the item rendering cache.
-            let target_size =
-                LogicalSize::from_lengths(target_width.get(), target_height.get()) * scale_factor;
+            let (target_width, target_height) = target_size_fn();
+            let target_size = LogicalSize::from_lengths(target_width, target_height) * scale_factor;
             let target_size = i_slint_core::graphics::fit_size(image_fit, target_size, svg.size());
             let pixels = match svg.render(target_size.cast()).ok()? {
                 SharedImageBuffer::RGB8(_) => unreachable!(),
@@ -81,7 +80,12 @@ pub(crate) fn as_skia_image(
             vtable::VRc::borrow(x).downcast::<SkiaCachedImage>().map(|x| x.image.clone())
         }
         #[cfg(skia_backend_opengl)]
-        ImageInner::BorrowedOpenGLTexture(BorrowedOpenGLTexture { texture_id, size, .. }) => unsafe {
+        ImageInner::BorrowedOpenGLTexture(BorrowedOpenGLTexture {
+            texture_id,
+            size,
+            origin,
+            ..
+        }) => unsafe {
             let mut texture_info = skia_safe::gpu::gl::TextureInfo::from_target_and_id(
                 glow::TEXTURE_2D,
                 texture_id.get(),
@@ -95,7 +99,14 @@ pub(crate) fn as_skia_image(
             skia_safe::image::Image::from_texture(
                 _canvas.recording_context().as_mut().unwrap(),
                 &backend_texture,
-                skia_safe::gpu::SurfaceOrigin::TopLeft,
+                match origin {
+                    i_slint_core::graphics::BorrowedOpenGLTextureOrigin::TopLeft => {
+                        skia_safe::gpu::SurfaceOrigin::TopLeft
+                    }
+                    i_slint_core::graphics::BorrowedOpenGLTextureOrigin::BottomLeft => {
+                        skia_safe::gpu::SurfaceOrigin::BottomLeft
+                    }
+                },
                 skia_safe::ColorType::RGBA8888,
                 skia_safe::AlphaType::Unpremul,
                 None,

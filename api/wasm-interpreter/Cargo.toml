@@ -3,7 +3,7 @@
 
 [package]
 name = "slint-wasm-interpreter"
-version = "1.1.1"
+version = "1.2.0"
 authors = ["Slint Developers <info@slint.dev>"]
 edition = "2021"
 license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial"
@@ -19,7 +19,7 @@ crate-type = ["cdylib"]
 highlight = ["slint-interpreter/highlight"]
 
 [dependencies]
-slint-interpreter = { path = "../../internal/interpreter", default-features = false, features = ["std", "backend-winit", "renderer-winit-femtovg", "compat-1-0"] }
+slint-interpreter = { path = "../../internal/interpreter", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "compat-1-2"] }
 send_wrapper = { workspace = true }
 
 vtable = { version = "0.1.6", path="../../helper_crates/vtable" }

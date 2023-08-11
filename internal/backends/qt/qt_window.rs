@@ -1056,6 +1056,10 @@ impl ItemRenderer for QtItemRenderer<'_> {
         }}
     }
 
+    fn draw_image_direct(&mut self, _image: i_slint_core::graphics::Image) {
+        todo!()
+    }
+
     fn window(&self) -> &i_slint_core::window::WindowInner {
         i_slint_core::window::WindowInner::from_pub(self.window)
     }
@@ -1447,20 +1451,9 @@ impl QtWindow {
                 collector.measure_frame_rendered(&mut renderer);
             }
 
-            i_slint_core::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
-                if !driver.has_active_animations() {
-                    return;
-                }
-                let widget_ptr = self.widget_ptr();
-                cpp! {unsafe [widget_ptr as "QWidget*"] {
-                    // FIXME: using QTimer -::singleShot is not optimal. We should use Qt animation timer
-                    QTimer::singleShot(16, [widget_ptr = QPointer<QWidget>(widget_ptr)] {
-                        if (widget_ptr)
-                            widget_ptr->update();
-                    });
-                    //return widget_ptr->update();
-                }}
-            });
+            if self.window.has_active_animations() {
+                self.request_redraw();
+            }
         });
 
         // Update the accessibility tree (if the component tree has changed)
@@ -1520,6 +1513,54 @@ impl WindowAdapter for QtWindow {
         self
     }
 
+    fn set_visible(&self, visible: bool) -> Result<(), PlatformError> {
+        if visible {
+            let component_rc = WindowInner::from_pub(&self.window).component();
+            let component = ComponentRc::borrow_pin(&component_rc);
+            let root_item = component.as_ref().get_item_ref(0);
+            if let Some(window_item) = ItemRef::downcast_pin::<WindowItem>(root_item) {
+                if window_item.width() <= LogicalLength::zero() {
+                    window_item.width.set(LogicalLength::new(
+                        component.as_ref().layout_info(Orientation::Horizontal).preferred_bounded(),
+                    ))
+                }
+                if window_item.height() <= LogicalLength::zero() {
+                    window_item.height.set(LogicalLength::new(
+                        component.as_ref().layout_info(Orientation::Vertical).preferred_bounded(),
+                    ))
+                }
+
+                self.apply_window_properties(window_item);
+            }
+
+            let widget_ptr = self.widget_ptr();
+            let fullscreen = std::env::var("SLINT_FULLSCREEN").is_ok();
+            cpp! {unsafe [widget_ptr as "QWidget*", fullscreen as "bool"] {
+                if (fullscreen) {
+                    widget_ptr->setWindowState(Qt::WindowFullScreen);
+                }
+                widget_ptr->show();
+            }};
+            let qt_platform_name = cpp! {unsafe [] -> qttypes::QString as "QString" {
+                return QGuiApplication::platformName();
+            }};
+            *self.rendering_metrics_collector.borrow_mut() = RenderingMetricsCollector::new(
+                &format!("Qt backend (platform {})", qt_platform_name),
+            );
+            Ok(())
+        } else {
+            self.rendering_metrics_collector.take();
+            let widget_ptr = self.widget_ptr();
+            cpp! {unsafe [widget_ptr as "QWidget*"] {
+                widget_ptr->hide();
+                // Since we don't call close(), this will force Qt to recompute wether there are any
+                // visible windows, and ends the application if needed
+                QEventLoopLocker();
+            }};
+            Ok(())
+        }
+    }
+
     fn position(&self) -> Option<i_slint_core::api::PhysicalPosition> {
         let widget_ptr = self.widget_ptr();
         let qp = cpp! {unsafe [widget_ptr as "QWidget*"] -> qttypes::QPoint as "QPoint" {
@@ -1564,7 +1605,9 @@ impl WindowAdapter for QtWindow {
     fn request_redraw(&self) {
         let widget_ptr = self.widget_ptr();
         cpp! {unsafe [widget_ptr as "QWidget*"] {
-            return widget_ptr->update();
+            if (auto w = widget_ptr->window()->windowHandle()) {
+                w->requestUpdate();
+            }
         }}
     }
 
@@ -1574,49 +1617,6 @@ impl WindowAdapter for QtWindow {
 }
 
 impl WindowAdapterInternal for QtWindow {
-    fn show(&self) -> Result<(), PlatformError> {
-        let component_rc = WindowInner::from_pub(&self.window).component();
-        let component = ComponentRc::borrow_pin(&component_rc);
-        let root_item = component.as_ref().get_item_ref(0);
-        if let Some(window_item) = ItemRef::downcast_pin::<WindowItem>(root_item) {
-            if window_item.width() <= LogicalLength::zero() {
-                window_item.width.set(LogicalLength::new(
-                    component.as_ref().layout_info(Orientation::Horizontal).preferred_bounded(),
-                ))
-            }
-            if window_item.height() <= LogicalLength::zero() {
-                window_item.height.set(LogicalLength::new(
-                    component.as_ref().layout_info(Orientation::Vertical).preferred_bounded(),
-                ))
-            }
-
-            self.apply_window_properties(window_item);
-        }
-
-        let widget_ptr = self.widget_ptr();
-        cpp! {unsafe [widget_ptr as "QWidget*"] {
-            widget_ptr->show();
-        }};
-        let qt_platform_name = cpp! {unsafe [] -> qttypes::QString as "QString" {
-            return QGuiApplication::platformName();
-        }};
-        *self.rendering_metrics_collector.borrow_mut() =
-            RenderingMetricsCollector::new(&format!("Qt backend (platform {})", qt_platform_name));
-        Ok(())
-    }
-
-    fn hide(&self) -> Result<(), i_slint_core::platform::PlatformError> {
-        self.rendering_metrics_collector.take();
-        let widget_ptr = self.widget_ptr();
-        cpp! {unsafe [widget_ptr as "QWidget*"] {
-            widget_ptr->hide();
-            // Since we don't call close(), this will force Qt to recompute wether there are any
-            // visible windows, and ends the application if needed
-            QEventLoopLocker();
-        }};
-        Ok(())
-    }
-
     /// Apply windows property such as title to the QWidget*
     fn apply_window_properties(&self, window_item: Pin<&items::WindowItem>) {
         let widget_ptr = self.widget_ptr();
@@ -2012,6 +2012,10 @@ impl i_slint_core::renderer::RendererSealed for QtWindow {
         self.cache.component_destroyed(component);
         Ok(())
     }
+
+    fn set_window_adapter(&self, _window_adapter: &Rc<dyn WindowAdapter>) {
+        // No-op because QtWindow is also the WindowAdapter
+    }
 }
 
 fn accessible_item(item: Option<ItemRc>) -> Option<ItemRc> {
@@ -2107,7 +2111,7 @@ pub(crate) fn timer_event() {
 
 mod key_codes {
     macro_rules! define_qt_key_to_string_fn {
-        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident)|* ;)*) => {
+        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident)|* # $($_xkb:ident)|*;)*) => {
             use crate::key_generated;
             pub fn qt_key_to_string(key: key_generated::Qt_Key) -> Option<i_slint_core::SharedString> {
 

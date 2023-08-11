@@ -20,12 +20,12 @@ fn ident(ident: &str) -> String {
 /// return tokens to the `ItemRc`
 fn access_item_rc(pr: &llr::PropertyReference, ctx: &EvaluationContext) -> String {
     let mut ctx = ctx;
-    let mut component_access = "self".into();
+    let mut component_access = "self->".into();
 
     let pr = match pr {
         llr::PropertyReference::InParent { level, parent_reference } => {
             for _ in 0..level.get() {
-                component_access = format!("{}->parent", component_access);
+                component_access = format!("{component_access}parent->");
                 ctx = ctx.parent.as_ref().unwrap().ctx;
             }
             parent_reference
@@ -39,17 +39,14 @@ fn access_item_rc(pr: &llr::PropertyReference, ctx: &EvaluationContext) -> Strin
             let (sub_compo_path, sub_component) =
                 follow_sub_component_path(ctx.current_sub_component.unwrap(), sub_component_path);
             if !sub_component_path.is_empty() {
-                component_access = format!("{}->{}", &component_access, &sub_compo_path);
+                component_access += &sub_compo_path;
             }
-            let component_rc = format!("{}->self_weak.lock()->into_dyn()", &component_access);
+            let component_rc = format!("{component_access}self_weak.lock()->into_dyn()");
             let item_index_in_tree = sub_component.items[*item_index].index_in_tree;
             let item_index = if item_index_in_tree == 0 {
-                format!("{}->tree_index", &component_access)
+                format!("{component_access}tree_index")
             } else {
-                format!(
-                    "{}->tree_index_of_first_child + {} - 1",
-                    &component_access, item_index_in_tree
-                )
+                format!("{component_access}tree_index_of_first_child + {item_index_in_tree} - 1")
             };
 
             format!("{}, {}", &component_rc, item_index)
@@ -911,7 +908,7 @@ fn generate_public_component(file: &mut File, component: &llr::PublicComponent) 
                     .into(),
                 "   window.window_handle().set_component(*self);".into(),
                 "}".into(),
-                "return self->m_window.value();".into(),
+                "return *self->m_window;".into(),
             ]),
             ..Default::default()
         }),
@@ -1191,6 +1188,17 @@ fn generate_item_tree(
         }),
     ));
 
+    target_struct.members.push((
+        Access::Private,
+        Declaration::Function(Function {
+            name: "embed_component".into(),
+            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] const slint::private_api::ComponentWeak *parent_component, [[maybe_unused]] const uintptr_t parent_index) -> bool".into(),
+            is_static: true,
+            statements: Some(vec!["return false; /* todo! */".into()]),
+            ..Default::default()
+        }),
+    ));
+
     // Statements will be overridden for repeated components!
     target_struct.members.push((
         Access::Private,
@@ -1285,6 +1293,21 @@ fn generate_item_tree(
     ));
 
     target_struct.members.push((
+        Access::Private,
+        Declaration::Function(Function {
+            name: "window_adapter".into(),
+            signature:
+                "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] bool do_create, [[maybe_unused]] slint::cbindgen_private::Option<slint::private_api::WindowAdapterRc>* result) -> void"
+                    .into(),
+            is_static: true,
+            statements: Some(vec![format!(
+                "/* TODO: implement this! */",
+            )]),
+            ..Default::default()
+        }),
+    ));
+
+    target_struct.members.push((
         Access::Public,
         Declaration::Var(Var {
             ty: "static const slint::private_api::ComponentVTable".to_owned(),
@@ -1298,8 +1321,8 @@ fn generate_item_tree(
         name: format!("{}::static_vtable", item_tree_class_name),
         init: Some(format!(
             "{{ visit_children, get_item_ref, get_subtree_range, get_subtree_component, \
-                get_item_tree, parent_node, subtree_index, layout_info, \
-                accessible_role, accessible_string_property, \
+                get_item_tree, parent_node, embed_component, subtree_index, layout_info, \
+                accessible_role, accessible_string_property, window_adapter, \
                 slint::private_api::drop_in_place<{}>, slint::private_api::dealloc }}",
             item_tree_class_name
         )),
@@ -1332,8 +1355,7 @@ fn generate_item_tree(
 
     create_code.extend([
         format!(
-            "slint::private_api::register_component({}->m_window, self, self->item_array());",
-            root_access
+            "slint::private_api::register_component(&self_rc.into_dyn(), {root_access}->m_window);",
         ),
         format!("self->init({}, self->self_weak, 0, 1 {});", root_access, init_parent_parameters),
     ]);
@@ -2950,7 +2972,7 @@ fn compile_builtin_function_call(
         BuiltinFunction::ItemAbsolutePosition => {
             if let [llr::Expression::PropertyReference(pr)] = arguments {
                 let item_rc = access_item_rc(pr, ctx);
-                format!("slint::LogicalPosition(slint_item_absolute_position(&{item_rc}))")
+                format!("slint::LogicalPosition(slint::cbindgen_private::slint_item_absolute_position(&{item_rc}))")
             } else {
                 panic!("internal error: invalid args to ItemAbsolutePosition {:?}", arguments)
             }

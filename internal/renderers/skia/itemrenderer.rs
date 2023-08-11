@@ -23,7 +23,7 @@ struct RenderState {
     alpha: f32,
 }
 
-pub struct SkiaRenderer<'a> {
+pub struct SkiaItemRenderer<'a> {
     pub canvas: &'a mut skia_safe::Canvas,
     pub scale_factor: ScaleFactor,
     pub window: &'a i_slint_core::api::Window,
@@ -34,7 +34,7 @@ pub struct SkiaRenderer<'a> {
     box_shadow_cache: &'a mut SkiaBoxShadowCache,
 }
 
-impl<'a> SkiaRenderer<'a> {
+impl<'a> SkiaItemRenderer<'a> {
     pub fn new(
         canvas: &'a mut skia_safe::Canvas,
         window: &'a i_slint_core::api::Window,
@@ -161,8 +161,7 @@ impl<'a> SkiaRenderer<'a> {
             let image = source_property.get();
             super::cached_image::as_skia_image(
                 image,
-                target_width,
-                target_height,
+                &|| (target_width.get(), target_height.get()),
                 image_fit,
                 self.scale_factor,
                 self.canvas,
@@ -252,7 +251,7 @@ impl<'a> SkiaRenderer<'a> {
             let canvas = surface.canvas();
             canvas.clear(skia_safe::Color::TRANSPARENT);
 
-            let mut sub_renderer = SkiaRenderer::new(
+            let mut sub_renderer = SkiaItemRenderer::new(
                 canvas,
                 &self.window,
                 self.image_cache,
@@ -271,7 +270,7 @@ impl<'a> SkiaRenderer<'a> {
     }
 }
 
-impl<'a> SkiaRenderer<'a> {
+impl<'a> SkiaItemRenderer<'a> {
     /// Draws a `Rectangle` using the `GLItemRenderer`.
     pub fn draw_rect(&mut self, size: LogicalSize, brush: Brush) {
         let geometry = PhysicalRect::from(size * self.scale_factor);
@@ -288,7 +287,7 @@ impl<'a> SkiaRenderer<'a> {
     }
 }
 
-impl<'a> ItemRenderer for SkiaRenderer<'a> {
+impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
     fn draw_rectangle(
         &mut self,
         rect: std::pin::Pin<&i_slint_core::items::Rectangle>,
@@ -468,7 +467,7 @@ impl<'a> ItemRenderer for SkiaRenderer<'a> {
         };
 
         let mut text_style = skia_safe::textlayout::TextStyle::new();
-        text_style.set_foreground_color(&paint);
+        text_style.set_foreground_paint(&paint);
 
         let (layout, layout_top_left) = super::textlayout::create_layout(
             font_request,
@@ -508,7 +507,7 @@ impl<'a> ItemRenderer for SkiaRenderer<'a> {
         };
 
         let mut text_style = skia_safe::textlayout::TextStyle::new();
-        text_style.set_foreground_color(&paint);
+        text_style.set_foreground_paint(&paint);
 
         let visual_representation = text_input.visual_representation(None);
 
@@ -807,6 +806,26 @@ impl<'a> ItemRenderer for SkiaRenderer<'a> {
             &skia_safe::Font::default(),
             &paint,
         );
+    }
+
+    fn draw_image_direct(&mut self, image: i_slint_core::graphics::Image) {
+        let skia_image = super::cached_image::as_skia_image(
+            image.clone(),
+            &|| {
+                let size = image.size();
+                (LogicalLength::new(size.width as _), LogicalLength::new(size.height as _))
+            },
+            ImageFit::Fill,
+            self.scale_factor,
+            self.canvas,
+        );
+
+        let skia_image = match skia_image {
+            Some(img) => img,
+            None => return,
+        };
+
+        self.canvas.draw_image(skia_image, skia_safe::Point::default(), None);
     }
 
     fn window(&self) -> &i_slint_core::window::WindowInner {

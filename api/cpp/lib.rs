@@ -10,7 +10,6 @@ use alloc::rc::Rc;
 use core::ffi::c_void;
 use i_slint_core::window::{ffi::WindowAdapterRcOpaque, WindowAdapter};
 
-#[cfg(feature = "experimental")]
 pub mod platform;
 
 #[cfg(feature = "i-slint-backend-selector")]
@@ -176,8 +175,10 @@ mod allocator {
     static ALLOCATOR: CAlloc = CAlloc;
 }
 
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), not(feature = "esp-backtrace")))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+#[cfg(feature = "esp-backtrace")]
+use esp_backtrace as _;

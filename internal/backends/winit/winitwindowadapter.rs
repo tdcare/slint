@@ -118,7 +118,6 @@ pub struct WinitWindowAdapter {
     constraints: Cell<(corelib::layout::LayoutInfo, corelib::layout::LayoutInfo)>,
     shown: Cell<bool>,
 
-    winit_window: Rc<winit::window::Window>,
     renderer: Box<dyn WinitCompatibleRenderer>,
     // We cache the size because winit_window.inner_size() can return different value between calls (eg, on X11)
     // And we wan see the newer value before the Resized event was received, leading to inconsistencies
@@ -129,6 +128,8 @@ pub struct WinitWindowAdapter {
 
     #[cfg(enable_accesskit)]
     pub accesskit_adapter: crate::accesskit::AccessKitAdapter,
+
+    winit_window: Rc<winit::window::Window>, // Last field so that any previously provided window handles are still valid in the drop impl of the renderers, etc.
 }
 
 impl WinitWindowAdapter {
@@ -286,10 +287,8 @@ impl WinitWindowAdapter {
             self.window().dispatch_event(WindowEvent::Resized {
                 size: physical_size.to_logical(scale_factor),
             });
-            self.renderer().resize_event(physical_size)
-        } else {
-            Ok(())
         }
+        Ok(())
     }
 
     pub fn set_dark_color_scheme(&self, dark_mode: bool) {
@@ -307,6 +306,93 @@ impl WindowAdapter for WinitWindowAdapter {
 
     fn renderer(&self) -> &dyn i_slint_core::renderer::Renderer {
         self.renderer().as_core_renderer()
+    }
+
+    fn set_visible(&self, visible: bool) -> Result<(), PlatformError> {
+        self.shown.set(visible);
+        if visible {
+            let winit_window = self.winit_window();
+
+            let runtime_window = WindowInner::from_pub(self.window());
+
+            let scale_factor = runtime_window.scale_factor() as f64;
+
+            let component_rc = runtime_window.component();
+            let component = ComponentRc::borrow_pin(&component_rc);
+
+            let layout_info_h = component.as_ref().layout_info(Orientation::Horizontal);
+            if let Some(window_item) = runtime_window.window_item() {
+                // Setting the width to its preferred size before querying the vertical layout info
+                // is important in case the height depends on the width
+                window_item.width.set(LogicalLength::new(layout_info_h.preferred_bounded()));
+            }
+            let layout_info_v = component.as_ref().layout_info(Orientation::Vertical);
+            #[allow(unused_mut)]
+            let mut preferred_size = winit::dpi::LogicalSize::new(
+                layout_info_h.preferred_bounded(),
+                layout_info_v.preferred_bounded(),
+            );
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                let html_canvas = winit_window.canvas();
+                let existing_canvas_size = winit::dpi::LogicalSize::new(
+                    html_canvas.client_width() as f32,
+                    html_canvas.client_height() as f32,
+                );
+
+                // Try to maintain the existing size of the canvas element. A window created with winit
+                // on the web will always have 1024x768 as size otherwise.
+                if preferred_size.width <= 0. {
+                    preferred_size.width = existing_canvas_size.width;
+                }
+                if preferred_size.height <= 0. {
+                    preferred_size.height = existing_canvas_size.height;
+                }
+            }
+
+            if winit_window.fullscreen().is_none()
+                && preferred_size.width > 0 as Coord
+                && preferred_size.height > 0 as Coord
+            {
+                // use the Slint's window Scale factor to take in account the override
+                let size = preferred_size.to_physical::<u32>(scale_factor);
+                winit_window.set_inner_size(size);
+                self.size.set(physical_size_to_slint(&size));
+            };
+
+            winit_window.set_visible(true);
+
+            // Make sure the dark color scheme property is up-to-date, as it may have been queried earlier when
+            // the window wasn't mapped yet.
+            if let Some(dark_color_scheme_prop) = self.dark_color_scheme.get() {
+                if let Some(theme) = winit_window.theme() {
+                    dark_color_scheme_prop.as_ref().set(theme == winit::window::Theme::Dark)
+                }
+            }
+
+            // In wasm a request_redraw() issued before show() results in a draw() even when the window
+            // isn't visible, as opposed to regular windowing systems. The compensate for the lost draw,
+            // explicitly render the first frame on show().
+            #[cfg(target_arch = "wasm32")]
+            if self.pending_redraw.get() {
+                self.draw()?;
+            };
+
+            Ok(())
+        } else {
+            self.winit_window().set_visible(false);
+
+            /* FIXME:
+            if let Some(existing_blinker) = self.cursor_blinker.borrow().upgrade() {
+                existing_blinker.stop();
+            }*/
+            crate::send_event_via_global_event_loop_proxy(crate::SlintUserEvent::CustomEvent {
+                event: crate::event_loop::CustomEvent::WindowHidden,
+            })
+            .ok(); // It's okay to call hide() even after the event loop is closed. We don't need the logic for quitting the event loop anymore at this point.
+            Ok(())
+        }
     }
 
     fn position(&self) -> Option<corelib::api::PhysicalPosition> {
@@ -481,99 +567,6 @@ impl WindowAdapterInternal for WinitWindowAdapter {
         });
     }
 
-    fn show(&self) -> Result<(), PlatformError> {
-        self.shown.set(true);
-
-        let winit_window = self.winit_window();
-
-        let runtime_window = WindowInner::from_pub(self.window());
-
-        let scale_factor = runtime_window.scale_factor() as f64;
-
-        let component_rc = runtime_window.component();
-        let component = ComponentRc::borrow_pin(&component_rc);
-
-        let layout_info_h = component.as_ref().layout_info(Orientation::Horizontal);
-        if let Some(window_item) = runtime_window.window_item() {
-            // Setting the width to its preferred size before querying the vertical layout info
-            // is important in case the height depends on the width
-            window_item.width.set(LogicalLength::new(layout_info_h.preferred_bounded()));
-        }
-        let layout_info_v = component.as_ref().layout_info(Orientation::Vertical);
-        #[allow(unused_mut)]
-        let mut preferred_size = winit::dpi::LogicalSize::new(
-            layout_info_h.preferred_bounded(),
-            layout_info_v.preferred_bounded(),
-        );
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            let html_canvas = winit_window.canvas();
-            let existing_canvas_size = winit::dpi::LogicalSize::new(
-                html_canvas.client_width() as f32,
-                html_canvas.client_height() as f32,
-            );
-
-            // Try to maintain the existing size of the canvas element. A window created with winit
-            // on the web will always have 1024x768 as size otherwise.
-            if preferred_size.width <= 0. {
-                preferred_size.width = existing_canvas_size.width;
-            }
-            if preferred_size.height <= 0. {
-                preferred_size.height = existing_canvas_size.height;
-            }
-        }
-
-        if winit_window.fullscreen().is_none()
-            && preferred_size.width > 0 as Coord
-            && preferred_size.height > 0 as Coord
-        {
-            // use the Slint's window Scale factor to take in account the override
-            let size = preferred_size.to_physical::<u32>(scale_factor);
-            winit_window.set_inner_size(size);
-            self.size.set(physical_size_to_slint(&size));
-        };
-
-        self.renderer().show()?;
-        winit_window.set_visible(true);
-
-        // Make sure the dark color scheme property is up-to-date, as it may have been queried earlier when
-        // the window wasn't mapped yet.
-        if let Some(dark_color_scheme_prop) = self.dark_color_scheme.get() {
-            if let Some(theme) = winit_window.theme() {
-                dark_color_scheme_prop.as_ref().set(theme == winit::window::Theme::Dark)
-            }
-        }
-
-        // In wasm a request_redraw() issued before show() results in a draw() even when the window
-        // isn't visible, as opposed to regular windowing systems. The compensate for the lost draw,
-        // explicitly render the first frame on show().
-        #[cfg(target_arch = "wasm32")]
-        if self.pending_redraw.get() {
-            self.draw()?;
-        };
-
-        Ok(())
-    }
-
-    fn hide(&self) -> Result<(), PlatformError> {
-        self.shown.set(false);
-
-        self.renderer().hide()?;
-
-        self.winit_window().set_visible(false);
-
-        /* FIXME:
-        if let Some(existing_blinker) = self.cursor_blinker.borrow().upgrade() {
-            existing_blinker.stop();
-        }*/
-        crate::send_event_via_global_event_loop_proxy(crate::SlintUserEvent::CustomEvent {
-            event: crate::event_loop::CustomEvent::WindowHidden,
-        })
-        .ok(); // It's okay to call hide() even after the event loop is closed. We don't need the logic for quitting the event loop anymore at this point.
-        Ok(())
-    }
-
     fn set_mouse_cursor(&self, cursor: MouseCursor) {
         let winit_cursor = match cursor {
             MouseCursor::Default => winit::window::CursorIcon::Default,
@@ -690,7 +683,6 @@ impl WindowAdapterInternal for WinitWindowAdapter {
 
 impl Drop for WinitWindowAdapter {
     fn drop(&mut self) {
-        self.renderer.hide().ok(); // ignore errors here, we're going away anyway
         crate::event_loop::unregister_window(self.winit_window().id());
     }
 }

@@ -14,6 +14,7 @@ use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
 use i_slint_core::{api::GraphicsAPI, platform::PlatformError};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
+/// This surface type renders into the given window with OpenGL, using glutin and glow libraries.
 pub struct OpenGLSurface {
     fb_info: skia_safe::gpu::gl::FramebufferInfo,
     surface: RefCell<skia_safe::Surface>,
@@ -23,8 +24,6 @@ pub struct OpenGLSurface {
 }
 
 impl super::Surface for OpenGLSurface {
-    const SUPPORTS_GRAPHICS_API: bool = true;
-
     fn new(
         window_handle: raw_window_handle::WindowHandle<'_>,
         display_handle: raw_window_handle::DisplayHandle<'_>,
@@ -55,6 +54,7 @@ impl super::Surface for OpenGLSurface {
                     format!("Skia Renderer: Internal error, framebuffer binding returned signed id")
                 })?,
                 format: skia_safe::gpu::gl::Format::RGBA8.into(),
+                ..Default::default()
             }
         };
 
@@ -98,7 +98,11 @@ impl super::Surface for OpenGLSurface {
         "opengl"
     }
 
-    fn with_graphics_api(&self, callback: impl FnOnce(GraphicsAPI<'_>)) {
+    fn supports_graphics_api(&self) -> bool {
+        true
+    }
+
+    fn with_graphics_api(&self, callback: &mut dyn FnMut(GraphicsAPI<'_>)) {
         let api = GraphicsAPI::NativeOpenGL {
             get_proc_address: &|name| {
                 self.glutin_context.display().get_proc_address(name) as *const _
@@ -107,7 +111,7 @@ impl super::Surface for OpenGLSurface {
         callback(api)
     }
 
-    fn with_active_surface(&self, callback: impl FnOnce()) -> Result<(), PlatformError> {
+    fn with_active_surface(&self, callback: &mut dyn FnMut()) -> Result<(), PlatformError> {
         self.ensure_context_current()?;
         callback();
         Ok(())
@@ -116,7 +120,7 @@ impl super::Surface for OpenGLSurface {
     fn render(
         &self,
         size: PhysicalWindowSize,
-        callback: impl FnOnce(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
+        callback: &dyn Fn(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
     ) -> Result<(), PlatformError> {
         self.ensure_context_current()?;
 
@@ -357,7 +361,7 @@ impl OpenGLSurface {
             config.stencil_size() as _,
             fb_info,
         );
-        match skia_safe::Surface::from_backend_render_target(
+        match skia_safe::gpu::surfaces::wrap_backend_render_target(
             gr_context,
             &backend_render_target,
             skia_safe::gpu::SurfaceOrigin::BottomLeft,

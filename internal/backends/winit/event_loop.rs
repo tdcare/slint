@@ -246,7 +246,7 @@ impl std::fmt::Debug for CustomEvent {
 
 mod key_codes {
     macro_rules! winit_key_to_char_fn {
-        ($($char:literal # $name:ident # $($_qt:ident)|* # $($winit:ident)|* ;)*) => {
+        ($($char:literal # $name:ident # $($_qt:ident)|* # $($winit:ident)|* # $($_xkb:ident)|*;)*) => {
             pub fn winit_key_to_char(virtual_keycode: winit::event::VirtualKeyCode) -> Option<char> {
                 let char = match(virtual_keycode) {
                     $($(winit::event::VirtualKeyCode::$winit => $char,)*)*
@@ -272,7 +272,7 @@ fn process_window_event(
         }
         WindowEvent::CloseRequested => {
             if runtime_window.request_close() {
-                window.hide()?;
+                window.set_visible(false)?;
             }
         }
         WindowEvent::ReceivedCharacter(ch) => {

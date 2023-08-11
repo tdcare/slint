@@ -342,7 +342,7 @@ impl Window {
     /// # Example
     /// ```rust
     /// use std::rc::Rc;
-    /// use slint::platform::WindowAdapter;
+    /// use slint::platform::{WindowAdapter, Renderer};
     /// use slint::{Window, PhysicalSize};
     /// struct MyWindowAdapter {
     ///     window: Window,
@@ -351,7 +351,7 @@ impl Window {
     /// impl WindowAdapter for MyWindowAdapter {
     ///    fn window(&self) -> &Window { &self.window }
     ///    fn size(&self) -> PhysicalSize { unimplemented!() }
-    /// #   fn renderer(&self) -> &dyn i_slint_core::renderer::Renderer { unimplemented!() }
+    ///    fn renderer(&self) -> &dyn Renderer { unimplemented!() }
     /// }
     ///
     /// fn create_window_adapter() -> Rc<dyn WindowAdapter> {
@@ -363,7 +363,6 @@ impl Window {
     ///    })
     /// }
     /// ```
-    #[doc(hidden)]
     pub fn new(window_adapter_weak: alloc::rc::Weak<dyn WindowAdapter>) -> Self {
         Self(WindowInner::new(window_adapter_weak))
     }
@@ -437,6 +436,7 @@ impl Window {
     ///
     /// Any position fields in the event must be in the logical pixel coordinate system relative to
     /// the top left corner of the window.
+    // TODO: Return a Result<(), PlatformError>
     pub fn dispatch_event(&self, event: crate::platform::WindowEvent) {
         match event {
             crate::platform::WindowEvent::PointerPressed { position, button } => {
@@ -488,6 +488,11 @@ impl Window {
             }
             crate::platform::WindowEvent::Resized { size } => {
                 self.0.set_window_item_geometry(size.to_euclid());
+                self.0
+                    .window_adapter()
+                    .renderer()
+                    .resize(size.to_physical(self.scale_factor()))
+                    .unwrap()
             }
         }
     }
@@ -676,6 +681,12 @@ mod weak_handle {
             self.upgrade().unwrap()
         }
 
+        /// A helper function to allow creation on `component_factory::Component` from
+        /// a `ComponentHandle`
+        pub(crate) fn inner(&self) -> vtable::VWeak<ComponentVTable, T::Inner> {
+            self.inner.clone()
+        }
+
         /// Convenience function that combines [`invoke_from_event_loop()`] with [`Self::upgrade()`]
         ///
         /// The given functor will be added to an internal queue and will wake the event loop.
@@ -826,6 +837,9 @@ pub enum PlatformError {
 
     /// Another platform-specific error occurred
     Other(String),
+    /// Another platform-specific error occurred.
+    #[cfg(feature = "std")]
+    OtherError(Box<dyn std::error::Error>),
 }
 
 impl core::fmt::Display for PlatformError {
@@ -841,6 +855,8 @@ impl core::fmt::Display for PlatformError {
                 f.write_str("The Slint platform was initialized in another thread")
             }
             PlatformError::Other(str) => f.write_str(str),
+            #[cfg(feature = "std")]
+            PlatformError::OtherError(error) => error.fmt(f),
         }
     }
 }
@@ -857,4 +873,18 @@ impl From<&str> for PlatformError {
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for PlatformError {}
+impl From<Box<dyn std::error::Error>> for PlatformError {
+    fn from(error: Box<dyn std::error::Error>) -> Self {
+        Self::OtherError(error)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for PlatformError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PlatformError::OtherError(err) => Some(err.as_ref()),
+            _ => None,
+        }
+    }
+}

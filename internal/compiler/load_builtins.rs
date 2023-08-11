@@ -20,7 +20,7 @@ use crate::typeregister::TypeRegister;
 /// Parse the contents of builtins.slint and fill the builtin type registry
 /// `register` is the register to fill with the builtin types.
 /// At this point, it really should already contain the basic Types (string, int, ...)
-pub fn load_builtins(register: &mut TypeRegister) {
+pub(crate) fn load_builtins(register: &mut TypeRegister) {
     let mut diag = crate::diagnostics::BuildDiagnostics::default();
     let node = crate::parser::parse(include_str!("builtins.slint").into(), None, &mut diag);
     if !diag.is_empty() {
@@ -32,23 +32,6 @@ pub fn load_builtins(register: &mut TypeRegister) {
 
     assert_eq!(node.kind(), crate::parser::SyntaxKind::Document);
     let doc: syntax_nodes::Document = node.into();
-
-    // parse structs
-    for s in doc.StructDeclaration().chain(doc.ExportsList().flat_map(|e| e.StructDeclaration())) {
-        let external_name = identifier_text(&s.DeclaredIdentifier()).unwrap();
-        let mut ty = object_tree::type_struct_from_node(s.ObjectType(), &mut diag, register, None);
-        if let Type::Struct { name, node, .. } = &mut ty {
-            *name = Some(
-                parse_annotation("name", &s.ObjectType())
-                    .map_or_else(|| external_name.clone(), |s| s.unwrap())
-                    .to_owned(),
-            );
-            *node = None;
-        } else {
-            unreachable!()
-        }
-        register.insert_type_with_name(ty, external_name);
-    }
 
     let mut natives = HashMap::<String, Rc<BuiltinElement>>::new();
 

@@ -76,12 +76,20 @@ impl<'a> SourceFileWithTags<'a> {
 
         // Find default gettext copyright statements
         let location = location.or_else(|| {
-            let Some(start) = source.find("# SOME DESCRIPTIVE TITLE").or_else(|| source.find("# Copyright (C) ")) else { return None; };
+            let Some(start) =
+                source.find("# SOME DESCRIPTIVE TITLE").or_else(|| source.find("# Copyright (C) "))
+            else {
+                return None;
+            };
             let end_line = "# This file is distributed under the same license as the ";
-            let Some(end) = source[start..].find(end_line) else { return None; };
+            let Some(end) = source[start..].find(end_line) else {
+                return None;
+            };
             let end = start + end + end_line.len();
-            let Some(end_nl) = source[end..].find('\n') else { return None; };
-            Some(std::ops::Range {start, end: end + end_nl + 1})
+            let Some(end_nl) = source[end..].find('\n') else {
+                return None;
+            };
+            Some(std::ops::Range { start, end: end + end_nl + 1 })
         });
 
         Self { source, tag_style: style, tag_location: location }
@@ -302,6 +310,8 @@ lazy_static! {
         ("(^|/)\\.eslintrc.yml$", LicenseLocation::NoLicense),
         ("(^|/)memory.x$", LicenseLocation::NoLicense), // third-party file
         ("(^|/)webpack\\..+\\.js$", LicenseLocation::NoLicense),
+        ("(^|/)partitions.csv$", LicenseLocation::Tag(LicenseTagStyle::shell_comment_style())),
+        ("(^|/)sdkconfig", LicenseLocation::NoLicense), // auto-generated
 
         // Path prefix matches:
         ("^editors/tree-sitter-slint/corpus/", LicenseLocation::NoLicense), // liberal license
@@ -357,6 +367,7 @@ lazy_static! {
         ("\\.ui$", LicenseLocation::NoLicense),
         ("\\.xml$", LicenseLocation::NoLicense),
         ("\\.yaml$", LicenseLocation::Tag(LicenseTagStyle::shell_comment_style())),
+        ("\\.yml$", LicenseLocation::Tag(LicenseTagStyle::shell_comment_style())),
     ]
     .iter()
     .map(|(re, ty)| (regex::Regex::new(re).unwrap(), *ty))

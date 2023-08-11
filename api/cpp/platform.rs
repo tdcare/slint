@@ -5,12 +5,11 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use core::ffi::c_void;
 use i_slint_core::api::{PhysicalSize, Window};
-use i_slint_core::graphics::{IntSize, Rgb8Pixel};
+use i_slint_core::graphics::IntSize;
 use i_slint_core::platform::{Platform, PlatformError};
 use i_slint_core::renderer::Renderer;
-use i_slint_core::software_renderer::{RepaintBufferType, Rgb565Pixel, SoftwareRenderer};
 use i_slint_core::window::ffi::WindowAdapterRcOpaque;
-use i_slint_core::window::{WindowAdapter, WindowAdapterInternal};
+use i_slint_core::window::WindowAdapter;
 
 type WindowAdapterUserData = *mut c_void;
 
@@ -27,8 +26,7 @@ pub struct CppWindowAdapter {
     drop: unsafe extern "C" fn(WindowAdapterUserData),
     /// Safety: the returned pointer must live for the lifetime of self
     get_renderer_ref: unsafe extern "C" fn(WindowAdapterUserData) -> RendererPtr,
-    show: unsafe extern "C" fn(WindowAdapterUserData),
-    hide: unsafe extern "C" fn(WindowAdapterUserData),
+    set_visible: unsafe extern "C" fn(WindowAdapterUserData, bool),
     request_redraw: unsafe extern "C" fn(WindowAdapterUserData),
     size: unsafe extern "C" fn(WindowAdapterUserData) -> IntSize,
 }
@@ -44,6 +42,11 @@ impl WindowAdapter for CppWindowAdapter {
         &self.window
     }
 
+    fn set_visible(&self, visible: bool) -> Result<(), PlatformError> {
+        unsafe { (self.set_visible)(self.user_data, visible) };
+        Ok(())
+    }
+
     fn size(&self) -> PhysicalSize {
         let s = unsafe { (self.size)(self.user_data) };
         PhysicalSize::new(s.width, s.height)
@@ -53,23 +56,8 @@ impl WindowAdapter for CppWindowAdapter {
         unsafe { core::mem::transmute((self.get_renderer_ref)(self.user_data)) }
     }
 
-    fn internal(&self, _: i_slint_core::InternalToken) -> Option<&dyn WindowAdapterInternal> {
-        Some(self)
-    }
-
     fn request_redraw(&self) {
         unsafe { (self.request_redraw)(self.user_data) }
-    }
-}
-
-impl WindowAdapterInternal for CppWindowAdapter {
-    fn show(&self) -> Result<(), PlatformError> {
-        unsafe { (self.show)(self.user_data) };
-        Ok(())
-    }
-    fn hide(&self) -> Result<(), PlatformError> {
-        unsafe { (self.hide)(self.user_data) }
-        Ok(())
     }
 }
 
@@ -78,8 +66,7 @@ pub unsafe extern "C" fn slint_window_adapter_new(
     user_data: WindowAdapterUserData,
     drop: unsafe extern "C" fn(WindowAdapterUserData),
     get_renderer_ref: unsafe extern "C" fn(WindowAdapterUserData) -> RendererPtr,
-    show: unsafe extern "C" fn(WindowAdapterUserData),
-    hide: unsafe extern "C" fn(WindowAdapterUserData),
+    set_visible: unsafe extern "C" fn(WindowAdapterUserData, bool),
     request_redraw: unsafe extern "C" fn(WindowAdapterUserData),
     size: unsafe extern "C" fn(WindowAdapterUserData) -> IntSize,
     target: *mut WindowAdapterRcOpaque,
@@ -89,9 +76,8 @@ pub unsafe extern "C" fn slint_window_adapter_new(
         user_data,
         drop,
         get_renderer_ref,
-        show,
+        set_visible,
         request_redraw,
-        hide,
         size,
     });
 
@@ -108,7 +94,7 @@ struct CppPlatform {
     duration_since_start: unsafe extern "C" fn(PlatformUserData) -> u64,
     run_event_loop: unsafe extern "C" fn(PlatformUserData),
     quit_event_loop: unsafe extern "C" fn(PlatformUserData),
-    invoke_from_event_loop: unsafe extern "C" fn(PlatformUserData, PlatformEventOpaque),
+    invoke_from_event_loop: unsafe extern "C" fn(PlatformUserData, PlatformTaskOpaque),
 }
 
 impl Drop for CppPlatform {
@@ -151,7 +137,7 @@ impl Platform for CppPlatform {
 struct CppEventLoopProxy {
     user_data: PlatformUserData,
     quit_event_loop: unsafe extern "C" fn(PlatformUserData),
-    invoke_from_event_loop: unsafe extern "C" fn(PlatformUserData, PlatformEventOpaque),
+    invoke_from_event_loop: unsafe extern "C" fn(PlatformUserData, PlatformTaskOpaque),
 }
 
 impl i_slint_core::platform::EventLoopProxy for CppEventLoopProxy {
@@ -167,9 +153,7 @@ impl i_slint_core::platform::EventLoopProxy for CppEventLoopProxy {
         unsafe {
             (self.invoke_from_event_loop)(
                 self.user_data,
-                core::mem::transmute::<*mut dyn FnOnce(), PlatformEventOpaque>(Box::into_raw(
-                    event,
-                )),
+                core::mem::transmute::<*mut dyn FnOnce(), PlatformTaskOpaque>(Box::into_raw(event)),
             )
         };
         Ok(())
@@ -187,7 +171,7 @@ pub unsafe extern "C" fn slint_platform_register(
     #[allow(unused)] duration_since_start: unsafe extern "C" fn(PlatformUserData) -> u64,
     run_event_loop: unsafe extern "C" fn(PlatformUserData),
     quit_event_loop: unsafe extern "C" fn(PlatformUserData),
-    invoke_from_event_loop: unsafe extern "C" fn(PlatformUserData, PlatformEventOpaque),
+    invoke_from_event_loop: unsafe extern "C" fn(PlatformUserData, PlatformTaskOpaque),
 ) {
     let p = CppPlatform {
         user_data,
@@ -248,72 +232,80 @@ pub extern "C" fn slint_platform_duration_until_next_timer_update() -> u64 {
 }
 
 #[repr(C)]
-pub struct PlatformEventOpaque(*const c_void, *const c_void);
+pub struct PlatformTaskOpaque(*const c_void, *const c_void);
 
 #[no_mangle]
-pub unsafe extern "C" fn slint_platform_event_drop(event: PlatformEventOpaque) {
-    drop(Box::from_raw(core::mem::transmute::<PlatformEventOpaque, *mut dyn FnOnce()>(event)));
+pub unsafe extern "C" fn slint_platform_task_drop(event: PlatformTaskOpaque) {
+    drop(Box::from_raw(core::mem::transmute::<PlatformTaskOpaque, *mut dyn FnOnce()>(event)));
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn slint_platform_event_invoke(event: PlatformEventOpaque) {
-    let f = Box::from_raw(core::mem::transmute::<PlatformEventOpaque, *mut dyn FnOnce()>(event));
+pub unsafe extern "C" fn slint_platform_task_run(event: PlatformTaskOpaque) {
+    let f = Box::from_raw(core::mem::transmute::<PlatformTaskOpaque, *mut dyn FnOnce()>(event));
     f();
 }
 
-type SoftwareRendererOpaque = *const c_void;
+#[cfg(feature = "renderer-software")]
+mod software_renderer {
+    use super::*;
+    type SoftwareRendererOpaque = *const c_void;
+    use i_slint_core::graphics::{IntRect, Rgb8Pixel};
+    use i_slint_core::software_renderer::{RepaintBufferType, Rgb565Pixel, SoftwareRenderer};
 
-#[no_mangle]
-pub unsafe extern "C" fn slint_software_renderer_new(buffer_age: u32) -> SoftwareRendererOpaque {
-    let repaint_buffer_type = match buffer_age {
-        0 => RepaintBufferType::NewBuffer,
-        1 => RepaintBufferType::ReusedBuffer,
-        2 => RepaintBufferType::SwappedBuffers,
-        _ => unreachable!(),
-    };
-    Box::into_raw(Box::new(SoftwareRenderer::new_without_window(repaint_buffer_type)))
-        as SoftwareRendererOpaque
-}
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_software_renderer_new(
+        buffer_age: u32,
+    ) -> SoftwareRendererOpaque {
+        let repaint_buffer_type = match buffer_age {
+            0 => RepaintBufferType::NewBuffer,
+            1 => RepaintBufferType::ReusedBuffer,
+            2 => RepaintBufferType::SwappedBuffers,
+            _ => unreachable!(),
+        };
+        Box::into_raw(Box::new(SoftwareRenderer::new_with_repaint_buffer_type(repaint_buffer_type)))
+            as SoftwareRendererOpaque
+    }
 
-#[no_mangle]
-pub unsafe extern "C" fn slint_software_renderer_drop(r: SoftwareRendererOpaque) {
-    drop(Box::from_raw(r as *mut SoftwareRenderer));
-}
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_software_renderer_drop(r: SoftwareRendererOpaque) {
+        drop(Box::from_raw(r as *mut SoftwareRenderer));
+    }
 
-#[no_mangle]
-pub unsafe extern "C" fn slint_software_renderer_render_rgb8(
-    r: SoftwareRendererOpaque,
-    window_adapter: *const WindowAdapterRcOpaque,
-    buffer: *mut Rgb8Pixel,
-    buffer_len: usize,
-    pixel_stride: usize,
-) {
-    let buffer = core::slice::from_raw_parts_mut(buffer, buffer_len);
-    let renderer = &*(r as *const SoftwareRenderer);
-    let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
-    renderer.set_window(window_adapter.window());
-    renderer.render(buffer, pixel_stride);
-}
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_software_renderer_render_rgb8(
+        r: SoftwareRendererOpaque,
+        buffer: *mut Rgb8Pixel,
+        buffer_len: usize,
+        pixel_stride: usize,
+    ) -> IntRect {
+        let buffer = core::slice::from_raw_parts_mut(buffer, buffer_len);
+        let renderer = &*(r as *const SoftwareRenderer);
+        let r = renderer.render(buffer, pixel_stride);
+        let (orig, size) = (r.bounding_box_origin(), r.bounding_box_size());
+        i_slint_core::graphics::euclid::rect(orig.x, orig.y, size.width as i32, size.height as i32)
+    }
 
-#[no_mangle]
-pub unsafe extern "C" fn slint_software_renderer_render_rgb565(
-    r: SoftwareRendererOpaque,
-    window_adapter: *const WindowAdapterRcOpaque,
-    buffer: *mut u16,
-    buffer_len: usize,
-    pixel_stride: usize,
-) {
-    let buffer = core::slice::from_raw_parts_mut(buffer as *mut Rgb565Pixel, buffer_len);
-    let renderer = &*(r as *const SoftwareRenderer);
-    let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
-    renderer.set_window(window_adapter.window());
-    renderer.render(buffer, pixel_stride);
-}
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_software_renderer_render_rgb565(
+        r: SoftwareRendererOpaque,
+        buffer: *mut u16,
+        buffer_len: usize,
+        pixel_stride: usize,
+    ) -> IntRect {
+        let buffer = core::slice::from_raw_parts_mut(buffer as *mut Rgb565Pixel, buffer_len);
+        let renderer = &*(r as *const SoftwareRenderer);
+        let r = renderer.render(buffer, pixel_stride);
+        let (orig, size) = (r.bounding_box_origin(), r.bounding_box_size());
+        i_slint_core::graphics::euclid::rect(orig.x, orig.y, size.width as i32, size.height as i32)
+    }
 
-#[no_mangle]
-pub unsafe extern "C" fn slint_software_renderer_handle(r: SoftwareRendererOpaque) -> RendererPtr {
-    let r = (r as *const SoftwareRenderer) as *const dyn Renderer;
-    core::mem::transmute(r)
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_software_renderer_handle(
+        r: SoftwareRendererOpaque,
+    ) -> RendererPtr {
+        let r = (r as *const SoftwareRenderer) as *const dyn Renderer;
+        core::mem::transmute(r)
+    }
 }
 
 #[cfg(all(feature = "i-slint-renderer-skia", feature = "raw-window-handle"))]
@@ -450,31 +442,9 @@ pub mod skia {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn slint_skia_renderer_show(r: SkiaRendererOpaque) {
+    pub unsafe extern "C" fn slint_skia_renderer_render(r: SkiaRendererOpaque) {
         let r = &*(r as *const SkiaRenderer);
-        r.show().unwrap()
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn slint_skia_renderer_hide(r: SkiaRendererOpaque) {
-        let r = &*(r as *const SkiaRenderer);
-        r.hide().unwrap()
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn slint_skia_renderer_resize(r: SkiaRendererOpaque, size: IntSize) {
-        let r = &*(r as *const SkiaRenderer);
-        r.resize_event(PhysicalSize { width: size.width, height: size.height }).unwrap();
-    }
-
-    #[no_mangle]
-    pub unsafe extern "C" fn slint_skia_renderer_render(
-        r: SkiaRendererOpaque,
-        window: *const WindowAdapterRcOpaque,
-    ) {
-        let window_adapter = &*(window as *const Rc<dyn WindowAdapter>);
-        let r = &*(r as *const SkiaRenderer);
-        r.render(window_adapter.window()).unwrap();
+        r.render().unwrap();
     }
 
     #[no_mangle]

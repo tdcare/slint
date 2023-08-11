@@ -8,6 +8,7 @@
 use crate::item_tree::{ItemRc, ItemWeak, VisitChildrenResult};
 pub use crate::items::PointerEventButton;
 use crate::items::{ItemRef, TextCursorDirection};
+pub use crate::items::{KeyEvent, KeyboardModifiers};
 use crate::lengths::{LogicalPoint, LogicalVector};
 use crate::timers::Timer;
 use crate::window::{WindowAdapter, WindowInner};
@@ -126,7 +127,7 @@ pub enum InputEventFilterResult {
 #[allow(missing_docs, non_upper_case_globals)]
 pub mod key_codes {
     macro_rules! declare_consts_for_special_keys {
-       ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident)|* ;)*) => {
+       ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident)|*    # $($_xkb:ident)|*;)*) => {
             $(pub const $name : char = $char;)*
 
             #[allow(missing_docs)]
@@ -137,9 +138,15 @@ pub mod key_codes {
             /// internal used unicode representation. The enum is convertible to [`std::char`] and [`slint::SharedString`](`crate::SharedString`).
             /// Use this with [`slint::platform::WindowEvent`](`crate::platform::WindowEvent`) to supply key events to Slint's platform abstraction.
             ///
+            /// # Example
+            ///
+            /// Send an tab key press event to a window
+            ///
             /// ```
-            /// let slint_key_code: char = slint::platform::Key::Tab.into();
-            /// assert_eq!(slint_key_code, '\t')
+            /// use slint::platform::{WindowEvent, Key};
+            /// fn send_tab_pressed(window: &slint::Window) {
+            ///     window.dispatch_event(WindowEvent::KeyPressed { text: Key::Tab.into() });
+            /// }
             /// ```
             pub enum Key {
                 $($name,)*
@@ -235,25 +242,6 @@ impl InternalKeyboardModifierState {
     }
 }
 
-/// KeyboardModifier provides booleans to indicate possible modifier keys
-/// on a keyboard, such as Shift, Control, etc.
-///
-/// On macOS, the command key is mapped to the meta modifier.
-///
-/// On Windows, the windows key is mapped to the meta modifier.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct KeyboardModifiers {
-    /// Indicates the alt key on a keyboard.
-    pub alt: bool,
-    /// Indicates the control key on a keyboard.
-    pub control: bool,
-    /// Indicates the command key on macos.
-    pub meta: bool,
-    /// Indicates the shift key on a keyboard.
-    pub shift: bool,
-}
-
 impl From<InternalKeyboardModifierState> for KeyboardModifiers {
     fn from(internal_state: InternalKeyboardModifierState) -> Self {
         Self {
@@ -285,28 +273,6 @@ pub enum KeyEventType {
 #[derive(Debug, Clone, PartialEq, Default)]
 #[repr(C)]
 pub struct KeyInputEvent {
-    /// The unicode representation of the key pressed.
-    pub text: SharedString,
-
-    // note: this field is not exported in the .slint in the KeyEvent builtin struct
-    /// Indicates whether the key was pressed or released
-    pub event_type: KeyEventType,
-
-    /// If the event type is KeyEventType::UpdateComposition, then this field specifies
-    /// the start of the selection as byte offsets within the preedit text.
-    pub preedit_selection_start: usize,
-    /// If the event type is KeyEventType::UpdateComposition, then this field specifies
-    /// the end of the selection as byte offsets within the preedit text.
-    pub preedit_selection_end: usize,
-}
-
-/// Represents a key event.
-#[derive(Debug, Clone, PartialEq, Default)]
-#[repr(C)]
-pub struct KeyEvent {
-    /// The keyboard modifiers active at the time of the key press event.
-    pub modifiers: KeyboardModifiers,
-
     /// The unicode representation of the key pressed.
     pub text: SharedString,
 
@@ -702,7 +668,10 @@ pub fn process_mouse_input(
         mouse_input_state = process_delayed_event(window_adapter, mouse_input_state);
     }
 
-    let Some(mouse_event) = handle_mouse_grab(mouse_event, window_adapter, &mut mouse_input_state) else { return mouse_input_state };
+    let Some(mouse_event) = handle_mouse_grab(mouse_event, window_adapter, &mut mouse_input_state)
+    else {
+        return mouse_input_state;
+    };
 
     let mut result = MouseInputState::default();
     let root = ItemRc::new(component, 0);

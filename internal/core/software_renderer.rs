@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 //! This module contains the [`SoftwareRenderer`] and related types.
+//!
+//! It is only enabled when the `renderer-software` Slint feature is enabled.
 
 #![warn(missing_docs)]
 
@@ -41,7 +43,7 @@ type PhysicalPoint = euclid::Point2D<i16, PhysicalPx>;
 type DirtyRegion = PhysicalRect;
 
 /// This enum describes which parts of the buffer passed to the [`SoftwareRenderer`] may be re-used to speed up painting.
-#[derive(PartialEq, Eq, Debug, Clone, Default)]
+#[derive(PartialEq, Eq, Debug, Clone, Default, Copy)]
 pub enum RepaintBufferType {
     #[default]
     /// The full window is always redrawn. No attempt at partial rendering will be made.
@@ -111,9 +113,10 @@ impl PhysicalRegion {
 ///  2. Using [`render_by_line()`](Self::render()) to render the window line by line. This
 ///     is only useful if the device does not have enough memory to render the whole window
 ///     in one single buffer
+#[derive(Default)]
 pub struct SoftwareRenderer {
     partial_cache: RefCell<crate::item_rendering::PartialRenderingCache>,
-    repaint_buffer_type: RepaintBufferType,
+    repaint_buffer_type: Cell<RepaintBufferType>,
     /// This is the area which we are going to redraw in the next frame, no matter if the items are dirty or not
     force_dirty: Cell<crate::item_rendering::DirtyRegion>,
     /// Force a redraw in the next frame, no matter what's dirty. Use only as a last resort.
@@ -121,59 +124,33 @@ pub struct SoftwareRenderer {
     /// This is the area which was dirty on the previous frame.
     /// Only used if repaint_buffer_type == RepaintBufferType::SwappedBuffers
     prev_frame_dirty: Cell<DirtyRegion>,
-    window: RefCell<Option<Weak<dyn crate::window::WindowAdapter>>>,
+    maybe_window_adapter: RefCell<Option<Weak<dyn crate::window::WindowAdapter>>>,
 }
 
 impl SoftwareRenderer {
-    /// Create a new Renderer for a given window.
-    ///
-    /// The `repaint_buffer_type` parameter specify what kind of buffer are passed to [`Self::render`]
-    ///
-    /// The `window` parameter can be coming from [`Rc::new_cyclic()`](alloc::rc::Rc::new_cyclic())
-    /// since the `WindowAdapter` most likely own the Renderer
-    #[doc(hidden)]
-    #[deprecated(
-        since = "1.0.3",
-        note = "Use MinimalSoftwareWindow instead of constructing a SoftwareRenderer Directly"
-    )]
-    pub fn new(
-        repaint_buffer_type: RepaintBufferType,
-        window: Weak<dyn crate::window::WindowAdapter>,
-    ) -> Self {
-        Self {
-            window: RefCell::new(Some(window.clone())),
-            repaint_buffer_type,
-            partial_cache: Default::default(),
-            force_dirty: Default::default(),
-            force_screen_refresh: Default::default(),
-            prev_frame_dirty: Default::default(),
-        }
+    /// Create a new Renderer
+    pub fn new() -> Self {
+        Default::default()
     }
 
-    /// Create a new Renderer for a given window.
+    /// Create a new SoftwareRenderer.
     ///
     /// The `repaint_buffer_type` parameter specify what kind of buffer are passed to [`Self::render`]
-    ///
-    /// The `window` parameter can be coming from [`Rc::new_cyclic()`](alloc::rc::Rc::new_cyclic())
-    /// since the `WindowAdapter` most likely own the Renderer
-    #[doc(hidden)]
-    pub fn new_without_window(repaint_buffer_type: RepaintBufferType) -> Self {
-        Self {
-            window: RefCell::new(None),
-            repaint_buffer_type,
-            partial_cache: Default::default(),
-            force_dirty: Default::default(),
-            force_screen_refresh: Default::default(),
-            prev_frame_dirty: Default::default(),
-        }
+    pub fn new_with_repaint_buffer_type(repaint_buffer_type: RepaintBufferType) -> Self {
+        Self { repaint_buffer_type: repaint_buffer_type.into(), ..Default::default() }
     }
 
-    /// Sets the window to be use for future rendering operations. Call this before calling
-    /// rendering.
-    #[doc(hidden)]
-    pub fn set_window(&self, window: &crate::api::Window) {
-        *self.window.borrow_mut() =
-            Some(Rc::downgrade(&WindowInner::from_pub(window).window_adapter().clone()));
+    /// Change the what kind of buffer is being passed to [`Self::render`]
+    ///
+    /// This may clear the internal caches
+    pub fn set_repaint_buffer_type(&self, repaint_buffer_type: RepaintBufferType) {
+        self.repaint_buffer_type.set(repaint_buffer_type);
+        self.partial_cache.borrow_mut().clear();
+    }
+
+    /// Returns the kind of buffer that must be passed to  [`Self::render`]
+    pub fn repaint_buffer_type(&self) -> RepaintBufferType {
+        self.repaint_buffer_type.get()
     }
 
     /// Internal function to apply a dirty region depending on the dirty_tracking_policy.
@@ -189,7 +166,7 @@ impl SoftwareRenderer {
             dirty_region = screen_region;
         }
 
-        match self.repaint_buffer_type {
+        match self.repaint_buffer_type() {
             RepaintBufferType::NewBuffer => {
                 PhysicalRect { origin: euclid::point2(0, 0), size: screen_size }
             }
@@ -211,12 +188,10 @@ impl SoftwareRenderer {
     ///
     /// returns the dirty region for this frame (not including the extra_draw_region)
     pub fn render(&self, buffer: &mut [impl TargetPixel], pixel_stride: usize) -> PhysicalRegion {
-        let window = self
-            .window
-            .borrow()
-            .as_ref()
-            .and_then(|w| w.upgrade())
-            .expect("render() called on a destroyed Window");
+        let Some(window) = self.maybe_window_adapter.borrow().as_ref().and_then(|w| w.upgrade())
+        else {
+            return Default::default();
+        };
         let window_inner = WindowInner::from_pub(window.window());
         let factor = ScaleFactor::new(window_inner.scale_factor());
         let (size, background) = if let Some(window_item) =
@@ -326,12 +301,10 @@ impl SoftwareRenderer {
     /// # }
     /// ```
     pub fn render_by_line(&self, line_buffer: impl LineBufferProvider) -> PhysicalRegion {
-        let window = self
-            .window
-            .borrow()
-            .as_ref()
-            .and_then(|w| w.upgrade())
-            .expect("render() called on a destroyed Window");
+        let Some(window) = self.maybe_window_adapter.borrow().as_ref().and_then(|w| w.upgrade())
+        else {
+            return Default::default();
+        };
         let window_inner = WindowInner::from_pub(window.window());
         let component_rc = window_inner.component();
         let component = crate::component::ComponentRc::borrow_pin(&component_rc);
@@ -404,7 +377,7 @@ impl RendererSealed for SoftwareRenderer {
                     paragraph.byte_offset_for_position((pos.x_length(), pos.y_length())),
                 )
             }
-            #[cfg(feature = "software-renderer-systemfonts")]
+            #[cfg(all(feature = "software-renderer-systemfonts", not(target_arch = "wasm32")))]
             fonts::Font::VectorFont(vf) => {
                 let layout = fonts::text_layout_for_font(&vf, &font_request, scale_factor);
 
@@ -459,7 +432,7 @@ impl RendererSealed for SoftwareRenderer {
 
                 (paragraph.cursor_pos_for_byte_offset(byte_offset), pf.height())
             }
-            #[cfg(feature = "software-renderer-systemfonts")]
+            #[cfg(all(feature = "software-renderer-systemfonts", not(target_arch = "wasm32")))]
             fonts::Font::VectorFont(vf) => {
                 let layout = fonts::text_layout_for_font(&vf, &font_request, scale_factor);
 
@@ -513,7 +486,7 @@ impl RendererSealed for SoftwareRenderer {
         fonts::register_bitmap_font(font_data);
     }
 
-    #[cfg(feature = "software-renderer-systemfonts")]
+    #[cfg(all(feature = "software-renderer-systemfonts", not(target_arch = "wasm32")))]
     fn register_font_from_memory(
         &self,
         data: &'static [u8],
@@ -521,7 +494,7 @@ impl RendererSealed for SoftwareRenderer {
         self::fonts::systemfonts::register_font_from_memory(data)
     }
 
-    #[cfg(feature = "software-renderer-systemfonts")]
+    #[cfg(all(feature = "software-renderer-systemfonts", not(target_arch = "wasm32")))]
     fn register_font_from_path(
         &self,
         path: &std::path::Path,
@@ -531,6 +504,11 @@ impl RendererSealed for SoftwareRenderer {
 
     fn default_font_size(&self) -> LogicalLength {
         self::fonts::DEFAULT_FONT_SIZE
+    }
+
+    fn set_window_adapter(&self, window_adapter: &Rc<dyn WindowAdapter>) {
+        *self.maybe_window_adapter.borrow_mut() = Some(Rc::downgrade(window_adapter));
+        self.partial_cache.borrow_mut().clear();
     }
 }
 
@@ -1791,7 +1769,7 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
 
                 self.draw_text_paragraph(&paragraph, physical_clip, offset, color, None);
             }
-            #[cfg(feature = "software-renderer-systemfonts")]
+            #[cfg(all(feature = "software-renderer-systemfonts", not(target_arch = "wasm32")))]
             fonts::Font::VectorFont(vf) => {
                 let layout = fonts::text_layout_for_font(&vf, &font_request, self.scale_factor);
 
@@ -1870,7 +1848,7 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
                     (paragraph.cursor_pos_for_byte_offset(cursor_offset), pf.height())
                 })
             }
-            #[cfg(feature = "software-renderer-systemfonts")]
+            #[cfg(all(feature = "software-renderer-systemfonts", not(target_arch = "wasm32")))]
             fonts::Font::VectorFont(vf) => {
                 let paragraph = TextParagraphLayout {
                     string: &text_visual_representation.text,
@@ -2012,6 +1990,10 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
         todo!()
     }
 
+    fn draw_image_direct(&mut self, _image: crate::graphics::Image) {
+        todo!()
+    }
+
     fn window(&self) -> &crate::window::WindowInner {
         self.window
     }
@@ -2037,7 +2019,7 @@ impl MinimalSoftwareWindow {
     pub fn new(repaint_buffer_type: RepaintBufferType) -> Rc<Self> {
         Rc::new_cyclic(|w: &Weak<Self>| Self {
             window: Window::new(w.clone()),
-            renderer: SoftwareRenderer::new_without_window(repaint_buffer_type),
+            renderer: SoftwareRenderer::new_with_repaint_buffer_type(repaint_buffer_type),
             needs_redraw: Default::default(),
             size: Default::default(),
         })
@@ -2051,7 +2033,6 @@ impl MinimalSoftwareWindow {
     /// Return true if something was redrawn.
     pub fn draw_if_needed(&self, render_callback: impl FnOnce(&SoftwareRenderer)) -> bool {
         if self.needs_redraw.replace(false) {
-            self.renderer.set_window(&self.window);
             render_callback(&self.renderer);
             true
         } else {

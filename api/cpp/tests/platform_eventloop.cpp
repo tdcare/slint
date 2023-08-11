@@ -4,7 +4,7 @@
 #define CATCH_CONFIG_MAIN
 #include "catch2/catch.hpp"
 
-#include <slint_platform.h>
+#include <slint-platform.h>
 #include <thread>
 #include <deque>
 #include <memory>
@@ -12,18 +12,16 @@
 #include <chrono>
 #include <optional>
 
-namespace slint_platform = slint::experimental::platform;
-
-struct TestPlatform : slint_platform::Platform
+struct TestPlatform : slint::platform::Platform
 {
     std::mutex the_mutex;
-    std::deque<slint_platform::PlatformEvent> queue;
+    std::deque<slint::platform::Platform::Task> queue;
     bool quit = false;
     std::condition_variable cv;
     std::chrono::time_point<std::chrono::steady_clock> start = std::chrono::steady_clock::now();
 
     /// Returns a new WindowAdapter
-    virtual std::unique_ptr<slint_platform::WindowAdapter> create_window_adapter() const override
+    virtual std::unique_ptr<slint::platform::WindowAdapter> create_window_adapter() override
     {
         assert(!"creating window in this test");
         return nullptr;
@@ -33,8 +31,8 @@ struct TestPlatform : slint_platform::Platform
     virtual void run_event_loop() override
     {
         while (true) {
-            slint_platform::update_timers_and_animations();
-            std::optional<slint_platform::PlatformEvent> event;
+            slint::platform::update_timers_and_animations();
+            std::optional<slint::platform::Platform::Task> event;
             {
                 std::unique_lock lock(the_mutex);
                 if (queue.empty()) {
@@ -42,7 +40,7 @@ struct TestPlatform : slint_platform::Platform
                         quit = false;
                         break;
                     }
-                    if (auto duration = slint_platform::duration_until_next_timer_update()) {
+                    if (auto duration = slint::platform::duration_until_next_timer_update()) {
                         cv.wait_for(lock, *duration);
                     } else {
                         cv.wait(lock);
@@ -54,16 +52,12 @@ struct TestPlatform : slint_platform::Platform
                 }
             }
             if (event) {
-                std::move(*event).invoke();
+                std::move(*event).run();
                 event.reset();
             }
         }
     }
 
-    /// Exits the event loop.
-    ///
-    /// This is what is called by slint::quit_event_loop() and can be called from a different thread
-    /// or re-enter from the event loop
     virtual void quit_event_loop() override
     {
         const std::unique_lock lock(the_mutex);
@@ -71,28 +65,23 @@ struct TestPlatform : slint_platform::Platform
         cv.notify_all();
     }
 
-    /// Invokes the event from the event loop.
-    ///
-    /// This function is called by slint::invoke_from_event_loop().
-    /// It can be called from any thread, but the passed function must only be called
-    /// from the event loop.
-    /// Reimplements this function and move the event to the event loop before calling
-    /// PlatformEvent::invoke()
-    virtual void invoke_from_event_loop(slint_platform::PlatformEvent event) override
+    virtual void run_in_event_loop(slint::platform::Platform::Task event) override
     {
         const std::unique_lock lock(the_mutex);
         queue.push_back(std::move(event));
         cv.notify_all();
     }
 
+#ifndef SLINT_FEATURE_STD
     virtual std::chrono::milliseconds duration_since_start() const override
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - start);
     }
+#endif
 };
 
-bool init_platform = (TestPlatform::register_platform(std::make_unique<TestPlatform>()), true);
+bool init_platform = (slint::platform::set_platform(std::make_unique<TestPlatform>()), true);
 
 TEST_CASE("C++ Singleshot Timers")
 {

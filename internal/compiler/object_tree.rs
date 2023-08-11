@@ -579,6 +579,8 @@ pub struct Element {
 
     /// This element is part of a `for <xxx> in <model>`:
     pub repeated: Option<RepeatedElementInfo>,
+    /// This element is a placeholder to embed an Component at
+    pub is_component_placeholder: bool,
 
     pub states: Vec<State>,
     pub transitions: Vec<Transition>,
@@ -646,6 +648,9 @@ pub fn pretty_print(
                 return Ok(());
             }
         }
+    }
+    if e.is_component_placeholder {
+        write!(f, "/* Component Placeholder */ ")?;
     }
     writeln!(f, "{} := {} {{", e.id, e.base_type)?;
     let mut indentation = indentation + 1;
@@ -1620,7 +1625,7 @@ impl Element {
     }
 
     pub fn sub_component(&self) -> Option<&Rc<Component>> {
-        if self.repeated.is_some() {
+        if self.repeated.is_some() || self.is_component_placeholder {
             None
         } else if let ElementType::Component(sub_component) = &self.base_type {
             Some(sub_component)

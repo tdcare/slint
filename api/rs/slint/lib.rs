@@ -171,23 +171,23 @@ The follow table summarizes the entire mapping:
 
 | `.slint` Type | Rust Type | Note |
 | --- | --- | --- |
-| `int` | `i32` | |
-| `float` | `f32` | |
-| `bool` | `bool` | |
-| `string` | [`SharedString`] | A reference-counted string type that can be easily converted to a str reference. |
-| `color` | [`Color`] | |
-| `brush` | [`Brush`] | |
-| `image` | [`Image`] | |
-| `physical_length` | `f32` | The unit are physical pixels. |
-| `length` | `f32` | At run-time, logical lengths are automatically translated to physical pixels using the device pixel ratio. |
-| `duration` | `i64` | At run-time, durations are always represented as signed 64-bit integers with millisecond precision. |
 | `angle` | `f32` | The value in degrees |
+| `array` | [`ModelRc`] | Arrays are represented as models, so that their contents can change dynamically. |
+| `bool` | `bool` | |
+| `brush` | [`Brush`] | |
+| `color` | [`Color`] | |
+| `duration` | `i64` | At run-time, durations are always represented as signed 64-bit integers with millisecond precision. |
+| `float` | `f32` | |
+| `image` | [`Image`] | |
+| `int` | `i32` | |
+| `length` | `f32` | At run-time, logical lengths are automatically translated to physical pixels using the device pixel ratio. |
+| `physical_length` | `f32` | The unit are physical pixels. |
+| `Point` | [`LogicalPosition`] | A struct with `x` and `y` fields, representing logical coordinates. |
 | `relative-font-size` | `f32` | Relative font size factor that is multiplied with the `Window.default-font-size` and can be converted to a `length`. |
-| structure | `struct` of the same name | |
+| `string` | [`SharedString`] | A reference-counted string type that can be easily converted to a str reference. |
 | anonymous object | anonymous tuple | The fields are in alphabetical order. |
 | enumeration | `enum` of the same name | The values are converted to CamelCase |
-| array | [`ModelRc`] | Arrays are represented as models, so that their contents can change dynamically. |
-| `Point` | [`LogicalPosition`] | A struct with `x` and `y` fields, representing logical coordinates. |
+| structure | `struct` of the same name | |
 
 For user defined structures in the .slint, an extra struct is generated.
 For example, if the `.slint` contains
@@ -259,15 +259,18 @@ See the [documentation of the `Global` trait](Global) for an example.
 
 extern crate alloc;
 
-#[cfg(not(feature = "compat-1-0"))]
+#[cfg(not(feature = "compat-1-2"))]
 compile_error!(
-    "The feature `compat-1-0` must be enabled to ensure \
+    "The feature `compat-1-2` must be enabled to ensure \
     forward compatibility with future version of this crate"
 );
 
 pub use slint_macros::slint;
 
 pub use i_slint_core::api::*;
+pub use i_slint_core::component_factory::ComponentFactory;
+#[cfg(not(target_arch = "wasm32"))]
+pub use i_slint_core::graphics::{BorrowedOpenGLTextureBuilder, BorrowedOpenGLTextureOrigin};
 pub use i_slint_core::graphics::{
     Brush, Color, Image, LoadImageError, Rgb8Pixel, Rgba8Pixel, RgbaColor, SharedPixelBuffer,
 };
@@ -351,7 +354,7 @@ pub mod platform {
 /// Helper type that helps checking that the generated code is generated for the right version
 #[doc(hidden)]
 #[allow(non_camel_case_types)]
-pub struct VersionCheck_1_1_1;
+pub struct VersionCheck_1_2_0;
 
 #[cfg(doctest)]
 mod compile_fail_tests;

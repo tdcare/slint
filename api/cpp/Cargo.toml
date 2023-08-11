@@ -3,7 +3,7 @@
 
 [package]
 name = "slint-cpp"
-version = "1.1.1"
+version = "1.2.0"
 authors = ["Slint Developers <info@slint.dev>"]
 edition = "2021"
 build = "build.rs"
@@ -30,33 +30,33 @@ backend-qt = ["i-slint-backend-selector/i-slint-backend-qt", "std"]
 backend-winit = ["i-slint-backend-selector/backend-winit", "std"]
 backend-winit-x11 = ["i-slint-backend-selector/backend-winit-x11", "std"]
 backend-winit-wayland = ["i-slint-backend-selector/backend-winit-wayland", "std"]
-renderer-winit-femtovg = ["i-slint-backend-selector/renderer-winit-femtovg"]
-renderer-winit-skia = ["i-slint-backend-selector/renderer-winit-skia"]
-renderer-winit-skia-opengl = ["i-slint-backend-selector/renderer-winit-skia-opengl"]
-renderer-winit-skia-vulkan = ["i-slint-backend-selector/renderer-winit-skia-vulkan"]
-renderer-winit-software = ["i-slint-backend-selector/renderer-winit-software"]
+backend-linuxkms = ["i-slint-backend-selector/backend-linuxkms", "std"]
+renderer-femtovg = ["i-slint-backend-selector/renderer-femtovg"]
+renderer-skia = ["i-slint-backend-selector/renderer-skia", "i-slint-renderer-skia", "raw-window-handle"]
+renderer-skia-opengl = ["i-slint-backend-selector/renderer-skia-opengl", "renderer-skia"]
+renderer-skia-vulkan = ["i-slint-backend-selector/renderer-skia-vulkan", "renderer-skia"]
+renderer-software = ["i-slint-backend-selector/renderer-software"]
 gettext = ["i-slint-core/gettext-rs"]
 accessibility = ["i-slint-backend-selector/accessibility"]
 
-experimental = []
-experimental-skia = ["i-slint-renderer-skia", "raw-window-handle", "experimental"]
-
 std = ["image", "i-slint-core/default", "i-slint-backend-selector"]
 
-default = ["std", "backend-winit", "renderer-winit-femtovg", "backend-qt", "experimental"]
+default = ["std", "backend-winit", "renderer-femtovg", "backend-qt"]
 
 [dependencies]
-i-slint-backend-selector = { version = "=1.1.1", path="../../internal/backends/selector", optional = true }
-i-slint-backend-testing = { version = "=1.1.1", path="../../internal/backends/testing", optional = true }
-i-slint-renderer-skia = { version = "=1.1.1", path="../../internal/renderers/skia", optional = true, features = ["x11", "wayland"] }
-i-slint-core = { version = "=1.1.1", path="../../internal/core", default-features = false, features = ["ffi"] }
-slint-interpreter = { version = "=1.1.1", path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-0"], optional = true }
+i-slint-backend-selector = { version = "=1.2.0", path="../../internal/backends/selector", optional = true }
+i-slint-backend-testing = { version = "=1.2.0", path="../../internal/backends/testing", optional = true }
+i-slint-renderer-skia = { version = "=1.2.0", path="../../internal/renderers/skia", optional = true, features = ["x11", "wayland"] }
+i-slint-core = { version = "=1.2.0", path="../../internal/core", default-features = false, features = ["ffi"] }
+slint-interpreter = { version = "=1.2.0", path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
 raw-window-handle = { version = "0.5", optional = true }
 # Enable image-rs' default features to make all image formats to C++ users
 image = { version = "0.24.0", optional = true }
+
+esp-backtrace = { version = "0.7.0", features = ["panic-handler", "print-uart"], optional = true }
 
 [build-dependencies]
 anyhow = "1.0"
 cbindgen = "0.24"
 proc-macro2 = "1.0.11"
-i-slint-common = { version = "=1.1.1", path="../../internal/common" }
+i-slint-common = { version = "=1.2.0", path="../../internal/common" }

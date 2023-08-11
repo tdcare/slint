@@ -1,13 +1,15 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
+use std::num::NonZeroU32;
+
 use glutin::{
     context::{ContextApi, ContextAttributesBuilder},
     display::GetGlDisplay,
     prelude::*,
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
-use i_slint_core::{api::PhysicalSize, platform::PlatformError};
+use i_slint_core::platform::PlatformError;
 use raw_window_handle::HasRawWindowHandle;
 
 pub struct OpenGLContext {
@@ -15,8 +17,8 @@ pub struct OpenGLContext {
     surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
 }
 
-unsafe impl i_slint_renderer_femtovg::OpenGLContextWrapper for OpenGLContext {
-    fn ensure_current(&self) -> Result<(), PlatformError> {
+unsafe impl i_slint_core::platform::OpenGLInterface for OpenGLContext {
+    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error>> {
         if !self.context.is_current() {
             self.context.make_current(&self.surface).map_err(|glutin_error| -> PlatformError {
                 format!("FemtoVG: Error making context current: {glutin_error}").into()
@@ -24,7 +26,7 @@ unsafe impl i_slint_renderer_femtovg::OpenGLContextWrapper for OpenGLContext {
         }
         Ok(())
     }
-    fn swap_buffers(&self) -> Result<(), PlatformError> {
+    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.surface.swap_buffers(&self.context).map_err(|glutin_error| -> PlatformError {
             format!("FemtoVG: Error swapping buffers: {glutin_error}").into()
         })?;
@@ -32,14 +34,11 @@ unsafe impl i_slint_renderer_femtovg::OpenGLContextWrapper for OpenGLContext {
         Ok(())
     }
 
-    fn resize(&self, _size: PhysicalSize) -> Result<(), PlatformError> {
-        let width = _size.width.try_into().map_err(|_| {
-            format!("Attempting to create window surface with an invalid width: {}", _size.width)
-        })?;
-        let height = _size.height.try_into().map_err(|_| {
-            format!("Attempting to create window surface with an invalid height: {}", _size.height)
-        })?;
-
+    fn resize(
+        &self,
+        width: NonZeroU32,
+        height: NonZeroU32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_current()?;
         self.surface.resize(&self.context, width, height);
 

@@ -850,6 +850,7 @@ mod tests {
     use crate::items::AccessibleRole;
     use crate::layout::{LayoutInfo, Orientation};
     use crate::slice::Slice;
+    use crate::window::WindowAdapterRc;
     use crate::SharedString;
 
     use vtable::VRc;
@@ -889,6 +890,14 @@ mod tests {
             }
         }
 
+        fn embed_component(
+            self: core::pin::Pin<&Self>,
+            _parent_component: &ComponentWeak,
+            _item_tree_index: usize,
+        ) -> bool {
+            false
+        }
+
         fn layout_info(self: core::pin::Pin<&Self>, _1: Orientation) -> LayoutInfo {
             unimplemented!("Not needed for this test")
         }
@@ -922,6 +931,14 @@ mod tests {
             _: AccessibleStringProperty,
             _: &mut SharedString,
         ) {
+        }
+
+        fn window_adapter(
+            self: Pin<&Self>,
+            _do_create: bool,
+            _result: &mut Option<WindowAdapterRc>,
+        ) {
+            unimplemented!("Not needed for this test")
         }
     }
 
