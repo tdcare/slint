@@ -9,10 +9,6 @@ use super::*;
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct NativeProgressIndicator {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub indeterminate: Property<bool>,
     pub progress: Property<f32>,
     widget_ptr: std::cell::Cell<SlintTypeErasedWidgetPtr>,
@@ -27,13 +23,6 @@ impl Item for NativeProgressIndicator {
             cpp! { unsafe [animation_tracker_property_ptr as "void*"] -> SlintTypeErasedWidgetPtr as "std::unique_ptr<SlintTypeErasedWidget>"  {
                 return make_unique_animated_widget<QProgressBar>(animation_tracker_property_ptr);
             }},
-        )
-    }
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
         )
     }
 
@@ -126,7 +115,7 @@ impl Item for NativeProgressIndicator {
         ] {
             QPainter *painter_ = painter->get();
             QStyleOptionProgressBar option;
-            option.initFrom(widget);
+            option.styleObject = widget;
             option.state |= QStyle::State(initial_state) | QStyle::State_Horizontal;
             option.rect = QRect(QPoint(), size / dpr);
             option.maximum = progress < 0 ? 0 : 100;

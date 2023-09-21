@@ -1,9 +1,9 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-// cSpell: ignore lumino permalink
+// cSpell: ignore cupertino lumino permalink
 
-import { EditorWidget } from "./editor_widget";
+import { EditorWidget, initialize as initializeEditor } from "./editor_widget";
 import { LspWaiter, Lsp } from "./lsp";
 import { LspRange, LspPosition } from "./lsp_integration";
 import { OutlineWidget } from "./outline_widget";
@@ -96,15 +96,18 @@ function create_style_menu(editor: EditorWidget): Menu {
         { label: "Material", name: "material" },
         { label: "Material Light", name: "material-light" },
         { label: "Material Dark", name: "material-dark" },
+        { label: "Cupertino", name: "cupertino" },
+        { label: "Cupertino Light", name: "cupertino-light" },
+        { label: "Cupertino Dark", name: "cupertino-dark" },
     ]) {
         const command_name = "slint:set_style_" + style.name;
         commands.addCommand(command_name, {
             label: style.label,
             isToggled: () => {
-                return editor.style === style.name;
+                return editor.style() === style.name;
             },
             execute: () => {
-                editor.style = style.name;
+                editor.set_style(style.name);
             },
         });
         menu.addItem({ command: command_name });
@@ -583,18 +586,25 @@ function setup(lsp: Lsp) {
 }
 
 function main() {
-    Promise.all([wait_for_service_worker(), lsp_waiter.wait_for_lsp()])
-        .then(([_sw, lsp]) => {
-            setup(lsp);
-            document.body.getElementsByClassName("loader")[0].remove();
+    initializeEditor()
+        .then((_) => {
+            Promise.all([wait_for_service_worker(), lsp_waiter.wait_for_lsp()])
+                .then(([_sw, lsp]) => {
+                    setup(lsp);
+                    document.body.getElementsByClassName("loader")[0].remove();
+                })
+                .catch((e) => {
+                    console.info("ServiceWorker or LSP fail:", e);
+                    const div = document.createElement("div");
+                    div.className = "browser-error";
+                    div.innerHTML =
+                        "<p>No ServiceWorker available in your browser. Try disabling private browsing mode.</p>";
+                    document.body.getElementsByClassName("loader")[0].remove();
+                    document.body.appendChild(div);
+                });
         })
-        .catch(() => {
-            const div = document.createElement("div");
-            div.className = "browser-error";
-            div.innerHTML =
-                "<p>No ServiceWorker available in your browser. Try disabling private browsing mode.</p>";
-            document.body.getElementsByClassName("loader")[0].remove();
-            document.body.appendChild(div);
+        .catch((e) => {
+            console.info("Monaco fail:", e);
         });
 }
 

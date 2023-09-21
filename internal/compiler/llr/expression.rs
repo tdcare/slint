@@ -151,8 +151,6 @@ pub enum Expression {
 
     EnumerationValue(crate::langtype::EnumerationValue),
 
-    ReturnStatement(Option<Box<Expression>>),
-
     LayoutCacheAccess {
         layout_cache_prop: PropertyReference,
         index: usize,
@@ -168,7 +166,7 @@ pub enum Expression {
         /// The name for the local variable that contains the repeater indices
         repeater_indices: Option<String>,
         /// Either an expression of type BoxLayoutCellData, or an index to the repeater
-        elements: Vec<Either<Expression, usize>>,
+        elements: Vec<Either<Expression, u32>>,
         orientation: Orientation,
         sub_expression: Box<Expression>,
     },
@@ -294,7 +292,6 @@ impl Expression {
             Self::LinearGradient { .. } => Type::Brush,
             Self::RadialGradient { .. } => Type::Brush,
             Self::EnumerationValue(e) => Type::Enumeration(e.enumeration.clone()),
-            Self::ReturnStatement(_) => Type::Invalid,
             Self::LayoutCacheAccess { .. } => Type::LogicalLength,
             Self::BoxLayoutFunction { sub_expression, .. } => sub_expression.ty(ctx),
             Self::ComputeDialogLayoutCells { .. } => {
@@ -365,11 +362,6 @@ macro_rules! visit_impl {
                 }
             }
             Expression::EnumerationValue(_) => {}
-            Expression::ReturnStatement(r) => {
-                if let Some(r) = r {
-                    $visitor(r);
-                }
-            }
             Expression::LayoutCacheAccess { repeater_index, .. } => {
                 if let Some(repeater_index) = repeater_index {
                     $visitor(repeater_index);
@@ -423,18 +415,18 @@ pub trait TypeResolutionContext {
 pub struct ParentCtx<'a, T = ()> {
     pub ctx: &'a EvaluationContext<'a, T>,
     // Index of the repeater within the ctx.current_sub_component
-    pub repeater_index: Option<usize>,
+    pub repeater_index: Option<u32>,
 }
 
 impl<'a, T> Clone for ParentCtx<'a, T> {
     fn clone(&self) -> Self {
-        Self { ctx: self.ctx, repeater_index: self.repeater_index }
+        *self
     }
 }
 impl<'a, T> Copy for ParentCtx<'a, T> {}
 
 impl<'a, T> ParentCtx<'a, T> {
-    pub fn new(ctx: &'a EvaluationContext<'a, T>, repeater_index: Option<usize>) -> Self {
+    pub fn new(ctx: &'a EvaluationContext<'a, T>, repeater_index: Option<u32>) -> Self {
         Self { ctx, repeater_index }
     }
 }
@@ -512,7 +504,7 @@ impl<'a, T> TypeResolutionContext for EvaluationContext<'a, T> {
                 for i in sub_component_path {
                     sub_component = &sub_component.sub_components[*i].ty;
                 }
-                sub_component.items[*item_index].ty.lookup_property(prop_name).unwrap()
+                sub_component.items[*item_index as usize].ty.lookup_property(prop_name).unwrap()
             }
             PropertyReference::InParent { level, parent_reference } => {
                 let mut ctx = self;

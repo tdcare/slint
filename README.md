@@ -1,4 +1,5 @@
-# ![Slint](./logo/slint-logo-full-light.svg#gh-light-mode-only)![Slint](./logo/slint-logo-full-white.svg#gh-dark-mode-only)
+<!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial -->
+# ![Slint](./logo/slint-logo-full-light.svg#gh-light-mode-only)![Slint](./logo/slint-logo-full-dark.svg#gh-dark-mode-only)
 
 <!-- cSpell: ignore ChipTrack Moiré Trolltech valign Woboq -->
 
@@ -218,7 +219,6 @@ located remotely in Germany.
 - Follow [@slint-ui](https://twitter.com/slint_ui) on Twitter.
 - Follow [@slint@fosstodon.org](https://mastodon.social/@slint@fosstodon.org) on Mastodon.
 - Follow [@slint-ui](https://www.linkedin.com/company/slint-ui/) on LinkedIn.
-- Keep an eye out for our [🥠 Weekly Status Updates](https://slint.dev/thisweek/).
 
 ### Contact us
 

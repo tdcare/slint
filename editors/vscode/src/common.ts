@@ -8,7 +8,7 @@ import * as vscode from "vscode";
 import { PropertiesViewProvider } from "./properties_webview";
 import * as wasm_preview from "./wasm_preview";
 import * as lsp_commands from "../../../tools/slintpad/src/shared/lsp_commands";
-import * as welcome from "./welcome/welcome_panel";
+import * as snippets from "./snippets";
 
 import {
     BaseLanguageClient,
@@ -111,6 +111,19 @@ export function languageClientOptions(
                 }
                 return next(command, args);
             },
+            async provideCodeActions(
+                document: vscode.TextDocument,
+                range: vscode.Range,
+                context: vscode.CodeActionContext,
+                token: vscode.CancellationToken,
+                next: any,
+            ) {
+                const actions = await next(document, range, context, token);
+                if (actions) {
+                    snippets.detectSnippetCodeActions(actions);
+                }
+                return actions;
+            },
         },
     };
 }
@@ -149,11 +162,6 @@ export function activate(
         }),
     );
     context.subscriptions.push(
-        vscode.commands.registerCommand("slint.showWelcome", function () {
-            welcome.WelcomePanel.createOrShow(context.extensionUri);
-        }),
-    );
-    context.subscriptions.push(
         vscode.commands.registerCommand("slint.toggleDesignMode", function () {
             lsp_commands.toggleDesignMode();
         }),
@@ -180,19 +188,6 @@ export function activate(
     );
     properties_provider.refresh_view();
 
-    vscode.workspace.onDidChangeConfiguration(async (ev) => {
-        if (ev.affectsConfiguration("slint")) {
-            properties_provider.client?.sendNotification(
-                "workspace/didChangeConfiguration",
-                {
-                    settings: "",
-                },
-            );
-            wasm_preview.refreshPreview();
-            welcome.WelcomePanel.updateShowConfig();
-        }
-    });
-
     vscode.workspace.onDidChangeTextDocument(async (ev) => {
         if (
             ev.document.languageId !== "slint" &&
@@ -208,8 +203,6 @@ export function activate(
             properties_provider.refresh_view();
         }, 1);
     });
-
-    setTimeout(() => welcome.WelcomePanel.maybeShow(context.extensionUri), 1);
 
     return [statusBar, properties_provider];
 }

@@ -74,6 +74,8 @@ component TableViewCell inherits Rectangle {
     HorizontalLayout {
         padding-left: 16px;
         padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 12px;
 
         @children
     }
@@ -135,6 +137,7 @@ export component StandardTableView {
     min-height: 200px;
     horizontal-stretch: 1;
     vertical-stretch: 1;
+    forward-focus: i-focus-scope;
 
     VerticalLayout {
         Rectangle {
@@ -200,6 +203,7 @@ export component StandardTableView {
                     }
 
                     clicked => {
+                        root.focus();
                         root.set-current-row(idx);
                     }
 
@@ -214,7 +218,10 @@ export component StandardTableView {
         }
     }
 
-    FocusScope {
+    i-focus-scope := FocusScope {
+        x: 0;
+        width: 0; // Do not react on clicks
+
         key-pressed(event) => {
             if (event.text == Key.UpArrow) {
                 root.set-current-row(root.current-row - 1);

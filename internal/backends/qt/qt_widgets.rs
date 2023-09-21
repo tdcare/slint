@@ -45,8 +45,9 @@ type ItemRendererRef<'a> = &'a mut dyn ItemRenderer;
 /// and return Default::default in case the size is too small
 macro_rules! get_size {
     ($self:ident) => {{
-        let width = $self.width().get();
-        let height = $self.height().get();
+        let geo = $self.geometry();
+        let width = geo.width();
+        let height = geo.height();
         if width < 1. || height < 1. {
             return Default::default();
         };
@@ -89,8 +90,9 @@ macro_rules! fn_render {
                 backend.draw_cached_pixmap(
                     item_rc,
                     &|callback| {
-                        let width = self.width().get() * $dpr;
-                        let height = self.height().get() * $dpr;
+                        let geo = item_rc.geometry();
+                        let width = geo.width() * $dpr;
+                        let height = geo.height() * $dpr;
                         if width < 1. || height < 1. {
                             return Default::default();
                         };
@@ -193,14 +195,16 @@ cpp! {{
         void *animation_update_property_ptr;
         bool event(QEvent *event) override {
             // QEvent::StyleAnimationUpdate is sent by QStyleAnimation used by Qt builtin styles
-            // The Breeze style use QMetaObject::invokeMethod("update") on the widget to update the widget, so catch QEvent::MetaCall
-            // (because the call to QWidget::update does nothing as the widget is not visible)
-            if (event->type() == QEvent::StyleAnimationUpdate || event->type() == QEvent::MetaCall) {
+            // And we hacked some attribute so that QWidget::update() will emit UpdateLater
+            if (event->type() == QEvent::StyleAnimationUpdate  || event->type() == QEvent::UpdateLater) {
                 rust!(Slint_AnimatedWidget_update [animation_update_property_ptr: Pin<&Property<i32>> as "void*"] {
                     animation_update_property_ptr.set(animation_update_property_ptr.get() + 1);
                 });
+                event->accept();
+                return true;
+            } else {
+                return Base::event(event);
             }
-            return Base::event(event);
         }
         // This seemingly useless cast is needed to adjust the this pointer correctly to point to Base.
         void *qwidget() override { return static_cast<QWidget*>(this); }
@@ -211,6 +215,13 @@ cpp! {{
     {
         ensure_initialized();
         auto ptr = std::make_unique<SlintAnimatedWidget<Base>>();
+        // For our hacks to work, we need to have some invisible parent widget.
+        static QWidget globalParent;
+        ptr->setParent(&globalParent);
+        // Let Qt thinks the widget is visible even if it isn't so update() from animation is forwared
+        ptr->setAttribute(Qt::WA_WState_Visible, true);
+        // Hack so update() send a UpdateLater event
+        ptr->setAttribute(Qt::WA_WState_InPaintEvent, true);
         ptr->animation_update_property_ptr = animation_update_property_ptr;
         return ptr;
     }

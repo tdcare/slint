@@ -9,10 +9,6 @@ use super::*;
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct NativeTableHeaderSection {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub item: Property<i_slint_core::model::TableColumn>,
     pub index: Property<i32>,
     pub cached_rendering_data: CachedRenderingData,
@@ -27,13 +23,6 @@ impl Item for NativeTableHeaderSection {
         self.widget_ptr.set(cpp! { unsafe [animation_tracker_property_ptr as "void*"] -> SlintTypeErasedWidgetPtr as "std::unique_ptr<SlintTypeErasedWidget>" {
             return make_unique_animated_widget<QWidget>(animation_tracker_property_ptr);
         }});
-    }
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
     }
 
     fn layout_info(
@@ -142,7 +131,7 @@ impl Item for NativeTableHeaderSection {
             #endif
 
             QStyleOptionHeader option;
-            option.initFrom(widget);
+            option.styleObject = widget;
             option.state |= QStyle::State(initial_state);
             option.state |= QStyle::State_Horizontal;
             option.rect = QRect(QPoint(), size / dpr);

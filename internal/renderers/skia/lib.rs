@@ -144,6 +144,9 @@ impl SkiaRenderer {
 
                 let mut box_shadow_cache = Default::default();
 
+                self.image_cache.clear_cache_if_scale_factor_changed(window);
+                self.path_cache.clear_cache_if_scale_factor_changed(window);
+
                 let mut item_renderer = itemrenderer::SkiaItemRenderer::new(
                     skia_canvas,
                     window,
@@ -221,6 +224,7 @@ impl i_slint_core::renderer::RendererSealed for SkiaRenderer {
             Default::default(),
             Default::default(),
             Default::default(),
+            Default::default(),
             None,
         );
 
@@ -254,6 +258,7 @@ impl i_slint_core::renderer::RendererSealed for SkiaRenderer {
             max_height,
             text_input.horizontal_alignment(),
             text_input.vertical_alignment(),
+            text_input.wrap(),
             i_slint_core::items::TextOverflow::Clip,
             None,
         );
@@ -301,6 +306,7 @@ impl i_slint_core::renderer::RendererSealed for SkiaRenderer {
             max_height,
             text_input.horizontal_alignment(),
             text_input.vertical_alignment(),
+            text_input.wrap(),
             i_slint_core::items::TextOverflow::Clip,
             None,
         );

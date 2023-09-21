@@ -131,7 +131,7 @@ export async function showPreview(
 
 async function getDocumentSource(url: Uri): Promise<string> {
     // FIXME: is there a faster way to get the document
-    let x = vscode.workspace.textDocuments.find((d) => d.uri === url);
+    let x = vscode.workspace.textDocuments.find((d) => d.uri.toString() === url.toString());
     let source;
     if (x) {
         source = x.getText();
@@ -193,7 +193,7 @@ function extract_rust_macro(source: string): string {
     return result;
 }
 
-function getPreviewHtml(slint_wasm_interpreter_url: Uri): string {
+function getPreviewHtml(slint_wasm_preview_url: Uri): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -202,7 +202,7 @@ function getPreviewHtml(slint_wasm_interpreter_url: Uri): string {
     <title>Slint Preview</title>
     <script type="module">
     "use strict";
-    import * as slint from '${slint_wasm_interpreter_url}';
+    import * as slint from '${slint_wasm_preview_url}';
     await slint.default();
 
     const vscode = acquireVsCodeApi();
@@ -252,14 +252,14 @@ function getPreviewHtml(slint_wasm_interpreter_url: Uri): string {
             }
             if (current_instance !== null) {
                 (await current_instance).set_design_mode(design_mode);
-                (await current_instance).on_element_selected(element_selected);    
+                (await current_instance).on_element_selected(element_selected);
             }
         }
     }
 
     window.addEventListener('message', async event => {
         if (event.data.command === "preview") {
-            design_mode = event.data.design_mode;
+            design_mode = !!event.data.design_mode;
             vscode.setState({base_url: event.data.base_url, component: event.data.component});
             await render(event.data.content, event.data.webview_uri, event.data.style);
         } else if (event.data.command === "file_loaded") {
@@ -276,7 +276,7 @@ function getPreviewHtml(slint_wasm_interpreter_url: Uri): string {
             design_mode = !design_mode;
             if (current_instance != null) {
                 (await current_instance).set_design_mode(design_mode);
-                (await current_instance).on_element_selected(element_selected);    
+                (await current_instance).on_element_selected(element_selected);
             }
         }
     });
@@ -286,7 +286,7 @@ function getPreviewHtml(slint_wasm_interpreter_url: Uri): string {
 </head>
 <body>
   <div id="slint_error_div"></div>
-  <canvas id="slint_canvas"></canvas>
+  <canvas style="margin-top: 10px;" id="slint_canvas"></canvas>
 </body>
 </html>`;
 }
@@ -301,12 +301,14 @@ export class PreviewSerializer implements vscode.WebviewPanelSerializer {
         state: any,
     ) {
         initPreviewPanel(this.context, webviewPanel);
-        previewUrl = Uri.parse(state.base_url, true);
+        if (state) {
+            previewUrl = Uri.parse(state.base_url, true);
 
-        if (previewUrl) {
-            let content_str = await getDocumentSource(previewUrl);
-            previewComponent = state.component ?? "";
-            reload_preview(previewUrl, content_str, previewComponent);
+            if (previewUrl) {
+                let content_str = await getDocumentSource(previewUrl);
+                previewComponent = state.component ?? "";
+                reload_preview(previewUrl, content_str, previewComponent);
+            }
         }
     }
 }
@@ -365,7 +367,7 @@ function initPreviewPanel(
                     );
                     const outside_uri = Uri.parse(
                         uriMapping.get(d.url) ??
-                        Uri.file(inside_uri.fsPath).toString(),
+                            Uri.file(inside_uri.fsPath).toString(),
                     );
                     if (outside_uri.scheme !== "invalid") {
                         vscode.window.showTextDocument(outside_uri, {
@@ -380,10 +382,13 @@ function initPreviewPanel(
         undefined,
         context.subscriptions,
     );
-    let slint_wasm_interpreter_url = panel.webview.asWebviewUri(
-        Uri.joinPath(context.extensionUri, "out/slint_wasm_interpreter.js"),
+    const lsp_wasm_url = Uri.joinPath(
+        context.extensionUri,
+        "out/slint_lsp_wasm.js",
     );
-    panel.webview.html = getPreviewHtml(slint_wasm_interpreter_url);
+    panel.webview.html = getPreviewHtml(
+        panel.webview.asWebviewUri(lsp_wasm_url),
+    );
     panel.onDidDispose(
         () => {
             previewPanel = null;

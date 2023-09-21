@@ -19,6 +19,7 @@ use std::sync::Mutex;
 #[derive(Default)]
 pub struct TestingBackend {
     clipboard: Mutex<Option<String>>,
+    queue: Option<Queue>,
 }
 
 impl i_slint_core::platform::Platform for TestingBackend {
@@ -27,8 +28,7 @@ impl i_slint_core::platform::Platform for TestingBackend {
     ) -> Result<Rc<dyn WindowAdapter>, i_slint_core::platform::PlatformError> {
         Ok(Rc::new_cyclic(|self_weak| TestingWindow {
             window: i_slint_core::api::Window::new(self_weak.clone() as _),
-            shown: false.into(),
-            size: Default::default(),
+            size: PhysicalSize::new(600, 800).into(),
             ime_requests: Default::default(),
         }))
     }
@@ -51,11 +51,32 @@ impl i_slint_core::platform::Platform for TestingBackend {
             None
         }
     }
+
+    fn run_event_loop(&self) -> Result<(), PlatformError> {
+        let queue = match self.queue.as_ref() {
+            Some(queue) => queue.clone(),
+            None => return Err(PlatformError::NoEventLoopProvider),
+        };
+
+        loop {
+            let e = queue.0.lock().unwrap().pop_front();
+            match e {
+                Some(Event::Quit) => break Ok(()),
+                Some(Event::Event(e)) => e(),
+                None => std::thread::park(),
+            }
+        }
+    }
+
+    fn new_event_loop_proxy(&self) -> Option<Box<dyn i_slint_core::platform::EventLoopProxy>> {
+        self.queue
+            .as_ref()
+            .map(|q| Box::new(q.clone()) as Box<dyn i_slint_core::platform::EventLoopProxy>)
+    }
 }
 
 pub struct TestingWindow {
     window: i_slint_core::api::Window,
-    shown: core::cell::Cell<bool>,
     size: core::cell::Cell<PhysicalSize>,
     pub ime_requests: RefCell<Vec<InputMethodRequest>>,
 }
@@ -63,10 +84,6 @@ pub struct TestingWindow {
 impl WindowAdapterInternal for TestingWindow {
     fn as_any(&self) -> &dyn std::any::Any {
         self
-    }
-
-    fn is_visible(&self) -> bool {
-        self.shown.get()
     }
 
     fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
@@ -79,16 +96,14 @@ impl WindowAdapter for TestingWindow {
         &self.window
     }
 
-    fn set_visible(&self, visible: bool) -> Result<(), PlatformError> {
-        self.shown.set(visible);
-        Ok(())
-    }
-
     fn size(&self) -> PhysicalSize {
         self.size.get()
     }
 
     fn set_size(&self, size: i_slint_core::api::WindowSize) {
+        self.window.dispatch_event(i_slint_core::platform::WindowEvent::Resized {
+            size: size.to_logical(1.),
+        });
         self.size.set(size.to_physical(1.))
     }
 
@@ -159,12 +174,48 @@ impl RendererSealed for TestingWindow {
     }
 }
 
+enum Event {
+    Quit,
+    Event(Box<dyn FnOnce() + Send>),
+}
+#[derive(Clone)]
+struct Queue(
+    std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<Event>>>,
+    std::thread::Thread,
+);
+
+impl i_slint_core::platform::EventLoopProxy for Queue {
+    fn quit_event_loop(&self) -> Result<(), i_slint_core::api::EventLoopError> {
+        self.0.lock().unwrap().push_back(Event::Quit);
+        self.1.unpark();
+        Ok(())
+    }
+
+    fn invoke_from_event_loop(
+        &self,
+        event: Box<dyn FnOnce() + Send>,
+    ) -> Result<(), i_slint_core::api::EventLoopError> {
+        self.0.lock().unwrap().push_back(Event::Event(event));
+        self.1.unpark();
+        Ok(())
+    }
+}
+
 /// Initialize the testing backend.
 /// Must be called before any call that would otherwise initialize the rendering backend.
 /// Calling it when the rendering backend is already initialized will have no effects
 pub fn init() {
     i_slint_core::platform::set_platform(Box::<TestingBackend>::default())
         .expect("platform already initialized");
+}
+
+/// Initialize the testing backend with support for simple event loop.
+/// This function can only be called once per process, so make sure to use integration
+/// tests with one `#[test]` function.
+pub fn init_with_event_loop() {
+    let mut backend = TestingBackend::default();
+    backend.queue = Some(Queue(Default::default(), std::thread::current()));
+    i_slint_core::platform::set_platform(Box::new(backend)).expect("platform already initialized");
 }
 
 /// This module contains functions useful for unit tests

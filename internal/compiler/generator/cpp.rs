@@ -42,7 +42,7 @@ fn access_item_rc(pr: &llr::PropertyReference, ctx: &EvaluationContext) -> Strin
                 component_access += &sub_compo_path;
             }
             let component_rc = format!("{component_access}self_weak.lock()->into_dyn()");
-            let item_index_in_tree = sub_component.items[*item_index].index_in_tree;
+            let item_index_in_tree = sub_component.items[*item_index as usize].index_in_tree;
             let item_index = if item_index_in_tree == 0 {
                 format!("{component_access}tree_index")
             } else {
@@ -317,11 +317,25 @@ use crate::object_tree::Document;
 use crate::parser::syntax_nodes;
 use cpp_ast::*;
 use itertools::{Either, Itertools};
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 
-type EvaluationContext<'a> = llr_EvaluationContext<'a, String>;
-type ParentCtx<'a> = llr_ParentCtx<'a, String>;
+#[derive(Default)]
+struct ConditionalIncludes {
+    iostream: Cell<bool>,
+    cstdlib: Cell<bool>,
+    cmath: Cell<bool>,
+}
+
+#[derive(Clone)]
+struct CppGeneratorContext<'a> {
+    root_access: String,
+    conditional_includes: &'a ConditionalIncludes,
+}
+
+type EvaluationContext<'a> = llr_EvaluationContext<'a, CppGeneratorContext<'a>>;
+type ParentCtx<'a> = llr_ParentCtx<'a, CppGeneratorContext<'a>>;
 
 impl CppType for Type {
     fn cpp_type(&self) -> Option<String> {
@@ -429,7 +443,7 @@ fn handle_property_init(
 ) {
     let prop_access = access_member(prop, ctx);
     let prop_type = ctx.property_ty(prop);
-    if let Type::Callback { args, .. } = &prop_type {
+    if let Type::Callback { args, return_type, .. } = &prop_type {
         let mut ctx2 = ctx.clone();
         ctx2.argument_types = args;
 
@@ -441,15 +455,18 @@ fn handle_property_init(
             "{prop_access}.set_handler(
                     [this]({params}) {{
                         [[maybe_unused]] auto self = this;
-                        return {code};
+                        {code};
                     }});",
             prop_access = prop_access,
             params = params.join(", "),
-            code = compile_expression_wrap_return(&binding_expression.expression.borrow(), &ctx2)
+            code = return_compile_expression(
+                &binding_expression.expression.borrow(),
+                &ctx2,
+                return_type.as_ref().map(|x| &**x)
+            )
         ));
     } else {
-        let init_expr =
-            compile_expression_wrap_return(&binding_expression.expression.borrow(), ctx);
+        let init_expr = compile_expression(&binding_expression.expression.borrow(), ctx);
 
         init.push(if binding_expression.is_constant && !binding_expression.is_state_info {
             format!("{}.set({});", prop_access, init_expr)
@@ -500,8 +517,6 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
 
     file.includes.push("<array>".into());
     file.includes.push("<limits>".into());
-    file.includes.push("<cstdlib>".into()); // TODO: ideally only include this if needed (by to_float)
-    file.includes.push("<cmath>".into()); // TODO: ideally only include this if needed (by floor/ceil/round)
     file.includes.push("<slint.h>".into());
 
     for (path, er) in doc.root_component.embedded_file_resources.borrow().iter() {
@@ -557,7 +572,7 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
                 let data = data.iter().map(ToString::to_string).join(", ");
                 let data_name = format!("slint_embedded_resource_{}_data", er.id);
                 file.declarations.push(Declaration::Var(Var {
-                    ty: "inline uint8_t".into(),
+                    ty: "inline const uint8_t".into(),
                     name: data_name.clone(),
                     array_size: Some(count),
                     init: Some(format!("{{ {data} }}")),
@@ -735,6 +750,8 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
         ..Default::default()
     }));
 
+    let conditional_includes = ConditionalIncludes::default();
+
     for sub_compo in &llr.sub_components {
         let sub_compo_id = ident(&sub_compo.name);
         let mut sub_compo_struct = Struct { name: sub_compo_id.clone(), ..Default::default() };
@@ -745,19 +762,20 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
             None,
             Access::Public,
             &mut file,
+            &conditional_includes,
         );
         file.definitions.extend(sub_compo_struct.extract_definitions().collect::<Vec<_>>());
         file.declarations.push(Declaration::Struct(sub_compo_struct));
     }
 
     for glob in llr.globals.iter().filter(|glob| !glob.is_builtin) {
-        generate_global(&mut file, glob, &llr);
+        generate_global(&mut file, &conditional_includes, glob, &llr);
         file.definitions.extend(glob.aliases.iter().map(|name| {
             Declaration::TypeAlias(TypeAlias { old_name: ident(&glob.name), new_name: ident(name) })
         }))
     }
 
-    generate_public_component(&mut file, &llr);
+    generate_public_component(&mut file, &conditional_includes, &llr);
 
     file.after_includes = format!(
         "static_assert({x} == SLINT_VERSION_MAJOR && {y} == SLINT_VERSION_MINOR && {z} == SLINT_VERSION_PATCH, \
@@ -767,6 +785,18 @@ pub fn generate(doc: &Document) -> impl std::fmt::Display {
         y = env!("CARGO_PKG_VERSION_MINOR"),
         z = env!("CARGO_PKG_VERSION_PATCH")
     );
+
+    if conditional_includes.iostream.get() {
+        file.includes.push("<iostream>".into());
+    }
+
+    if conditional_includes.cstdlib.get() {
+        file.includes.push("<cstdlib>".into());
+    }
+
+    if conditional_includes.cmath.get() {
+        file.includes.push("<cmath>".into());
+    }
 
     file
 }
@@ -824,7 +854,11 @@ fn generate_enum(file: &mut File, en: &std::rc::Rc<Enumeration>) {
 /// Generate the component in `file`.
 ///
 /// `sub_components`, if Some, will be filled with all the sub component which needs to be added as friends
-fn generate_public_component(file: &mut File, component: &llr::PublicComponent) {
+fn generate_public_component(
+    file: &mut File,
+    conditional_includes: &ConditionalIncludes,
+    component: &llr::PublicComponent,
+) {
     let root_component = &component.item_tree.root;
     let component_id = ident(&root_component.name);
     let mut component_struct = Struct { name: component_id.clone(), ..Default::default() };
@@ -844,7 +878,10 @@ fn generate_public_component(file: &mut File, component: &llr::PublicComponent) 
         public_component: component,
         current_sub_component: Some(&component.item_tree.root),
         current_global: None,
-        generator_state: "this".to_string(),
+        generator_state: CppGeneratorContext {
+            root_access: "this".to_string(),
+            conditional_includes,
+        },
         parent: None,
         argument_types: &[],
     };
@@ -859,6 +896,7 @@ fn generate_public_component(file: &mut File, component: &llr::PublicComponent) 
         component_id,
         Access::Private, // Hide properties and other fields from the C++ API
         file,
+        conditional_includes,
     );
 
     // Give generated sub-components, etc. access to our fields
@@ -1005,15 +1043,22 @@ fn generate_item_tree(
     item_tree_class_name: String,
     field_access: Access,
     file: &mut File,
+    conditional_includes: &ConditionalIncludes,
 ) {
     target_struct.friends.push(format!(
         "vtable::VRc<slint::private_api::ComponentVTable, {}>",
         item_tree_class_name
     ));
 
-    generate_sub_component(target_struct, &sub_tree.root, root, parent_ctx, field_access, file);
-
-    let root_access = if parent_ctx.is_some() { "parent->root" } else { "self" };
+    generate_sub_component(
+        target_struct,
+        &sub_tree.root,
+        root,
+        parent_ctx,
+        field_access,
+        file,
+        conditional_includes,
+    );
 
     let mut item_tree_array: Vec<String> = Default::default();
     let mut item_array: Vec<String> = Default::default();
@@ -1048,12 +1093,7 @@ fn generate_item_tree(
                 sub_component = &sub_component.sub_components[*i].ty;
             }
 
-            let item = &sub_component.items[node.item_index];
-
-            if item.is_flickable_viewport {
-                compo_offset += "offsetof(slint::cbindgen_private::Flickable, viewport) + ";
-            }
-
+            let item = &sub_component.items[node.item_index as usize];
             let children_count = node.children.len() as u32;
             let children_index = children_offset as u32;
             let item_array_index = item_array.len() as u32;
@@ -1073,7 +1113,7 @@ fn generate_item_tree(
     });
 
     let mut visit_children_statements = vec![
-        "static const auto dyn_visit = [] (const uint8_t *base,  [[maybe_unused]] slint::private_api::TraversalOrder order, [[maybe_unused]] slint::private_api::ItemVisitorRefMut visitor, [[maybe_unused]] uintptr_t dyn_index) -> uint64_t {".to_owned(),
+        "static const auto dyn_visit = [] (const uint8_t *base,  [[maybe_unused]] slint::private_api::TraversalOrder order, [[maybe_unused]] slint::private_api::ItemVisitorRefMut visitor, [[maybe_unused]] uint32_t dyn_index) -> uint64_t {".to_owned(),
         format!("    [[maybe_unused]] auto self = reinterpret_cast<const {}*>(base);", item_tree_class_name)];
     let mut subtree_range_statement = vec!["    std::abort();".into()];
     let mut subtree_component_statement = vec!["    std::abort();".into()];
@@ -1116,7 +1156,7 @@ fn generate_item_tree(
         Access::Private,
         Declaration::Function(Function {
             name: "get_item_ref".into(),
-            signature: "(slint::private_api::ComponentRef component, uintptr_t index) -> slint::private_api::ItemRef".into(),
+            signature: "(slint::private_api::ComponentRef component, uint32_t index) -> slint::private_api::ItemRef".into(),
             is_static: true,
             statements: Some(vec![
                 "return slint::private_api::get_item_ref(component, get_item_tree(component), item_array(), index);".to_owned(),
@@ -1129,7 +1169,7 @@ fn generate_item_tree(
         Access::Private,
         Declaration::Function(Function {
             name: "get_subtree_range".into(),
-            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] uintptr_t dyn_index) -> slint::private_api::IndexRange".into(),
+            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] uint32_t dyn_index) -> slint::private_api::IndexRange".into(),
             is_static: true,
             statements: Some(subtree_range_statement),
             ..Default::default()
@@ -1140,7 +1180,7 @@ fn generate_item_tree(
         Access::Private,
         Declaration::Function(Function {
             name: "get_subtree_component".into(),
-            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] uintptr_t dyn_index, [[maybe_unused]] uintptr_t subtree_index, [[maybe_unused]] slint::private_api::ComponentWeak *result) -> void".into(),
+            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] uint32_t dyn_index, [[maybe_unused]] uintptr_t subtree_index, [[maybe_unused]] slint::private_api::ComponentWeak *result) -> void".into(),
             is_static: true,
             statements: Some(subtree_component_statement),
             ..Default::default()
@@ -1164,7 +1204,7 @@ fn generate_item_tree(
         .and_then(|parent| {
             parent
                 .repeater_index
-                .map(|idx| parent.ctx.current_sub_component.unwrap().repeated[idx].index_in_tree)
+                .map(|idx| parent.ctx.current_sub_component.unwrap().repeated[idx as usize].index_in_tree)
         }).map(|parent_index|
             vec![
                 format!(
@@ -1192,7 +1232,7 @@ fn generate_item_tree(
         Access::Private,
         Declaration::Function(Function {
             name: "embed_component".into(),
-            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] const slint::private_api::ComponentWeak *parent_component, [[maybe_unused]] const uintptr_t parent_index) -> bool".into(),
+            signature: "([[maybe_unused]] slint::private_api::ComponentRef component, [[maybe_unused]] const slint::private_api::ComponentWeak *parent_component, [[maybe_unused]] const uint32_t parent_index) -> bool".into(),
             is_static: true,
             statements: Some(vec!["return false; /* todo! */".into()]),
             ..Default::default()
@@ -1263,9 +1303,25 @@ fn generate_item_tree(
     target_struct.members.push((
         Access::Private,
         Declaration::Function(Function {
+            name: "item_geometry".into(),
+            signature:
+                "([[maybe_unused]] slint::private_api::ComponentRef component, uint32_t index) -> slint::cbindgen_private::LogicalRect"
+                    .into(),
+            is_static: true,
+            statements: Some(vec![format!(
+                "return reinterpret_cast<const {}*>(component.instance)->item_geometry(index);",
+                item_tree_class_name
+            ), ]),
+            ..Default::default()
+        }),
+    ));
+
+    target_struct.members.push((
+        Access::Private,
+        Declaration::Function(Function {
             name: "accessible_role".into(),
             signature:
-                "([[maybe_unused]] slint::private_api::ComponentRef component, uintptr_t index) -> slint::cbindgen_private::AccessibleRole"
+                "([[maybe_unused]] slint::private_api::ComponentRef component, uint32_t index) -> slint::cbindgen_private::AccessibleRole"
                     .into(),
             is_static: true,
             statements: Some(vec![format!(
@@ -1281,7 +1337,7 @@ fn generate_item_tree(
         Declaration::Function(Function {
             name: "accessible_string_property".into(),
             signature:
-                "([[maybe_unused]] slint::private_api::ComponentRef component, uintptr_t index, slint::cbindgen_private::AccessibleStringProperty what, slint::SharedString *result) -> void"
+                "([[maybe_unused]] slint::private_api::ComponentRef component, uint32_t index, slint::cbindgen_private::AccessibleStringProperty what, slint::SharedString *result) -> void"
                     .into(),
             is_static: true,
             statements: Some(vec![format!(
@@ -1322,7 +1378,7 @@ fn generate_item_tree(
         init: Some(format!(
             "{{ visit_children, get_item_ref, get_subtree_range, get_subtree_component, \
                 get_item_tree, parent_node, embed_component, subtree_index, layout_info, \
-                accessible_role, accessible_string_property, window_adapter, \
+                item_geometry, accessible_role, accessible_string_property, window_adapter, \
                 slint::private_api::drop_in_place<{}>, slint::private_api::dealloc }}",
             item_tree_class_name
         )),
@@ -1353,6 +1409,7 @@ fn generate_item_tree(
         create_code.push("slint::cbindgen_private::slint_ensure_backend();".into());
     }
 
+    let root_access = if parent_ctx.is_some() { "parent->root" } else { "self" };
     create_code.extend([
         format!(
             "slint::private_api::register_component(&self_rc.into_dyn(), {root_access}->m_window);",
@@ -1384,12 +1441,10 @@ fn generate_item_tree(
         }),
     ));
 
-    let mut destructor = vec!["auto self = this;".to_owned()];
-
-    destructor.push(format!(
-        "if (auto &window = {}->m_window) window->window_handle().unregister_component(self, item_array());",
-        root_access
-    ));
+    let root_access = if parent_ctx.is_some() { "root" } else { "this" };
+    let destructor = vec![format!(
+        "if (auto &window = {root_access}->m_window) window->window_handle().unregister_component(this, item_array());"
+    )];
 
     target_struct.members.push((
         Access::Public,
@@ -1410,14 +1465,15 @@ fn generate_sub_component(
     parent_ctx: Option<ParentCtx>,
     field_access: Access,
     file: &mut File,
+    conditional_includes: &ConditionalIncludes,
 ) {
     let root_ptr_type = format!("const {} *", ident(&root.item_tree.root.name));
 
     let mut init_parameters = vec![
         format!("{} root", root_ptr_type),
         "slint::cbindgen_private::ComponentWeak enclosing_component".into(),
-        "uintptr_t tree_index".into(),
-        "uintptr_t tree_index_of_first_child".into(),
+        "uint32_t tree_index".into(),
+        "uint32_t tree_index_of_first_child".into(),
     ];
 
     let mut init: Vec<String> =
@@ -1441,7 +1497,7 @@ fn generate_sub_component(
     target_struct.members.push((
         field_access,
         Declaration::Var(Var {
-            ty: "uintptr_t".to_owned(),
+            ty: "uint32_t".to_owned(),
             name: "tree_index_of_first_child".to_owned(),
             ..Default::default()
         }),
@@ -1451,7 +1507,7 @@ fn generate_sub_component(
     target_struct.members.push((
         field_access,
         Declaration::Var(Var {
-            ty: "uintptr_t".to_owned(),
+            ty: "uint32_t".to_owned(),
             name: "tree_index".to_owned(),
             ..Default::default()
         }),
@@ -1474,8 +1530,12 @@ fn generate_sub_component(
         init.push("self->parent = parent;".into());
     }
 
-    let ctx =
-        EvaluationContext::new_sub_component(root, component, "self->root".into(), parent_ctx);
+    let ctx = EvaluationContext::new_sub_component(
+        root,
+        component,
+        CppGeneratorContext { root_access: "self->root".into(), conditional_includes },
+        parent_ctx,
+    );
 
     component.popup_windows.iter().for_each(|c| {
         let component_id = ident(&c.root.name);
@@ -1488,6 +1548,7 @@ fn generate_sub_component(
             component_id,
             Access::Public,
             file,
+            conditional_includes,
         );
         file.definitions.extend(popup_struct.extract_definitions().collect::<Vec<_>>());
         file.declarations.push(Declaration::Struct(popup_struct));
@@ -1604,9 +1665,6 @@ fn generate_sub_component(
     }
 
     for item in &component.items {
-        if item.is_flickable_viewport {
-            continue;
-        }
         target_struct.members.push((
             field_access,
             Declaration::Var(Var {
@@ -1619,6 +1677,7 @@ fn generate_sub_component(
     }
 
     for (idx, repeated) in component.repeated.iter().enumerate() {
+        let idx = idx as u32;
         let data_type = if let Some(data_prop) = repeated.data_prop {
             repeated.sub_tree.root.properties[data_prop].ty.clone()
         } else {
@@ -1631,6 +1690,7 @@ fn generate_sub_component(
             ParentCtx::new(&ctx, Some(idx)),
             &data_type,
             file,
+            conditional_includes,
         );
 
         let repeater_id = format!("repeater_{}", idx);
@@ -1757,10 +1817,10 @@ fn generate_sub_component(
         }),
     ));
 
-    let mut accessible_function = |name: &str,
-                                   signature: &str,
-                                   forward_args: &str,
-                                   code: Vec<String>| {
+    let mut dispatch_item_function = |name: &str,
+                                      signature: &str,
+                                      forward_args: &str,
+                                      code: Vec<String>| {
         let mut code = ["[[maybe_unused]] auto self = this;".into()]
             .into_iter()
             .chain(code.into_iter())
@@ -1776,6 +1836,7 @@ fn generate_sub_component(
                     "}} else if (index >= {} && index < {}) {{",
                     sub.index_of_first_child_in_tree,
                     sub.index_of_first_child_in_tree + sub_items_count - 1
+                        + sub.ty.repeater_count()
                 ));
                 code.push(format!(
                     "    return self->{}.{name}(index - {}{forward_args});",
@@ -1797,6 +1858,29 @@ fn generate_sub_component(
         ));
     };
 
+    let mut item_geometry_cases = vec!["switch (index) {".to_string()];
+    item_geometry_cases.extend(
+        component
+            .geometries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| x.as_ref().map(|x| (i, x)))
+            .map(|(index, expr)| {
+                format!(
+                    "    case {index}: return slint::private_api::convert_anonymous_rect({});",
+                    compile_expression(&expr.borrow(), &ctx)
+                )
+            }),
+    );
+    item_geometry_cases.push("}".into());
+
+    dispatch_item_function(
+        "item_geometry",
+        "(uint32_t index) const -> slint::cbindgen_private::Rect",
+        "",
+        item_geometry_cases,
+    );
+
     let mut accessible_role_cases = vec!["switch (index) {".into()];
     let mut accessible_string_cases = vec!["switch ((index << 8) | uintptr_t(what)) {".into()];
     for ((index, what), expr) in &component.accessible_prop {
@@ -1810,15 +1894,15 @@ fn generate_sub_component(
     accessible_role_cases.push("}".into());
     accessible_string_cases.push("}".into());
 
-    accessible_function(
+    dispatch_item_function(
         "accessible_role",
-        "(uintptr_t index) const -> slint::cbindgen_private::AccessibleRole",
+        "(uint32_t index) const -> slint::cbindgen_private::AccessibleRole",
         "",
         accessible_role_cases,
     );
-    accessible_function(
+    dispatch_item_function(
         "accessible_string_property",
-        "(uintptr_t index, slint::cbindgen_private::AccessibleStringProperty what) const -> slint::SharedString",
+        "(uint32_t index, slint::cbindgen_private::AccessibleStringProperty what) const -> slint::SharedString",
         ", what",
         accessible_string_cases,
     );
@@ -1828,7 +1912,7 @@ fn generate_sub_component(
             field_access,
             Declaration::Function(Function {
                 name: "visit_dynamic_children".into(),
-                signature: "(uintptr_t dyn_index, [[maybe_unused]] slint::private_api::TraversalOrder order, [[maybe_unused]] slint::private_api::ItemVisitorRefMut visitor) const -> uint64_t".into(),
+                signature: "(uint32_t dyn_index, [[maybe_unused]] slint::private_api::TraversalOrder order, [[maybe_unused]] slint::private_api::ItemVisitorRefMut visitor) const -> uint64_t".into(),
                 statements: Some(vec![
                     "    auto self = this;".to_owned(),
                     format!("    switch(dyn_index) {{ {} }};", children_visitor_cases.join("")),
@@ -1872,6 +1956,7 @@ fn generate_repeated_component(
     parent_ctx: ParentCtx,
     model_data_type: &Type,
     file: &mut File,
+    conditional_includes: &ConditionalIncludes,
 ) {
     let repeater_id = ident(&repeated.sub_tree.root.name);
     let mut repeater_struct = Struct { name: repeater_id.clone(), ..Default::default() };
@@ -1883,13 +1968,14 @@ fn generate_repeated_component(
         repeater_id.clone(),
         Access::Public,
         file,
+        conditional_includes,
     );
 
     let ctx = EvaluationContext {
         public_component: root,
         current_sub_component: Some(&repeated.sub_tree.root),
         current_global: None,
-        generator_state: "self".into(),
+        generator_state: CppGeneratorContext { root_access: "self".into(), conditional_includes },
         parent: Some(parent_ctx),
         argument_types: &[],
     };
@@ -1991,7 +2077,12 @@ fn generate_repeated_component(
     file.declarations.push(Declaration::Struct(repeater_struct));
 }
 
-fn generate_global(file: &mut File, global: &llr::GlobalComponent, root: &llr::PublicComponent) {
+fn generate_global(
+    file: &mut File,
+    conditional_includes: &ConditionalIncludes,
+    global: &llr::GlobalComponent,
+    root: &llr::PublicComponent,
+) {
     let mut global_struct = Struct { name: ident(&global.name), ..Default::default() };
 
     for property in global.properties.iter().filter(|p| p.use_count.get() > 0) {
@@ -2016,8 +2107,11 @@ fn generate_global(file: &mut File, global: &llr::GlobalComponent, root: &llr::P
     }
 
     let mut init = vec!["(void)this->root;".into()];
-
-    let ctx = EvaluationContext::new_global(root, global, "this->root".into());
+    let ctx = EvaluationContext::new_global(
+        root,
+        global,
+        CppGeneratorContext { root_access: "this->root".into(), conditional_includes },
+    );
 
     for (property_index, expression) in global.init_values.iter().enumerate() {
         if global.properties[property_index].use_count.get() == 0 {
@@ -2067,14 +2161,14 @@ fn generate_global(file: &mut File, global: &llr::GlobalComponent, root: &llr::P
 
 fn generate_functions<'a>(
     functions: &'a [llr::Function],
-    ctx: &'a EvaluationContext,
+    ctx: &'a EvaluationContext<'_>,
 ) -> impl Iterator<Item = Declaration> + 'a {
     functions.iter().map(|f| {
         let mut ctx2 = ctx.clone();
         ctx2.argument_types = &f.args;
         let body = vec![
             "[[maybe_unused]] auto self = this;".into(),
-            format!("return {};", compile_expression_wrap_return(&f.code, &ctx2)),
+            format!("return {};", compile_expression(&f.code, &ctx2)),
         ];
         Declaration::Function(Function {
             name: ident(&format!("fn_{}", f.name)),
@@ -2275,7 +2369,7 @@ fn follow_sub_component_path<'a>(
 }
 
 fn access_window_field(ctx: &EvaluationContext) -> String {
-    let root = &ctx.generator_state;
+    let root = &ctx.generator_state.root_access;
     format!("{}->window().window_handle()", root)
 }
 
@@ -2296,23 +2390,20 @@ fn access_member(reference: &llr::PropertyReference, ctx: &EvaluationContext) ->
     fn in_native_item(
         ctx: &EvaluationContext,
         sub_component_path: &[usize],
-        item_index: usize,
+        item_index: u32,
         prop_name: &str,
         path: &str,
     ) -> String {
         let (compo_path, sub_component) =
             follow_sub_component_path(ctx.current_sub_component.unwrap(), sub_component_path);
-        let item_name = ident(&sub_component.items[item_index].name);
+        let item_name = ident(&sub_component.items[item_index as usize].name);
         if prop_name.is_empty() {
             // then this is actually a reference to the element itself
             format!("{}->{}{}", path, compo_path, item_name)
         } else {
             let property_name = ident(prop_name);
-            let flick = sub_component.items[item_index]
-                .is_flickable_viewport
-                .then_some("viewport.")
-                .unwrap_or_default();
-            format!("{}->{}{}.{}{}", path, compo_path, item_name, flick, property_name)
+
+            format!("{path}->{compo_path}{item_name}.{property_name}")
         }
     }
 
@@ -2380,7 +2471,7 @@ fn access_member(reference: &llr::PropertyReference, ctx: &EvaluationContext) ->
             }
         }
         llr::PropertyReference::Global { global_index, property_index } => {
-            let root_access = &ctx.generator_state;
+            let root_access = &ctx.generator_state.root_access;
             let global = &ctx.public_component.globals[*global_index];
             let global_id = format!("global_{}", ident(&global.name));
             let property_name = ident(
@@ -2389,7 +2480,7 @@ fn access_member(reference: &llr::PropertyReference, ctx: &EvaluationContext) ->
             format!("{}->{}->{}", root_access, global_id, property_name)
         }
         llr::PropertyReference::GlobalFunction { global_index, function_index } => {
-            let root_access = &ctx.generator_state;
+            let root_access = &ctx.generator_state.root_access;
             let global = &ctx.public_component.globals[*global_index];
             let global_id = format!("global_{}", ident(&global.name));
             let name =
@@ -2411,7 +2502,7 @@ fn native_item<'a>(
             for i in sub_component_path {
                 sub_component = &sub_component.sub_components[*i].ty;
             }
-            &sub_component.items[*item_index].ty
+            &sub_component.items[*item_index as usize].ty
         }
         llr::PropertyReference::InParent { level, parent_reference } => {
             let mut ctx = ctx;
@@ -2576,18 +2667,21 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
             }
         }
         Expression::CodeBlock(sub) => {
-            let len = sub.len();
-            let mut x = sub.iter().enumerate().map(|(i, e)| {
-                if i == len - 1 {
-                    return_compile_expression(e, ctx, None) + ";"
+            match sub.len() {
+                0 => String::new(),
+                1 => compile_expression(&sub[0], ctx),
+                len => {
+                    let mut x = sub.iter().enumerate().map(|(i, e)| {
+                        if i == len - 1 {
+                            return_compile_expression(e, ctx, None) + ";"
+                        }
+                        else {
+                            compile_expression(e, ctx)
+                        }
+                    });
+                   format!("[&]{{ {} }}()", x.join(";"))
                 }
-                else {
-                    compile_expression(e, ctx)
-                }
-
-            });
-
-            format!("[&]{{ {} }}()", x.join(";"))
+            }
         }
         Expression::PropertyAssignment { property, value} => {
             let value = compile_expression(value, ctx);
@@ -2607,7 +2701,7 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
             let repeater_index = repeater_index.unwrap();
             let mut index_prop = llr::PropertyReference::Local {
                 sub_component_path: vec![],
-                property_index: ctx2.current_sub_component.unwrap().repeated[repeater_index]
+                property_index: ctx2.current_sub_component.unwrap().repeated[repeater_index as usize]
                     .index_prop
                     .unwrap(),
             };
@@ -2753,12 +2847,6 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
                 ident(&value.to_pascal_case()),
             )
         }
-        Expression::ReturnStatement(Some(expr)) => format!(
-            "throw slint::private_api::ReturnWrapper<{}>({})",
-            expr.ty(ctx).cpp_type().unwrap_or_default(),
-            compile_expression(expr, ctx)
-        ),
-        Expression::ReturnStatement(None) => "throw slint::private_api::ReturnWrapper<void>()".to_owned(),
         Expression::LayoutCacheAccess { layout_cache_prop, index, repeater_index } =>  {
             let cache = access_member(layout_cache_prop, ctx);
             if let Some(ri) = repeater_index {
@@ -2831,30 +2919,72 @@ fn compile_builtin_function_call(
         }
         BuiltinFunction::GetWindowDefaultFontSize => {
             let window_item_name = ident(&ctx.public_component.item_tree.root.items[0].name);
-            format!("{}->{}.default_font_size.get()", ctx.generator_state, window_item_name)
+            format!(
+                "{}->{}.default_font_size.get()",
+                ctx.generator_state.root_access, window_item_name
+            )
         }
         BuiltinFunction::AnimationTick => "slint::cbindgen_private::slint_animation_tick()".into(),
         BuiltinFunction::Debug => {
+            ctx.generator_state.conditional_includes.iostream.set(true);
             format!("std::cout << {} << std::endl;", a.join("<<"))
         }
-        BuiltinFunction::Mod => format!("std::fmod({}, {})", a.next().unwrap(), a.next().unwrap()),
-        BuiltinFunction::Round => format!("std::round({})", a.next().unwrap()),
-        BuiltinFunction::Ceil => format!("std::ceil({})", a.next().unwrap()),
-        BuiltinFunction::Floor => format!("std::floor({})", a.next().unwrap()),
-        BuiltinFunction::Sqrt => format!("std::sqrt({})", a.next().unwrap()),
-        BuiltinFunction::Abs => format!("std::abs({})", a.next().unwrap()),
+        BuiltinFunction::Mod => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::fmod({}, {})", a.next().unwrap(), a.next().unwrap())
+        }
+        BuiltinFunction::Round => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::round({})", a.next().unwrap())
+        }
+        BuiltinFunction::Ceil => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::ceil({})", a.next().unwrap())
+        }
+        BuiltinFunction::Floor => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::floor({})", a.next().unwrap())
+        }
+        BuiltinFunction::Sqrt => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::sqrt({})", a.next().unwrap())
+        }
+        BuiltinFunction::Abs => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::abs({})", a.next().unwrap())
+        }
         BuiltinFunction::Log => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
             format!("std::log({}) / std::log({})", a.next().unwrap(), a.next().unwrap())
         }
         BuiltinFunction::Pow => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
             format!("std::pow(({}), ({}))", a.next().unwrap(), a.next().unwrap())
         }
-        BuiltinFunction::Sin => format!("std::sin(({}) * {})", a.next().unwrap(), pi_180),
-        BuiltinFunction::Cos => format!("std::cos(({}) * {})", a.next().unwrap(), pi_180),
-        BuiltinFunction::Tan => format!("std::tan(({}) * {})", a.next().unwrap(), pi_180),
-        BuiltinFunction::ASin => format!("std::asin({}) / {}", a.next().unwrap(), pi_180),
-        BuiltinFunction::ACos => format!("std::acos({}) / {}", a.next().unwrap(), pi_180),
-        BuiltinFunction::ATan => format!("std::atan({}) / {}", a.next().unwrap(), pi_180),
+        BuiltinFunction::Sin => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::sin(({}) * {})", a.next().unwrap(), pi_180)
+        }
+        BuiltinFunction::Cos => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::cos(({}) * {})", a.next().unwrap(), pi_180)
+        }
+        BuiltinFunction::Tan => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::tan(({}) * {})", a.next().unwrap(), pi_180)
+        }
+        BuiltinFunction::ASin => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::asin({}) / {}", a.next().unwrap(), pi_180)
+        }
+        BuiltinFunction::ACos => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::acos({}) / {}", a.next().unwrap(), pi_180)
+        }
+        BuiltinFunction::ATan => {
+            ctx.generator_state.conditional_includes.cmath.set(true);
+            format!("std::atan({}) / {}", a.next().unwrap(), pi_180)
+        }
         BuiltinFunction::SetFocusItem => {
             if let [llr::Expression::PropertyReference(pr)] = arguments {
                 let window = access_window_field(ctx);
@@ -2874,9 +3004,11 @@ fn compile_builtin_function_call(
                 .into()
         }*/
         BuiltinFunction::StringIsFloat => {
+            ctx.generator_state.conditional_includes.cstdlib.set(true);
             format!("[](const auto &a){{ auto e1 = std::end(a); auto e2 = const_cast<char*>(e1); std::strtod(std::begin(a), &e2); return e1 == e2; }}({})", a.next().unwrap())
         }
         BuiltinFunction::StringToFloat => {
+            ctx.generator_state.conditional_includes.cstdlib.set(true);
             format!("[](const auto &a){{ auto e1 = std::end(a); auto e2 = const_cast<char*>(e1); auto r = std::strtod(std::begin(a), &e2); return e1 == e2 ? r : 0; }}({})", a.next().unwrap())
         }
         BuiltinFunction::ColorBrighter => {
@@ -3031,10 +3163,10 @@ fn compile_builtin_function_call(
 fn box_layout_function(
     cells_variable: &str,
     repeated_indices: Option<&str>,
-    elements: &[Either<llr::Expression, usize>],
+    elements: &[Either<llr::Expression, u32>],
     orientation: Orientation,
     sub_expression: &llr::Expression,
-    ctx: &llr_EvaluationContext<String>,
+    ctx: &llr_EvaluationContext<CppGeneratorContext>,
 ) -> String {
     let repeated_indices = repeated_indices.map(ident);
     let mut push_code =
@@ -3094,35 +3226,6 @@ fn box_layout_function(
         ident(cells_variable),
         compile_expression(sub_expression, ctx)
     )
-}
-
-/// Like compile_expression, but wrap inside a try{}catch{} block to intercept the return
-fn compile_expression_wrap_return(expr: &llr::Expression, ctx: &EvaluationContext) -> String {
-    let mut return_type = None;
-    expr.visit_recursive(&mut |e| {
-        if let llr::Expression::ReturnStatement(val) = e {
-            return_type = Some(val.as_ref().map_or(Type::Void, |v| v.ty(ctx)));
-        }
-    });
-
-    if let Some(ty) = return_type {
-        if ty == Type::Void || ty == Type::Invalid {
-            format!(
-                "[&]{{ try {{ {}; }} catch(const slint::private_api::ReturnWrapper<void> &w) {{ }} }}()",
-                compile_expression(expr, ctx)
-            )
-        } else {
-            let cpp_ty = ty.cpp_type().unwrap_or_default();
-            format!(
-                "[&]() -> {} {{ try {{ {}; }} catch(const slint::private_api::ReturnWrapper<{}> &w) {{ return w.value; }} }}()",
-                cpp_ty,
-                return_compile_expression(expr, ctx, Some(&ty)),
-                cpp_ty
-            )
-        }
-    } else {
-        compile_expression(expr, ctx)
-    }
 }
 
 /// Like compile expression, but prepended with `return` if not void.

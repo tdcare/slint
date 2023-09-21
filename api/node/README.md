@@ -1,3 +1,4 @@
+<!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial -->
 # Slint-node (Beta)
 
 [![npm](https://img.shields.io/npm/v/slint-ui)](https://www.npmjs.com/package/slint-ui)
@@ -27,7 +28,7 @@ You need to install the following components:
 
   * **[Node.js](https://nodejs.org/download/release/v16.19.1/)** (v16. Newer versions currently not supported: [#961](https://github.com/slint-ui/slint/issues/961))
   * **[npm](https://www.npmjs.com/)**
-  * **[Rust compiler](https://www.rust-lang.org/tools/install)** (1.66 or newer)
+  * **[Rust compiler](https://www.rust-lang.org/tools/install)** (1.70 or newer)
 
 You will also need a few more dependencies, see <https://github.com/slint-ui/slint/blob/master/docs/building.md#prerequisites>
 

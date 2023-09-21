@@ -561,7 +561,10 @@ pub extern "C" fn slint_interpreter_component_instance_show(
 ) {
     generativity::make_guard!(guard);
     let comp = inst.unerase(guard);
-    comp.borrow_instance().window_adapter().set_visible(is_visible).unwrap();
+    match is_visible {
+        true => comp.borrow_instance().window_adapter().window().show().unwrap(),
+        false => comp.borrow_instance().window_adapter().window().hide().unwrap(),
+    }
 }
 
 /// Return a window for the component
@@ -698,7 +701,7 @@ pub unsafe extern "C" fn slint_interpreter_model_notify_row_removed(
 // FIXME: Figure out how to re-export the one from compilerlib
 /// DiagnosticLevel describes the severity of a diagnostic.
 #[derive(Clone)]
-#[repr(C)]
+#[repr(u8)]
 pub enum DiagnosticLevel {
     /// The diagnostic belongs to an error.
     Error,

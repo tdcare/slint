@@ -116,6 +116,13 @@ pub fn lower_expression(
             tree_Expression::BuiltinFunctionReference(BuiltinFunction::ShowPopupWindow, _) => {
                 lower_show_popup(arguments, ctx)
             }
+            tree_Expression::BuiltinFunctionReference(BuiltinFunction::ClosePopupWindow, _) => {
+                // FIXME: right now, `popup.close()` will close any visible popup, as the popup argument is ignored
+                llr_Expression::BuiltinFunctionCall {
+                    function: BuiltinFunction::ClosePopupWindow,
+                    arguments: vec![],
+                }
+            }
             tree_Expression::BuiltinFunctionReference(f, _) => {
                 let mut arguments =
                     arguments.iter().map(|e| lower_expression(e, ctx)).collect::<Vec<_>>();
@@ -185,8 +192,8 @@ pub fn lower_expression(
                 .collect::<_>(),
         },
         tree_Expression::EnumerationValue(e) => llr_Expression::EnumerationValue(e.clone()),
-        tree_Expression::ReturnStatement(x) => {
-            llr_Expression::ReturnStatement(x.as_ref().map(|e| lower_expression(e, ctx).into()))
+        tree_Expression::ReturnStatement(..) => {
+            panic!("The remove return pass should have removed all return")
         }
         tree_Expression::LayoutCacheAccess { layout_cache_prop, index, repeater_index } => {
             llr_Expression::LayoutCacheAccess {
@@ -646,7 +653,7 @@ struct BoxLayoutDataResult {
     cells: llr_Expression,
     /// When there are repeater involved, we need to do a BoxLayoutFunction with the
     /// given cell variable and elements
-    compute_cells: Option<(String, Vec<Either<llr_Expression, usize>>)>,
+    compute_cells: Option<(String, Vec<Either<llr_Expression, u32>>)>,
 }
 
 fn box_layout_data(

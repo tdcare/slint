@@ -1,3 +1,5 @@
+<!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: MIT -->
+
 # Examples
 
 These examples demonstrate the main features of Slint and how to use them in different language environments.
@@ -125,7 +127,7 @@ A Rust and C++ example that shows how render Slint on top of graphical effect re
 
 ### [`opengl_texture`](./opengl_texture)
 
-A Rust and C++ example that shows how render a scene with custom OpenGL code intoa texture and render that texture within a Slint scene. For more details check out the [Readme](./opengl_texture).
+A Rust and C++ example that shows how render a scene with custom OpenGL code into a texture and render that texture within a Slint scene. For more details check out the [Readme](./opengl_texture).
 
 | `.slint` Design | Rust Source | C++ Source |
 | --- | --- | --- |

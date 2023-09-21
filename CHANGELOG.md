@@ -1,3 +1,5 @@
+<!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial -->
+
 # Changelog
 All notable changes to this project are documented in this file.
 
@@ -5,43 +7,110 @@ All notable changes to this project are documented in this file.
 
 ### General
 
- - Fixed accessibility tree on Linux when UI has no repeaters
- - Fixed native style animations
- - Fixed setting rotation-angle and opacity from a callback
- - Fixed touch in the Flickable not resulting in a click
- - Added support for a new experimental backend that renders fullscreen on Linux using KMS (`backend-linuxkms`).
+ - Minimum Rust version is now 1.70.
+ - Skia renderer: Fixed the `source` property of `Image` elements sometimes not changing when setting dynamically loaded images. (#3510)
+ - Skia / FemtoVG renderers: Default to vsync swap interval when rendering with OpenGL to avoid excessive CPU usage. (#3516)
 
-### Slint language
+### Slint Language
 
- - In case of error, still attempt to run more pass to report more diagnostics
- - Fixed compiler panic when an unresolved alias has a binding
- - Added `edited` callback to `SpinBox`
- - Added `row-pointer-event` callback to `StandardTableView`
- - Fixed enabled does not work properly on `fluent` `ComboBox`
- - Fixed duplicated import when importing file relative to the project instead of the current path. Deprecated importing files relative to the project path.
- - Added `current-item-changed` to `StandardListView`
- - Added `current-row-changed` to `StandardTableView`
- - Added `item-pointer-event` to `StandardListView`
+ - Added `Number`, `Decimal` variant to enum `InputType`
 
 ### Rust API
 
- - Implemented `Default` for `slint::Weak`
- - Added `ReverseModel` and `ModelExt::reverse`
+### C++
+
+ - Removed the need for C++ exceptions in generated code.
+ - Added ability to only build the Slint compiler or use an external compiler.
+
+### LSP
+
+ - Added "Wrap in element" and "Remove element" code actions
+
+## [1.2.1] - 2023-09-19
+
+### General
+
+ - Fixed generated C++ and Rust code in conversion from unnamed to named struct in complex expressions. (#2765)
+ - Improved wasm preview in the documentation, especially on mobile. (#3389)
+ - Improved `StandardTableView` to use `ListView` optimization for all styles. (#3425)
+ - Fixed in WSL against a distro that uses X11 instead of Wayland. (#3406)
+ - Added documentation about different renderers and their relation to backends.
+ - Added support for partial rendering to the software renderer when used with the winit backend. (#3457)
+ - Fixed builds of the Skia renderer on Windows when built from source within `vcvars.bat` environments.
+ - Updated to Skia milestone 117.
+ - Fixed panic when using `SLINT_FULLSCREEN=1` in comination with the Skia OpenGL renderer. (#3472)
+ - Native style: Fixed scroll bar handle size for `ScrollView`. (#3489)
+ - FemtoVG renderer: Fixed empty lines and vertical alignment when eliding text. (#3481)
+ - Skia renderer: Fixed eliding of multi-line text. (#3481)
+ - `StandardTableView`: Fixed scrollbar only responding to the second click.
+ - Polished the experimental Cupertino style further.
+
+### Rust API
+
+ - Derive serde traits for `slint::Color`, when the feature is active. (#3411)
+
+### C++
+
+ - Fixed crash when code in a `clicked` handler in a sub-component would cause a conditional
+   or repeated element to disappear. (#3465)
+ - Fixed Skia renderer builds finding clang correctly.
+
+### VS Code Extension
+
+ - Fixed "Show Preview" command when invoked from the command palette. (#3412)
+
+### Language Server
+
+ - Fixed automatic indentation within named elements. (#3409)
+ - Fixed panic when editing path in import statements. (#3468)
+
+
+## [1.2.0] - 2023-09-04
+
+### General
+
+ - Fixed accessibility tree on Linux when UI has no repeaters.
+ - Fixed native style animations.
+ - Fixed setting rotation-angle and opacity from a callback.
+ - Fixed touch in the `Flickable` not resulting in a click.
+ - Added support for a new experimental backend that renders fullscreen on Linux using KMS (`backend-linuxkms`).
+ - Calling `show()` on a component (or its window) now keeps the component alive for as long as the window
+   is visible.
+
+### Slint Language
+
+ - Improve reporting of diagnostics when there are errors, by attempting to run more passes.
+ - Fixed compiler panic when an unresolved alias has a binding.
+ - Added `edited` callback to `SpinBox`.
+ - Added `row-pointer-event` callback to `StandardTableView`.
+ - Fixed enabled property with `ComboBox` in Fluent Design style.
+ - Fixed duplicated import when importing file relative to the project instead of the current path. Deprecated importing files relative to the project path.
+ - Added `current-item-changed` to `StandardListView`.
+ - Added `current-row-changed` to `StandardTableView`.
+ - Added `item-pointer-event` to `StandardListView`.
+ - Added `orientation` property to `Slider`.
+ - Added experimental `cupertino` style.
+
+### Rust API
+
+ - Implemented `Default` for `slint::Weak`.
+ - Added `ReverseModel` and `ModelExt::reverse`.
  - Added `fn set_visible(&self, _visible: bool)` to the `slint::platform::WindowAdapter` trait.
- - Added ways to create a `SoftwareRenderer` without a `MinimalSoftwareWindow`
- - The features `renderer-winit-*` were renamed to `renderer-*`
+ - Added ways to create a `SoftwareRenderer` without a `MinimalSoftwareWindow`.
+ - The features `renderer-winit-*` were renamed to `renderer-*`.
  - Added `BorrowedOpenGLTextureBuilder` to configure more aspects of borrowed OpenGL textures.
 
 ### C++
 
  - Added Platform API to write your own platform that drives its own event loop.
- - Added `SLINT_TARGET_CARGO_FLAGS` cmake variable
- - Added `ReverseModel`
- - Added functions in Window to dispatch pointer events
- - The `slint_interpreter.h` file was renamed `slint-interpreter.h`, a deprecated header was added
- - The features `SLINT_FEATURE_RENDERER_WINIT_*` were renamed to `SLINT_FEATURE_RENDERER_*`
+ - Added `SLINT_LIBRARY_CARGO_FLAGS` cmake variable.
+ - Added `ReverseModel`.
+ - Added functions in Window to dispatch pointer events.
+ - The `slint_interpreter.h` file was renamed `slint-interpreter.h`, a deprecated header was added.
+ - The features `SLINT_FEATURE_RENDERER_WINIT_*` were renamed to `SLINT_FEATURE_RENDERER_*`.
  - Extended `slint::Image::create_from_borrowed_gl_2d_rgba_texture` with an option to configure more aspects
    of texture rendering.
+ - Fixed cmake dependencies of the generated header so it is generated if and only if the .slint files have changed
 
 ### LSP
 
@@ -932,3 +1001,5 @@ as well as the [Rust migration guide for the `sixtyfps` crate](api/rs/slint/migr
 [1.0.2]: https://github.com/slint-ui/slint/releases/tag/v1.0.2
 [1.1.0]: https://github.com/slint-ui/slint/releases/tag/v1.1.0
 [1.1.1]: https://github.com/slint-ui/slint/releases/tag/v1.1.1
+[1.2.0]: https://github.com/slint-ui/slint/releases/tag/v1.2.0
+[1.2.1]: https://github.com/slint-ui/slint/releases/tag/v1.2.1

@@ -3,15 +3,14 @@
 
 use by_address::ByAddress;
 
+use super::lower_expression::ExpressionContext;
 use crate::expression_tree::Expression as tree_Expression;
 use crate::langtype::{ElementType, Type};
 use crate::llr::item_tree::*;
 use crate::namedreference::NamedReference;
 use crate::object_tree::{Component, ElementRc, PropertyVisibility};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-
-use super::lower_expression::ExpressionContext;
 
 pub fn lower_to_item_tree(component: &Rc<Component>) -> PublicComponent {
     let mut state = LoweringState::default();
@@ -61,8 +60,8 @@ pub struct LoweringState {
 #[derive(Debug, Clone)]
 pub enum LoweredElement {
     SubComponent { sub_component_index: usize },
-    NativeItem { item_index: usize },
-    Repeated { repeated_index: usize },
+    NativeItem { item_index: u32 },
+    Repeated { repeated_index: u32 },
     ComponentPlaceholder { component_container_index: ComponentContainerIndex },
 }
 
@@ -194,6 +193,7 @@ fn lower_sub_component(
         two_way_bindings: Default::default(),
         const_properties: Default::default(),
         init_code: Default::default(),
+        geometries: Default::default(),
         // just initialize to dummy expression right now and it will be set later
         layout_info_h: super::Expression::BoolLiteral(false).into(),
         layout_info_v: super::Expression::BoolLiteral(false).into(),
@@ -270,7 +270,7 @@ fn lower_sub_component(
         if elem.repeated.is_some() {
             mapping.element_mapping.insert(
                 element.clone().into(),
-                LoweredElement::Repeated { repeated_index: repeated.len() },
+                LoweredElement::Repeated { repeated_index: repeated.len() as u32 },
             );
             repeated.push(element.clone());
             return None;
@@ -295,20 +295,14 @@ fn lower_sub_component(
             }
 
             ElementType::Native(n) => {
-                let item_index = sub_component.items.len();
+                let item_index = sub_component.items.len() as u32;
                 mapping
                     .element_mapping
                     .insert(element.clone().into(), LoweredElement::NativeItem { item_index });
-                let is_flickable_viewport = elem.is_flickable_viewport;
                 sub_component.items.push(Item {
                     ty: n.clone(),
-                    name: if is_flickable_viewport {
-                        parent.as_ref().unwrap().borrow().id.clone()
-                    } else {
-                        elem.id.clone()
-                    },
+                    name: elem.id.clone(),
                     index_in_tree: *elem.item_index.get().unwrap(),
-                    is_flickable_viewport,
                 })
             }
             _ => unreachable!(),
@@ -397,7 +391,7 @@ fn lower_sub_component(
     sub_component.repeated =
         repeated.into_iter().map(|elem| lower_repeated_component(&elem, &ctx)).collect();
     for s in &mut sub_component.sub_components {
-        s.repeater_offset += sub_component.repeated.len();
+        s.repeater_offset += sub_component.repeated.len() as u32;
     }
     sub_component.component_containers = component_container_data
         .into_iter()
@@ -464,7 +458,38 @@ fn lower_sub_component(
         })
         .collect();
 
+    crate::object_tree::recurse_elem(&component.root_element, &(), &mut |element, _| {
+        let elem = element.borrow();
+        if elem.repeated.is_some() {
+            return;
+        };
+        let Some(geom) = &elem.geometry_props else { return };
+        let item_index = *elem.item_index.get().unwrap() as usize;
+        if item_index >= sub_component.geometries.len() {
+            sub_component.geometries.resize(item_index + 1, Default::default());
+        }
+        sub_component.geometries[item_index] = Some(lower_geometry(geom, &ctx).into());
+    });
+
     LoweredSubComponent { sub_component: Rc::new(sub_component), mapping }
+}
+
+fn lower_geometry(
+    geom: &crate::object_tree::GeometryProps,
+    ctx: &ExpressionContext<'_>,
+) -> super::Expression {
+    let mut fields = BTreeMap::default();
+    let mut values = HashMap::with_capacity(4);
+    for (f, v) in [("x", &geom.x), ("y", &geom.y), ("width", &geom.width), ("height", &geom.height)]
+    {
+        fields.insert(f.into(), Type::LogicalLength);
+        values
+            .insert(f.into(), super::Expression::PropertyReference(ctx.map_property_reference(v)));
+    }
+    super::Expression::Struct {
+        ty: Type::Struct { fields, name: None, node: None, rust_attributes: None },
+        values,
+    }
 }
 
 fn get_property_analysis(elem: &ElementRc, p: &str) -> crate::object_tree::PropertyAnalysis {
@@ -539,7 +564,7 @@ fn lower_component_container(
     let component_container_index: ComponentContainerIndex = (*c.item_index.get().unwrap()).into();
     let ti = component_container_index.as_item_tree_index();
     let component_container_items_index =
-        sub_component.items.iter().position(|i| i.index_in_tree == ti).unwrap();
+        sub_component.items.iter().position(|i| i.index_in_tree == ti).unwrap() as u32;
 
     ComponentContainerElement {
         component_container_item_tree_index: component_container_index,

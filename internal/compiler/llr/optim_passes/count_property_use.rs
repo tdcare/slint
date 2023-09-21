@@ -72,7 +72,7 @@ pub fn count_property_use(root: &PublicComponent) {
                     root,
                     &r.sub_tree.root,
                     (),
-                    Some(ParentCtx::new(ctx, Some(idx))),
+                    Some(ParentCtx::new(ctx, Some(idx as u32))),
                 );
                 visit_property(&lv.prop_y, &rep_ctx);
                 visit_property(&lv.prop_width, &rep_ctx);
@@ -89,9 +89,12 @@ pub fn count_property_use(root: &PublicComponent) {
         sc.layout_info_h.borrow().visit_recursive(&mut |e| visit_expression(e, ctx));
         sc.layout_info_v.borrow().visit_recursive(&mut |e| visit_expression(e, ctx));
 
-        // 6. accessibility props
+        // 6. accessibility props and geometries
         for b in sc.accessible_prop.values() {
             b.borrow().visit_recursive(&mut |e| visit_expression(e, ctx))
+        }
+        for i in sc.geometries.iter().filter_map(Option::as_ref) {
+            i.borrow().visit_recursive(&mut |e| visit_expression(e, ctx))
         }
 
         // 7. aliases (if they were not optimize, they are probably used)

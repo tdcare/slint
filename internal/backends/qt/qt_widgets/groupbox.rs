@@ -9,10 +9,6 @@ use super::*;
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct NativeGroupBox {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub enabled: Property<bool>,
     pub title: Property<SharedString>,
     pub cached_rendering_data: CachedRenderingData,
@@ -146,13 +142,6 @@ impl Item for NativeGroupBox {
         });
     }
 
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
-
     fn layout_info(
         self: Pin<&Self>,
         orientation: Orientation,
@@ -222,8 +211,13 @@ impl Item for NativeGroupBox {
             dpr as "float",
             initial_state as "int"
         ] {
+            if (auto groupbox = qobject_cast<QGroupBox *>(widget)) {
+                // If not set, the style may render incorrectly
+                // https://github.com/qt/qtbase/blob/5be45ff6a6e157d45b0010a4f09d3a11e62fddce/src/widgets/styles/qfusionstyle.cpp#L441
+                groupbox->setTitle(text);
+            }
             QStyleOptionGroupBox option;
-            option.initFrom(widget);
+            option.styleObject = widget;
             option.state |= QStyle::State(initial_state);
             if (enabled) {
                 option.state |= QStyle::State_Enabled;

@@ -15,7 +15,7 @@ use crate::input::{
 use crate::item_rendering::CachedRenderingData;
 use crate::item_rendering::ItemRenderer;
 use crate::layout::{LayoutInfo, Orientation};
-use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, LogicalSize};
+use crate::lengths::{LogicalLength, LogicalSize};
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
 use crate::window::WindowAdapter;
@@ -31,8 +31,6 @@ use i_slint_core_macros::*;
 /// The implementation of the `Image` element
 pub struct ImageItem {
     pub source: Property<crate::graphics::Image>,
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
     pub width: Property<LogicalLength>,
     pub height: Property<LogicalLength>,
     pub image_fit: Property<ImageFit>,
@@ -43,13 +41,6 @@ pub struct ImageItem {
 
 impl Item for ImageItem {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -129,8 +120,6 @@ impl ItemConsts for ImageItem {
 /// The implementation of the `ClippedImage` element
 pub struct ClippedImage {
     pub source: Property<crate::graphics::Image>,
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
     pub width: Property<LogicalLength>,
     pub height: Property<LogicalLength>,
     pub image_fit: Property<ImageFit>,
@@ -145,13 +134,6 @@ pub struct ClippedImage {
 
 impl Item for ClippedImage {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,

@@ -35,11 +35,12 @@ mod lower_shadows;
 mod lower_states;
 mod lower_tabwidget;
 mod lower_text_input_interface;
-mod materialize_fake_properties;
-mod move_declarations;
+pub mod materialize_fake_properties;
+pub mod move_declarations;
 mod optimize_useless_rectangles;
 mod purity_check;
 mod remove_aliases;
+mod remove_return;
 mod remove_unused_properties;
 mod repeater_component;
 pub mod resolve_native_classes;
@@ -85,7 +86,12 @@ pub async fn run_passes(
     for component in (root_component.used_types.borrow().sub_components.iter())
         .chain(std::iter::once(root_component))
     {
-        compile_paths::compile_paths(component, &doc.local_registry, diag);
+        compile_paths::compile_paths(
+            component,
+            &doc.local_registry,
+            compiler_config.embed_resources,
+            diag,
+        );
         lower_tabwidget::lower_tabwidget(component, type_loader, diag).await;
         apply_default_properties_from_style::apply_default_properties_from_style(
             component,
@@ -215,6 +221,8 @@ pub async fn run_passes(
 
     // collect globals once more: After optimizations we might have less globals
     collect_globals::collect_globals(doc, diag);
+
+    remove_return::remove_return(doc);
 
     embed_images::embed_images(
         root_component,

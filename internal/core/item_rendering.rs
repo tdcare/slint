@@ -14,6 +14,7 @@ use crate::item_tree::{
 use crate::lengths::{
     LogicalLength, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, LogicalVector,
 };
+use crate::properties::PropertyTracker;
 use crate::Coord;
 use alloc::boxed::Box;
 use core::cell::{Cell, RefCell};
@@ -72,11 +73,20 @@ impl CachedRenderingData {
 /// [`ItemCache::component_destroyed`] must be called to clear the cache for that
 /// component.
 #[cfg(feature = "std")]
-#[derive(Default)]
 pub struct ItemCache<T> {
     /// The pointer is a pointer to a component
-    map: RefCell<HashMap<*const vtable::Dyn, HashMap<usize, CachedGraphicsData<T>>>>,
+    map: RefCell<HashMap<*const vtable::Dyn, HashMap<u32, CachedGraphicsData<T>>>>,
+    /// Track if the window scale factor changes; used to clear the cache if necessary.
+    window_scale_factor_tracker: Pin<Box<PropertyTracker>>,
 }
+
+#[cfg(feature = "std")]
+impl<T> Default for ItemCache<T> {
+    fn default() -> Self {
+        Self { map: Default::default(), window_scale_factor_tracker: Box::pin(Default::default()) }
+    }
+}
+
 #[cfg(feature = "std")]
 impl<T: Clone> ItemCache<T> {
     /// Returns the cached value associated to the `item_rc` if it is still valid.
@@ -132,6 +142,16 @@ impl<T: Clone> ItemCache<T> {
             .and_then(|entry| callback(&entry.data))
     }
 
+    /// Clears the cache if the window's scale factor has changed since the last call.
+    pub fn clear_cache_if_scale_factor_changed(&self, window: &crate::api::Window) {
+        if self.window_scale_factor_tracker.is_dirty() {
+            self.window_scale_factor_tracker
+                .as_ref()
+                .evaluate_as_dependency_root(|| window.scale_factor());
+            self.clear_all();
+        }
+    }
+
     /// free the whole cache
     pub fn clear_all(&self) {
         self.map.borrow_mut().clear();
@@ -169,10 +189,11 @@ pub fn render_item_children(
     index: isize,
 ) {
     let mut actual_visitor =
-        |component: &ComponentRc, index: usize, item: Pin<ItemRef>| -> VisitChildrenResult {
+        |component: &ComponentRc, index: u32, item: Pin<ItemRef>| -> VisitChildrenResult {
             renderer.save_state();
+            let item_rc = ItemRc::new(component.clone(), index);
 
-            let (do_draw, item_geometry) = renderer.filter_item(item);
+            let (do_draw, item_geometry) = renderer.filter_item(&item_rc);
 
             let item_origin = item_geometry.origin;
             renderer.translate(item_origin.to_vector());
@@ -186,7 +207,7 @@ pub fn render_item_children(
             {
                 item.as_ref().render(
                     &mut (renderer as &mut dyn ItemRenderer),
-                    &ItemRc::new(component.clone(), index),
+                    &item_rc,
                     item_geometry.size,
                 )
             } else {
@@ -232,8 +253,8 @@ pub fn item_children_bounding_rect(
     let mut bounding_rect = LogicalRect::zero();
 
     let mut actual_visitor =
-        |component: &ComponentRc, index: usize, item: Pin<ItemRef>| -> VisitChildrenResult {
-            let item_geometry = item.as_ref().geometry();
+        |component: &ComponentRc, index: u32, item: Pin<ItemRef>| -> VisitChildrenResult {
+            let item_geometry = ComponentRc::borrow_pin(component).as_ref().item_geometry(index);
 
             let local_clip_rect = clip_rect.translate(-item_geometry.origin.to_vector());
 
@@ -320,11 +341,11 @@ pub trait ItemRenderer {
     fn visit_clip(
         &mut self,
         clip_item: Pin<&Clip>,
-        _self_rc: &ItemRc,
+        item_rc: &ItemRc,
         _size: LogicalSize,
     ) -> RenderingResult {
         if clip_item.clip() {
-            let geometry = clip_item.geometry();
+            let geometry = item_rc.geometry();
 
             let clip_region_valid = self.combine_clip(
                 LogicalRect::new(LogicalPoint::default(), geometry.size),
@@ -386,8 +407,8 @@ pub trait ItemRenderer {
     /// Returns
     ///  - if the item needs to be drawn (false means it is clipped or doesn't need to be drawn)
     ///  - the geometry of the item
-    fn filter_item(&mut self, item: Pin<ItemRef>) -> (bool, LogicalRect) {
-        let item_geometry = item.as_ref().geometry();
+    fn filter_item(&mut self, item: &ItemRc) -> (bool, LogicalRect) {
+        let item_geometry = item.geometry();
         (self.get_current_clip().intersects(&item_geometry), item_geometry)
     }
 
@@ -442,9 +463,10 @@ impl<'a, T> PartialRenderer<'a, T> {
         crate::item_tree::visit_items(
             component,
             crate::item_tree::TraversalOrder::BackToFront,
-            |_, item, _, state| {
+            |component, item, index, state| {
                 let mut new_state = *state;
                 let mut borrowed = self.cache.borrow_mut();
+                let item_rc = ItemRc::new(component.clone(), index);
 
                 match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
                     Some(CachedGraphicsData {
@@ -454,9 +476,8 @@ impl<'a, T> PartialRenderer<'a, T> {
                         if tr.is_dirty() {
                             let old_geom = *cached_geom;
                             drop(borrowed);
-                            let geom = crate::properties::evaluate_no_tracking(|| {
-                                item.as_ref().geometry()
-                            });
+                            let geom =
+                                crate::properties::evaluate_no_tracking(|| item_rc.geometry());
 
                             self.mark_dirty_rect(old_geom, state.old_offset, &state.clipped);
                             self.mark_dirty_rect(geom, state.offset, &state.clipped);
@@ -504,7 +525,7 @@ impl<'a, T> PartialRenderer<'a, T> {
                     _ => {
                         drop(borrowed);
                         let geom = crate::properties::evaluate_no_tracking(|| {
-                            let geom = item.as_ref().geometry();
+                            let geom = item_rc.geometry();
                             new_state.offset += geom.origin.to_vector();
                             new_state.old_offset += geom.origin.to_vector();
                             if is_clipping_item(item) {
@@ -550,7 +571,7 @@ impl<'a, T> PartialRenderer<'a, T> {
         if let Some(entry) = rendering_data.get_entry(&mut cache.borrow_mut()) {
             entry
                 .dependency_tracker
-                .get_or_insert_with(|| Box::pin(crate::properties::PropertyTracker::default()))
+                .get_or_insert_with(|| Box::pin(PropertyTracker::default()))
                 .as_ref()
                 .evaluate(render_fn);
         } else {
@@ -573,7 +594,7 @@ macro_rules! forward_rendering_call {
             let mut ret = None;
             Self::do_rendering(&self.cache, &obj.cached_rendering_data, || {
                 ret = Some(self.actual_renderer.$fn(obj, item_rc, size));
-                obj.geometry()
+                item_rc.geometry()
             });
             ret.unwrap_or_default()
         }
@@ -581,13 +602,14 @@ macro_rules! forward_rendering_call {
 }
 
 impl<'a, T: ItemRenderer> ItemRenderer for PartialRenderer<'a, T> {
-    fn filter_item(&mut self, item: Pin<ItemRef>) -> (bool, LogicalRect) {
+    fn filter_item(&mut self, item_rc: &ItemRc) -> (bool, LogicalRect) {
+        let item = item_rc.borrow();
         let eval = || {
             if let Some(clip) = ItemRef::downcast_pin::<Clip>(item) {
                 // Make sure we register a dependency on the clip
                 clip.clip();
             }
-            item.as_ref().geometry()
+            item_rc.geometry()
         };
 
         let rendering_data = item.cached_rendering_data_offset();
@@ -595,7 +617,7 @@ impl<'a, T: ItemRenderer> ItemRenderer for PartialRenderer<'a, T> {
         let item_geometry = match rendering_data.get_entry(&mut cache) {
             Some(CachedGraphicsData { data, dependency_tracker }) => {
                 dependency_tracker
-                    .get_or_insert_with(|| Box::pin(crate::properties::PropertyTracker::default()))
+                    .get_or_insert_with(|| Box::pin(PropertyTracker::default()))
                     .as_ref()
                     .evaluate_if_dirty(|| *data = eval());
                 *data

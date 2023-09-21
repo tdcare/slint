@@ -13,7 +13,7 @@ use i_slint_core::graphics::rendering_metrics_collector::RenderingMetrics;
 use i_slint_core::graphics::{Image, IntRect, Point, Size};
 use i_slint_core::item_rendering::{ItemCache, ItemRenderer};
 use i_slint_core::items::{
-    self, Clip, FillRule, ImageFit, ImageRendering, Item, ItemRc, Layer, Opacity, RenderingResult,
+    self, Clip, FillRule, ImageFit, ImageRendering, ItemRc, Layer, Opacity, RenderingResult,
 };
 use i_slint_core::lengths::{
     LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector, PointLengths,
@@ -533,12 +533,12 @@ impl<'a> ItemRenderer for GLItemRenderer<'a> {
         }
     }
 
-    fn draw_path(&mut self, path: Pin<&items::Path>, _: &ItemRc, _size: LogicalSize) {
+    fn draw_path(&mut self, path: Pin<&items::Path>, item_rc: &ItemRc, _size: LogicalSize) {
         if self.global_alpha_transparent() {
             return;
         }
 
-        let (offset, path_events) = match path.fitted_path_events() {
+        let (offset, path_events) = match path.fitted_path_events(item_rc) {
             Some(offset_and_events) => offset_and_events,
             None => return,
         };
@@ -837,9 +837,7 @@ impl<'a> ItemRenderer for GLItemRenderer<'a> {
         let border_width = clip_item.border_width();
 
         if radius.get() > 0. {
-            if let Some(layer_image) =
-                self.render_layer(item_rc, &|| clip_item.as_ref().geometry().size)
-            {
+            if let Some(layer_image) = self.render_layer(item_rc, &|| item_rc.geometry().size) {
                 let layer_image_paint = layer_image.as_paint();
 
                 let layer_path = clip_path_for_rect_alike_item(
@@ -1308,9 +1306,8 @@ impl<'a> GLItemRenderer<'a> {
                     if image_size.is_empty() {
                         return None;
                     }
-                    let scale_factor = ScaleFactor::new(self.window.scale_factor());
                     let t = LogicalSize::from_lengths(target_width.get(), target_height.get())
-                        * scale_factor;
+                        * self.scale_factor;
 
                     Some(i_slint_core::graphics::fit_size(image_fit, t, image_size).cast())
                 } else {

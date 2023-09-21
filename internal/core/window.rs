@@ -21,7 +21,7 @@ use crate::items::{ItemRef, MouseCursor};
 use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, LogicalSize, SizeLengths};
 use crate::properties::{Property, PropertyTracker};
 use crate::renderer::Renderer;
-use crate::{Callback, Coord};
+use crate::{Callback, Coord, SharedString};
 use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
 use core::cell::{Cell, RefCell};
@@ -48,9 +48,29 @@ fn input_as_key_event(input: KeyInputEvent, modifiers: KeyboardModifiers) -> Key
     }
 }
 
-/// This trait represents the adaptation layer between the [`Window`] API, and the
-/// internal type from the backend that provides functionality such as device-independent pixels,
-/// window resizing, and other typically windowing system related tasks.
+/// This trait represents the adaptation layer between the [`Window`] API and then
+/// windowing specific window representation, such as a Win32 `HWND` handle or a `wayland_surface_t`.
+///
+/// Implement this trait to establish the link between the two, and pass messages in both
+/// directions:
+///
+/// - When receiving messages from the windowing system about state changes, such as the window being resized,
+///   the user requested the window to be closed, input being received, etc. you need to create a
+///   [`crate::platform::WindowEvent`](enum.WindowEvent.html) and send it to Slint via [`create::Window::dispatch_event()`](../struct.Window.html#method.dispatch_event).
+///
+/// - Slint sends requests to change visibility, position, size, etc. via functions such as [`Self::set_visible`],
+///   [`Self::set_size`], [`Self::set_position`], or [`Self::update_window_properties()`]. Re-implement these functions
+///   and delegate the requests to the windowing system.
+///
+/// If the implementation of this bi-directional message passing protocol is incomplete, the user may
+/// experience unexpected behavior, or the intention of the developer calling functions on the [`crate::Window`](struct.Window.html)
+/// API may not be fullfilled.
+///
+/// Your implementation must hold a renderer, such as [`crate::software_renderer::SoftwareRenderer`].
+/// In the [`Self::renderer()`] function, you must return a reference to it.
+///
+/// It is also required to hold a [`crate::Window`](struct.Window.html) and return a reference to it in your
+/// implementation of [`Self::window()`].
 ///
 /// See also [`MinimalSoftwareWindow`](crate::software_renderer::MinimalSoftwareWindow)
 /// for a minimal implementation of this trait using the software renderer
@@ -116,6 +136,13 @@ pub trait WindowAdapter {
     /// Currently, the only public struct that implement renderer is [`SoftwareRenderer`](crate::software_renderer::SoftwareRenderer).
     fn renderer(&self) -> &dyn Renderer;
 
+    /// Re-implement this function to update the properties such as window title or layout constraints.
+    ///
+    /// This function is called before `set_visible(true)`, and will be called again when the properties
+    /// that were queried on the last call are changed. If you do not query any properties, it may not
+    /// be called again.
+    fn update_window_properties(&self, _properties: WindowProperties<'_>) {}
+
     #[doc(hidden)]
     fn internal(&self, _: crate::InternalToken) -> Option<&dyn WindowAdapterInternal> {
         None
@@ -152,20 +179,6 @@ pub trait WindowAdapterInternal {
         None
     }
 
-    /// Request for the given title string to be set to the windowing system for use as window title.
-    // Add API to the Window to query the properties which needs to be applied (title, flags, ...)
-    fn apply_window_properties(&self, _window_item: Pin<&crate::items::WindowItem>) {}
-
-    /// Apply the given horizontal and vertical constraints to the window. This typically involves communication
-    /// minimum/maximum sizes to the windowing system, for example.
-    // TODO: Add API to the window to query the constraints, then merge with apply_window_properties
-    fn apply_geometry_constraint(
-        &self,
-        _constraints_horizontal: crate::layout::LayoutInfo,
-        _constraints_vertical: crate::layout::LayoutInfo,
-    ) {
-    }
-
     /// Set the mouse cursor
     // TODO: Make the enum public and make public
     fn set_mouse_cursor(&self, _cursor: MouseCursor) {}
@@ -185,12 +198,6 @@ pub trait WindowAdapterInternal {
 
     /// returns wether a dark theme is used
     fn dark_color_scheme(&self) -> bool {
-        false
-    }
-
-    /// Get the visibility of the window
-    // todo: replace with WindowEvent::VisibilityChanged and require backend to dispatch event
-    fn is_visible(&self) -> bool {
         false
     }
 }
@@ -218,6 +225,56 @@ pub enum InputMethodRequest {
         /// The position of the text cursor in window coordinates.
         position: crate::api::LogicalPosition,
     },
+}
+
+/// This struct describes layout constraints of a resizable element, such as a window.
+#[non_exhaustive]
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
+pub struct LayoutConstraints {
+    /// The minimum size.
+    pub min: Option<crate::api::LogicalSize>,
+    /// The maximum size.
+    pub max: Option<crate::api::LogicalSize>,
+    /// The preferred size.
+    pub preferred: crate::api::LogicalSize,
+}
+
+/// This struct contains getters that provide access to properties of the `Window`
+/// element, and is used with [`WindowAdapter::update_window_properties`].
+pub struct WindowProperties<'a>(&'a WindowInner);
+
+impl<'a> WindowProperties<'a> {
+    /// Returns the Window's title
+    pub fn title(&self) -> SharedString {
+        self.0.window_item().map(|w| w.as_pin_ref().title()).unwrap_or_default()
+    }
+
+    /// The background color or brush of the Window
+    pub fn background(&self) -> crate::Brush {
+        self.0
+            .window_item()
+            .map(|w: VRcMapped<ComponentVTable, crate::items::WindowItem>| {
+                w.as_pin_ref().background()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Returns the layout constraints of the window
+    pub fn layout_constraints(&self) -> LayoutConstraints {
+        let component = self.0.component();
+        let component = ComponentRc::borrow_pin(&component);
+        let h = component.as_ref().layout_info(crate::layout::Orientation::Horizontal);
+        let v = component.as_ref().layout_info(crate::layout::Orientation::Vertical);
+        let (min, max) = crate::layout::min_max_size_for_layout_constraints(h, v);
+        LayoutConstraints {
+            min,
+            max,
+            preferred: crate::api::LogicalSize::new(
+                h.preferred_bounded() as f32,
+                v.preferred_bounded() as f32,
+            ),
+        }
+    }
 }
 
 struct WindowPropertiesTracker {
@@ -286,6 +343,8 @@ struct WindowPinnedFields {
 pub struct WindowInner {
     window_adapter_weak: Weak<dyn WindowAdapter>,
     component: RefCell<ComponentWeak>,
+    /// When the window is visible, keep a strong reference
+    strong_component_ref: RefCell<Option<ComponentRc>>,
     mouse_input_state: Cell<MouseInputState>,
     pub(crate) modifiers: Cell<InternalKeyboardModifierState>,
 
@@ -331,6 +390,7 @@ impl WindowInner {
         Self {
             window_adapter_weak,
             component: Default::default(),
+            strong_component_ref: Default::default(),
             mouse_input_state: Default::default(),
             modifiers: Default::default(),
             pinned_fields: Box::pin(WindowPinnedFields {
@@ -423,11 +483,7 @@ impl WindowInner {
 
                 if let MouseEvent::Pressed { position, .. } = &event {
                     // close the popup if one press outside the popup
-                    let geom = ComponentRc::borrow_pin(popup_component)
-                        .as_ref()
-                        .get_item_ref(0)
-                        .as_ref()
-                        .geometry();
+                    let geom = ComponentRc::borrow_pin(popup_component).as_ref().item_geometry(0);
                     if !geom.contains(*position) {
                         self.close_popup();
                         return None;
@@ -539,26 +595,6 @@ impl WindowInner {
         }
     }
 
-    /// Sets the focus on the window to true or false, depending on the have_focus argument.
-    /// This results in WindowFocusReceived and WindowFocusLost events.
-    pub fn set_focus(&self, have_focus: bool) {
-        let event = if have_focus {
-            crate::input::FocusEvent::WindowReceivedFocus
-        } else {
-            crate::input::FocusEvent::WindowLostFocus
-        };
-
-        if let Some(focus_item) = self.focus_item.borrow().upgrade() {
-            focus_item.borrow().as_ref().focus_event(&event, &self.window_adapter(), &focus_item);
-        }
-
-        // If we lost focus due to for example a global shortcut, then when we regain focus
-        // should not assume that the modifiers are in the same state.
-        if !have_focus {
-            self.modifiers.take();
-        }
-    }
-
     /// Take the focus_item out of this Window
     ///
     /// This sends the FocusOut event!
@@ -647,8 +683,26 @@ impl WindowInner {
     /// Marks the window to be the active window. This typically coincides with the keyboard
     /// focus. One exception though is when a popup is shown, in which case the window may
     /// remain active but temporarily loose focus to the popup.
-    pub fn set_active(&self, active: bool) {
-        self.pinned_fields.as_ref().project_ref().active.set(active);
+    ///
+    /// This results in WindowFocusReceived and WindowFocusLost events.
+    pub fn set_active(&self, have_focus: bool) {
+        self.pinned_fields.as_ref().project_ref().active.set(have_focus);
+
+        let event = if have_focus {
+            crate::input::FocusEvent::WindowReceivedFocus
+        } else {
+            crate::input::FocusEvent::WindowLostFocus
+        };
+
+        if let Some(focus_item) = self.focus_item.borrow().upgrade() {
+            focus_item.borrow().as_ref().focus_event(&event, &self.window_adapter(), &focus_item);
+        }
+
+        // If we lost focus due to for example a global shortcut, then when we regain focus
+        // should not assume that the modifiers are in the same state.
+        if !have_focus {
+            self.modifiers.take();
+        }
     }
 
     /// Returns true of the window is the active window. That typically implies having the
@@ -661,7 +715,6 @@ impl WindowInner {
     /// for example, with the properties known to the windowing system.
     pub fn update_window_properties(&self) {
         let window_adapter = self.window_adapter();
-        let Some(window_adapter) = window_adapter.internal(crate::InternalToken) else { return };
 
         // No `if !dirty { return; }` check here because the backend window may be newly mapped and not up-to-date, so force
         // an evaluation.
@@ -670,15 +723,7 @@ impl WindowInner {
             .project_ref()
             .window_properties_tracker
             .evaluate_as_dependency_root(|| {
-                let component = self.component();
-                let component = ComponentRc::borrow_pin(&component);
-                window_adapter.apply_geometry_constraint(
-                    component.as_ref().layout_info(crate::layout::Orientation::Horizontal),
-                    component.as_ref().layout_info(crate::layout::Orientation::Vertical),
-                );
-                if let Some(window_item) = self.window_item() {
-                    window_adapter.apply_window_properties(window_item.as_pin_ref());
-                }
+                window_adapter.update_window_properties(WindowProperties(self));
             });
     }
 
@@ -720,20 +765,25 @@ impl WindowInner {
     /// Registers the window with the windowing system, in order to render the component's items and react
     /// to input events once the event loop spins.
     pub fn show(&self) -> Result<(), PlatformError> {
+        if let Some(component) = self.try_component() {
+            *self.strong_component_ref.borrow_mut() = Some(component);
+        }
+
         self.update_window_properties();
         self.window_adapter().set_visible(true)?;
         // Make sure that the window's inner size is in sync with the root window item's
         // width/height.
-        self.set_window_item_geometry(
-            self.window_adapter().size().to_logical(self.scale_factor()).to_euclid(),
-        );
-
+        let size = self.window_adapter().size();
+        self.set_window_item_geometry(size.to_logical(self.scale_factor()).to_euclid());
+        self.window_adapter().renderer().resize(size).unwrap();
         Ok(())
     }
 
     /// De-registers the window with the windowing system.
     pub fn hide(&self) -> Result<(), PlatformError> {
-        self.window_adapter().set_visible(false)
+        let result = self.window_adapter().set_visible(false);
+        self.strong_component_ref.borrow_mut().take();
+        result
     }
 
     /// returns wether a dark theme is used
@@ -821,7 +871,7 @@ impl WindowInner {
                 // Refresh the area that was previously covered by the popup.
                 let popup_region = crate::properties::evaluate_no_tracking(|| {
                     let popup_component = ComponentRc::borrow_pin(&current_popup.component);
-                    popup_component.as_ref().get_item_ref(0).as_ref().geometry()
+                    popup_component.as_ref().item_geometry(0)
                 })
                 .translate(offset.to_vector());
 
@@ -857,6 +907,11 @@ impl WindowInner {
     /// Sets the scale factor for the window. This is set by the backend or for testing.
     pub fn set_text_input_focused(&self, value: bool) {
         self.pinned_fields.text_input_focused.set(value)
+    }
+
+    /// Returns true if the window is visible
+    pub fn is_visible(&self) -> bool {
+        self.strong_component_ref.borrow().is_some()
     }
 
     /// Returns the window item that is the first item in the component.
@@ -923,7 +978,7 @@ pub mod ffi {
 
     /// This enum describes a low-level access to specific graphics APIs used
     /// by the renderer.
-    #[repr(C)]
+    #[repr(u8)]
     pub enum GraphicsAPI {
         /// The rendering is done using OpenGL.
         NativeOpenGL,
@@ -965,14 +1020,14 @@ pub mod ffi {
     pub unsafe extern "C" fn slint_windowrc_show(handle: *const WindowAdapterRcOpaque) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
 
-        window_adapter.set_visible(true).unwrap();
+        window_adapter.window().show().unwrap();
     }
 
     /// Spins an event loop and renders the items of the provided component in this window.
     #[no_mangle]
     pub unsafe extern "C" fn slint_windowrc_hide(handle: *const WindowAdapterRcOpaque) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
-        window_adapter.set_visible(false).unwrap();
+        window_adapter.window().hide().unwrap();
     }
 
     /// Returns the visibility state of the window. This function can return false even if you previously called show()
@@ -982,7 +1037,7 @@ pub mod ffi {
         handle: *const WindowAdapterRcOpaque,
     ) -> bool {
         let window = &*(handle as *const Rc<dyn WindowAdapter>);
-        window.internal(crate::InternalToken).map_or(false, |w| w.is_visible())
+        window.window().is_visible()
     }
 
     /// Returns the window scale factor.
@@ -1259,6 +1314,16 @@ pub mod ffi {
     ) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
         window_adapter.window().0.process_mouse_input(event);
+    }
+
+    /// Dispatch a window event
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_dispatch_event(
+        handle: *const WindowAdapterRcOpaque,
+        event: &crate::platform::WindowEvent,
+    ) {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().dispatch_event(event.clone());
     }
 }
 

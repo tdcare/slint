@@ -21,9 +21,9 @@ import {
     MessageWriter,
 } from "vscode-languageserver-protocol/browser";
 
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+import * as monaco from "monaco-editor";
 
-import slint_init, * as slint_preview from "@preview/slint_wasm_interpreter.js";
+import slint_init, * as slint_preview from "@lsp/slint_lsp_wasm.js";
 import { HighlightRequestCallback } from "./text";
 
 let is_event_loop_running = false;
@@ -90,7 +90,7 @@ export class LspWaiter {
         const pp = this.#previewer_promise!;
         this.#previewer_promise = null;
 
-        const [_, worker] = await Promise.all([pp, lp]);
+        const [_1, worker] = await Promise.all([pp, lp]);
 
         return Promise.resolve(new Lsp(worker, this.#previewer_port));
     }
@@ -183,7 +183,7 @@ class PreviewerBackend {
                         .catch((e) => {
                             port.postMessage({ type: "Error", data: e });
                             port.close();
-                        })
+                        });
                 }
             } catch (e) {
                 client_port.postMessage({ type: "Error", data: e });
@@ -215,10 +215,12 @@ class PreviewerBackend {
                 },
             );
             instance.set_design_mode(this.#picker_mode);
-        })
+        });
     }
 
-    private async with_instance<R>(callback: InstanceCallback<R>): Promise<R | null> {
+    private async with_instance<R>(
+        callback: InstanceCallback<R>,
+    ): Promise<R | null> {
         if (this.#instance == null) {
             return null;
         }
@@ -302,7 +304,7 @@ class PreviewerBackend {
 
     private async highlight(file_path: string, offset: number) {
         this.#to_highlight = { file: file_path, offset: offset };
-        this.with_instance((instance) => instance.highlight(file_path, offset))
+        this.with_instance((instance) => instance.highlight(file_path, offset));
     }
 }
 

@@ -10,15 +10,15 @@ use glutin::{
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
 use i_slint_core::platform::PlatformError;
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
 pub struct OpenGLContext {
     context: glutin::context::PossiblyCurrentContext,
     surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
 }
 
-unsafe impl i_slint_core::platform::OpenGLInterface for OpenGLContext {
-    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error>> {
+unsafe impl i_slint_renderer_femtovg::OpenGLInterface for OpenGLContext {
+    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.context.is_current() {
             self.context.make_current(&self.surface).map_err(|glutin_error| -> PlatformError {
                 format!("FemtoVG: Error making context current: {glutin_error}").into()
@@ -26,7 +26,7 @@ unsafe impl i_slint_core::platform::OpenGLInterface for OpenGLContext {
         }
         Ok(())
     }
-    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.surface.swap_buffers(&self.context).map_err(|glutin_error| -> PlatformError {
             format!("FemtoVG: Error swapping buffers: {glutin_error}").into()
         })?;
@@ -38,7 +38,7 @@ unsafe impl i_slint_core::platform::OpenGLInterface for OpenGLContext {
         &self,
         width: NonZeroU32,
         height: NonZeroU32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.ensure_current()?;
         self.surface.resize(&self.context, width, height);
 
@@ -83,7 +83,11 @@ impl OpenGLContext {
                 .expect("internal error: Could not find any matching GL configuration")
             })
             .map_err(|glutin_err| {
-                format!("Error creating OpenGL display with glutin: {}", glutin_err)
+                format!(
+                    "Error creating OpenGL display ({:#?}) with glutin: {}",
+                    window_target.raw_display_handle(),
+                    glutin_err
+                )
             })?;
 
         let gl_display = gl_config.display();
@@ -174,6 +178,14 @@ impl OpenGLContext {
                     .into(),
             );
         }
+
+        // Try to default to vsync and ignore if the driver doesn't support it.
+        surface
+            .set_swap_interval(
+                &context,
+                glutin::surface::SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
+            )
+            .ok();
 
         Ok((window, Self { context, surface }))
     }

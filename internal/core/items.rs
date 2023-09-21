@@ -27,9 +27,9 @@ use crate::input::{
 };
 use crate::item_rendering::CachedRenderingData;
 pub use crate::item_tree::ItemRc;
-use crate::layout::{LayoutInfo, Orientation};
+use crate::layout::LayoutInfo;
 use crate::lengths::{
-    LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector, PointLengths,
+    LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector, PointLengths, RectLengths,
 };
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
@@ -111,9 +111,6 @@ pub struct ItemVTable {
     /// bindings are set.
     pub init: extern "C" fn(core::pin::Pin<VRef<ItemVTable>>, my_item: &ItemRc),
 
-    /// Returns the geometry of this item (relative to its parent item)
-    pub geometry: extern "C" fn(core::pin::Pin<VRef<ItemVTable>>) -> LogicalRect,
-
     /// offset in bytes from the *const ItemImpl.
     /// isize::MAX  means None
     #[allow(non_upper_case_globals)]
@@ -177,22 +174,11 @@ pub type ItemRef<'a> = vtable::VRef<'a, ItemVTable>;
 #[pin]
 /// The implementation of an empty items that does nothing
 pub struct Empty {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub cached_rendering_data: CachedRenderingData,
 }
 
 impl Item for Empty {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -265,22 +251,11 @@ declare_item_vtable! {
 /// The implementation of the `Rectangle` element
 pub struct Rectangle {
     pub background: Property<Brush>,
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub cached_rendering_data: CachedRenderingData,
 }
 
 impl Item for Rectangle {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -354,10 +329,6 @@ declare_item_vtable! {
 /// The implementation of the `BorderRectangle` element
 pub struct BorderRectangle {
     pub background: Property<Brush>,
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub border_width: Property<LogicalLength>,
     pub border_radius: Property<LogicalLength>,
     pub border_color: Property<Brush>,
@@ -366,13 +337,6 @@ pub struct BorderRectangle {
 
 impl Item for BorderRectangle {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -445,10 +409,6 @@ declare_item_vtable! {
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct TouchArea {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub enabled: Property<bool>,
     /// FIXME: We should annotate this as an "output" property.
     pub pressed: Property<bool>,
@@ -473,13 +433,6 @@ pub struct TouchArea {
 
 impl Item for TouchArea {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -516,7 +469,7 @@ impl Item for TouchArea {
         self: Pin<&Self>,
         event: MouseEvent,
         window_adapter: &Rc<dyn WindowAdapter>,
-        _self_rc: &ItemRc,
+        self_rc: &ItemRc,
     ) -> InputEventResult {
         if matches!(event, MouseEvent::Exit) {
             Self::FIELD_OFFSETS.has_hover.apply_pin(self).set(false);
@@ -528,12 +481,9 @@ impl Item for TouchArea {
             return InputEventResult::EventIgnored;
         }
         let result = if let MouseEvent::Released { position, button, .. } = event {
+            let geometry = self_rc.geometry();
             if button == PointerEventButton::Left
-                && LogicalRect::new(
-                    LogicalPoint::default(),
-                    LogicalSize::from_lengths(self.width(), self.height()),
-                )
-                .contains(position)
+                && LogicalRect::new(LogicalPoint::default(), geometry.size).contains(position)
                 && self.pressed()
             {
                 Self::FIELD_OFFSETS.clicked.apply_pin(self).call(&());
@@ -641,10 +591,6 @@ declare_item_vtable! {
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct FocusScope {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub enabled: Property<bool>,
     pub has_focus: Property<bool>,
     pub key_pressed: Callback<KeyEventArg, EventResult>,
@@ -655,13 +601,6 @@ pub struct FocusScope {
 
 impl Item for FocusScope {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -764,10 +703,6 @@ declare_item_vtable! {
 #[pin]
 /// The implementation of the `Clip` element
 pub struct Clip {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub border_radius: Property<LogicalLength>,
     pub border_width: Property<LogicalLength>,
     pub cached_rendering_data: CachedRenderingData,
@@ -776,13 +711,6 @@ pub struct Clip {
 
 impl Item for Clip {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -796,14 +724,15 @@ impl Item for Clip {
         self: Pin<&Self>,
         event: MouseEvent,
         _window_adapter: &Rc<dyn WindowAdapter>,
-        _self_rc: &ItemRc,
+        self_rc: &ItemRc,
     ) -> InputEventFilterResult {
         if let Some(pos) = event.position() {
+            let geometry = self_rc.geometry();
             if self.clip()
                 && (pos.x < 0 as Coord
                     || pos.y < 0 as Coord
-                    || pos.x_length() > self.width()
-                    || pos.y_length() > self.height())
+                    || pos.x_length() > geometry.width_length()
+                    || pos.y_length() > geometry.height_length())
             {
                 return InputEventFilterResult::Intercept;
             }
@@ -863,23 +792,12 @@ declare_item_vtable! {
 /// The Opacity Item is not meant to be used directly by the .slint code, instead, the `opacity: xxx` or `visible: false` should be used
 pub struct Opacity {
     // FIXME: this element shouldn't need these geometry property
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub opacity: Property<f32>,
     pub cached_rendering_data: CachedRenderingData,
 }
 
 impl Item for Opacity {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -978,24 +896,12 @@ declare_item_vtable! {
 #[pin]
 /// The Layer Item is not meant to be used directly by the .slint code, instead, the `layer: xxx` property should be used
 pub struct Layer {
-    // FIXME: this element shouldn't need these geometry property
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub cache_rendering_hint: Property<bool>,
     pub cached_rendering_data: CachedRenderingData,
 }
 
 impl Item for Layer {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -1067,25 +973,14 @@ declare_item_vtable! {
 #[pin]
 /// The implementation of the `Rotate` element
 pub struct Rotate {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
     pub rotation_angle: Property<f32>,
     pub rotation_origin_x: Property<LogicalLength>,
     pub rotation_origin_y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub cached_rendering_data: CachedRenderingData,
 }
 
 impl Item for Rotate {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -1205,13 +1100,6 @@ pub struct WindowItem {
 impl Item for WindowItem {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::default(),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
-
     fn layout_info(
         self: Pin<&Self>,
         _orientation: Orientation,
@@ -1309,11 +1197,6 @@ declare_item_vtable! {
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct BoxShadow {
-    // Rectangle properties
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub border_radius: Property<LogicalLength>,
     // Shadow specific properties
     pub offset_x: Property<LogicalLength>,
@@ -1325,13 +1208,6 @@ pub struct BoxShadow {
 
 impl Item for BoxShadow {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -1426,7 +1302,7 @@ macro_rules! declare_enums {
     ($( $(#[$enum_doc:meta])* enum $Name:ident { $( $(#[$value_doc:meta])* $Value:ident,)* })*) => {
         $(
             #[derive(Copy, Clone, Debug, PartialEq, Eq, strum::EnumString, strum::Display, Hash)]
-            #[repr(C)]
+            #[repr(u32)]
             #[strum(serialize_all = "kebab-case")]
             $(#[$enum_doc])*
             pub enum $Name {
@@ -1482,7 +1358,7 @@ i_slint_common::for_each_builtin_structs!(declare_builtin_structs);
 #[no_mangle]
 pub unsafe extern "C" fn slint_item_absolute_position(
     self_component: &vtable::VRc<crate::component::ComponentVTable>,
-    self_index: usize,
+    self_index: u32,
 ) -> LogicalPoint {
     let self_rc = ItemRc::new(self_component.clone(), self_index);
     self_rc.map_to_window(Default::default())

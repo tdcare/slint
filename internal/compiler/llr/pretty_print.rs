@@ -64,9 +64,10 @@ impl<'a> PrettyPrinter<'a> {
             self.indent()?;
             writeln!(
                 self.writer,
-                "{}: {};",
+                "{}: {};{}",
                 DisplayPropertyRef(p, &ctx),
-                DisplayExpression(&init.expression.borrow(), &ctx)
+                DisplayExpression(&init.expression.borrow(), &ctx),
+                if init.is_constant { " /*const*/" } else { "" }
             )?
         }
         for ssc in &sc.sub_components {
@@ -80,7 +81,11 @@ impl<'a> PrettyPrinter<'a> {
         for (idx, r) in sc.repeated.iter().enumerate() {
             self.indent()?;
             write!(self.writer, "for in {} : ", DisplayExpression(&r.model.borrow(), &ctx))?;
-            self.print_component(root, &r.sub_tree.root, Some(ParentCtx::new(&ctx, Some(idx))))?
+            self.print_component(
+                root,
+                &r.sub_tree.root,
+                Some(ParentCtx::new(&ctx, Some(idx as u32))),
+            )?
         }
         for w in &sc.popup_windows {
             self.indent()?;
@@ -122,7 +127,7 @@ impl<T> Display for DisplayPropertyRef<'_, T> {
                     write!(f, "{}.", sc.sub_components[*i].name)?;
                     sc = &sc.sub_components[*i].ty;
                 }
-                let i = &sc.items[*item_index];
+                let i = &sc.items[*item_index as usize];
                 write!(f, "{}.{}", i.name, prop_name)
             }
             PropertyReference::InParent { level, parent_reference } => {
@@ -236,8 +241,6 @@ impl<'a, T> Display for DisplayExpression<'a, T> {
                 stops.iter().map(|(e1, e2)| format!("{} {}", e(e1), e(e2))).join(", ")
             ),
             Expression::EnumerationValue(x) => write!(f, "{}", x),
-            Expression::ReturnStatement(Some(x)) => write!(f, "return {}", e(x)),
-            Expression::ReturnStatement(None) => f.write_str("return"),
             Expression::LayoutCacheAccess { layout_cache_prop, index, repeater_index: None } => {
                 write!(f, "{}[{}]", DisplayPropertyRef(layout_cache_prop, ctx), index)
             }

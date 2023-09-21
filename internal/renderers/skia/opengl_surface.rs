@@ -157,20 +157,10 @@ impl super::Surface for OpenGLSurface {
     fn resize_event(&self, size: PhysicalWindowSize) -> Result<(), PlatformError> {
         self.ensure_context_current()?;
 
-        let width = size.width.try_into().map_err(|_| {
-            format!(
-                "Attempting to resize OpenGL window surface with an invalid width: {}",
-                size.width
-            )
-        })?;
-        let height = size.height.try_into().map_err(|_| {
-            format!(
-                "Attempting to resize OpenGL window surface with an invalid height: {}",
-                size.height
-            )
-        })?;
+        if let Some((width, height)) = size.width.try_into().ok().zip(size.height.try_into().ok()) {
+            self.glutin_surface.resize(&self.glutin_context, width, height);
+        }
 
-        self.glutin_surface.resize(&self.glutin_context, width, height);
         Ok(())
     }
 
@@ -207,7 +197,7 @@ impl OpenGLSurface {
         cfg_if::cfg_if! {
             if #[cfg(target_os = "macos")] {
                 let prefs = [glutin::display::DisplayApiPreference::Cgl];
-            } else if #[cfg(all(feature = "x11", not(target_family = "windows")))] {
+            } else if #[cfg(all(feature = "x11", not(target_family = "windows"), not(target_os = "android")))] {
                 let mut prefs = vec![glutin::display::DisplayApiPreference::Egl];
                 // GLX can only be supported with xlib, not xcb.
                 if matches!(_window_handle.raw_window_handle(), raw_window_handle::RawWindowHandle::Xlib(..)) {
@@ -226,7 +216,14 @@ impl OpenGLSurface {
                     glutin::display::Display::new(
                         _display_handle.raw_display_handle(),
                         display_api_preference,
-                    )?
+                    )
+                    .map_err(|glutin_error| {
+                        format!(
+                            "Error creating glutin display for native display {:#?}: {}",
+                            _display_handle.raw_display_handle(),
+                            glutin_error
+                        )
+                    })?
                 };
 
                 let config_template_builder = glutin::config::ConfigTemplateBuilder::new();
@@ -342,6 +339,14 @@ impl OpenGLSurface {
             )
             .into());
         }
+
+        // Try to default to vsync and ignore if the driver doesn't support it.
+        surface
+            .set_swap_interval(
+                &context,
+                glutin::surface::SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
+            )
+            .ok();
 
         Ok((context, surface))
     }

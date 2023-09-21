@@ -21,12 +21,12 @@ import textwrap
 
 # -- Project information -----------------------------------------------------
 
-project = "Slint C++ API"
+# The full version, including alpha/beta/rc tags
+version = "1.3.0"
+
+project = f'Slint {version} C++ API'
 copyright = "SixtyFPS GmbH"
 author = "Slint Developers <info@slint.dev>"
-
-# The full version, including alpha/beta/rc tags
-version = "1.2.0"
 
 cpp_index_common_prefix = ["slint::", "slint::interpreter::"]
 
@@ -113,6 +113,11 @@ myst_enable_extensions = [
 
 # Annotate h1/h2 elements with anchors
 myst_heading_anchors = 2
+
+myst_url_schemes = {
+    "slint-reference": f"https://slint.dev/releases/{version}/docs/slint/{{{{path}}}}",
+    'http': None, 'https': None, 'mailto': None,
+}
 
 rst_epilog = """
 .. |ListView| replace:: :code:`ListView`

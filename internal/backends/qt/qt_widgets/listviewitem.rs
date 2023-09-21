@@ -9,10 +9,6 @@ use super::*;
 #[derive(FieldOffsets, Default, SlintElement)]
 #[pin]
 pub struct NativeStandardListViewItem {
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
-    pub width: Property<LogicalLength>,
-    pub height: Property<LogicalLength>,
     pub item: Property<i_slint_core::model::StandardListViewItem>,
     pub index: Property<i32>,
     pub is_selected: Property<bool>,
@@ -30,13 +26,6 @@ impl Item for NativeStandardListViewItem {
         self.widget_ptr.set(cpp! { unsafe [animation_tracker_property_ptr as "void*"] -> SlintTypeErasedWidgetPtr as "std::unique_ptr<SlintTypeErasedWidget>"  {
             return make_unique_animated_widget<QWidget>(animation_tracker_property_ptr);
         }})
-    }
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
     }
 
     fn layout_info(
@@ -142,7 +131,7 @@ impl Item for NativeStandardListViewItem {
             if (combobox && qApp->style()->styleHint(QStyle::SH_ComboBox_Popup, &cb_opt, widget)) {
                 widget->setProperty("_q_isComboBoxPopupItem", true);
                 QStyleOptionMenuItem option;
-                option.initFrom(widget);
+                option.styleObject = widget;
                 option.state |= QStyle::State(initial_state);
                 option.rect = QRect(QPoint(), size / dpr);
                 option.menuRect = QRect(QPoint(), size / dpr);
@@ -162,7 +151,7 @@ impl Item for NativeStandardListViewItem {
                 widget->setProperty("_q_isComboBoxPopupItem", {});
             } else {
                 QStyleOptionViewItem option;
-                option.initFrom(widget);
+                option.styleObject = widget;
                 option.state |= QStyle::State(initial_state);
                 option.rect = QRect(QPoint(), size / dpr);
                 option.state = QStyle::State_Enabled;

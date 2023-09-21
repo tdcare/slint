@@ -14,13 +14,11 @@ pub use crate::renderer::Renderer;
 pub use crate::software_renderer;
 #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
 use crate::unsafe_single_threaded::{thread_local, OnceCell};
-pub use crate::window::WindowAdapter;
+pub use crate::window::{LayoutConstraints, WindowAdapter, WindowProperties};
 use crate::SharedString;
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
-#[cfg(feature = "std")]
-use core::num::NonZeroU32;
 #[cfg(feature = "std")]
 use once_cell::sync::OnceCell;
 
@@ -98,18 +96,19 @@ pub trait Platform {
 }
 
 /// The clip board, used in [`Platform::clipboard_text`] and [Platform::set_clipboard_text`]
+#[repr(u8)]
 #[non_exhaustive]
 #[derive(PartialEq, Clone, Default)]
 pub enum Clipboard {
     /// This is the default clipboard used for text action for Ctrl+V,  Ctrl+C.
     /// Corresponds to the secondary clipboard on X11.
     #[default]
-    DefaultClipboard,
+    DefaultClipboard = 0,
 
     /// This is the clipboard that is used when text is selected
     /// Corresponds to the primary clipboard on X11.
     /// The Platform implementation should do nothing if copy on select is not supported on that platform.
-    SelectionClipboard,
+    SelectionClipboard = 1,
 }
 
 /// Trait that is returned by the [`Platform::new_event_loop_proxy`]
@@ -217,7 +216,7 @@ pub use crate::input::PointerEventButton;
 /// A event that describes user input or windowing system events.
 ///
 /// Slint backends typically receive events from the windowing system, translate them to this
-/// enum and deliver to the scene of items via [`slint::Window::dispatch_event()`](`crate::api::Window::dispatch_event()`).
+/// enum and deliver them to the scene of items via [`slint::Window::dispatch_event()`](`crate::api::Window::dispatch_event()`).
 ///
 /// The pointer variants describe events originating from an input device such as a mouse
 /// or a contact point on a touch-enabled surface.
@@ -226,6 +225,7 @@ pub use crate::input::PointerEventButton;
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
+#[repr(u32)]
 pub enum WindowEvent {
     /// A pointer was pressed.
     PointerPressed {
@@ -262,7 +262,7 @@ pub enum WindowEvent {
         /// ```
         text: SharedString,
     },
-    /// A key was pressed.
+    /// A key was released.
     KeyReleased {
         /// The unicode representation of the key released.
         ///
@@ -290,6 +290,19 @@ pub enum WindowEvent {
         /// The new logical size of the window
         size: LogicalSize,
     },
+    /// The user requested to close the window.
+    ///
+    /// The backend should send this event when the user tries to close the window,for example by pressing the close button.
+    ///
+    /// This will have the effect of invoking the callback set in [`Window::on_close_requested()`](`crate::api::Window::on_close_requested()`)
+    /// and then hiding the window depending on the return value of the callback.
+    CloseRequested,
+
+    /// The Window was activated or de-activated.
+    ///
+    /// The backend should dispatch this event with true when the window gains focus
+    /// and false when the window loses focus.
+    WindowActiveChanged(bool),
 }
 
 impl WindowEvent {
@@ -303,36 +316,4 @@ impl WindowEvent {
             _ => None,
         }
     }
-}
-
-/// This trait describes the interface GPU accelerated renderers in Slint require to render with OpenGL.
-///
-/// It serves the purpose to ensure that the OpenGL context is current before running any OpenGL
-/// commands, as well as providing access to the OpenGL implementation by function pointers.
-///
-/// # Safety
-///
-/// This trait is unsafe because an implementation of get_proc_address could return dangling
-/// pointers. In practice an implementation of this trait should just forward to the EGL/WGL/CGL
-/// C library that implements EGL/CGL/WGL.
-#[cfg(feature = "std")]
-#[allow(unsafe_code)]
-pub unsafe trait OpenGLInterface {
-    /// Ensures that the OpenGL context is current when returning from this function.
-    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error>>;
-    /// This function is called by the renderers when all OpenGL commands have been issued and
-    /// the back buffer is reading for on-screen presentation. Typically implementations forward
-    /// this to platform specific APIs such as eglSwapBuffers.
-    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error>>;
-    /// This function is called by the renderers when the surface needs to be resized, typically
-    /// in response to the windowing system notifying of a change in the window system.
-    /// For most implementations this is a no-op, with the exception for wayland for example.
-    fn resize(
-        &self,
-        width: NonZeroU32,
-        height: NonZeroU32,
-    ) -> Result<(), Box<dyn std::error::Error>>;
-    /// Returns the address of the OpenGL function specified by name, or a null pointer if the
-    /// function does not exist.
-    fn get_proc_address(&self, name: &std::ffi::CStr) -> *const std::ffi::c_void;
 }

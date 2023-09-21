@@ -28,9 +28,10 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build slint-wasm-interpreter
-        run: npm run build:wasm_preview-release
-        working-directory: tools/slintpad
+      - name: Compile slint-wasm-interpreter
+        run: wasm-pack build --release --target web -- --features console_error_panic_hook
+        working-directory: api/wasm-interpreter
+
       - name: Build slint-wasm-lsp
         run: npm run build:wasm_lsp-release
         working-directory: tools/slintpad
@@ -49,14 +50,14 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/install-nodejs
-      - name: Download the WASM binaries
+      - name: Download wasm_lsp Artifacts
         uses: actions/download-artifact@v3
         with:
           name: wasm
       - uses: actions/cache@v3
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-${{ github.job }}-node-${{ hashFiles('api/wasm-interpreter/pkg/package.json', 'tools/lsp/pkg/package.json', 'tools/slintpad/package.json') }}
+          key: ${{ runner.os }}-${{ github.job }}-node-${{ hashFiles('tools/lsp/pkg/package.json', 'tools/slintpad/package.json') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-node-
 
@@ -80,14 +81,14 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: ./.github/actions/install-nodejs
-      - name: Download the WASM binaries
+      - name: Download wasm_lsp Artifacts
         uses: actions/download-artifact@v3
         with:
           name: wasm
       - uses: actions/cache@v3
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-${{ github.job }}-node-${{ hashFiles('api/wasm-interpreter/pkg/package.json', 'tools/lsp/pkg/package.json', 'tools/slintpad/package.json') }}
+          key: ${{ runner.os }}-${{ github.job }}-node-${{ hashFiles('tools/lsp/pkg/package.json', 'tools/slintpad/package.json') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-node-
 
@@ -95,7 +96,7 @@ jobs:
         run: npm install
         working-directory: tools/slintpad
 
-      - name: Lint slintpad # This needs the slint-wasm-interpreter!
+      - name: Lint slintpad # This needs the WASM!
         run: |
           npm run syntax_check
           npm run lint

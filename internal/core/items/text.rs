@@ -50,8 +50,6 @@ pub struct Text {
     pub wrap: Property<TextWrap>,
     pub overflow: Property<TextOverflow>,
     pub letter_spacing: Property<LogicalLength>,
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
     pub width: Property<LogicalLength>,
     pub height: Property<LogicalLength>,
     pub cached_rendering_data: CachedRenderingData,
@@ -59,13 +57,6 @@ pub struct Text {
 
 impl Item for Text {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -227,8 +218,6 @@ pub struct TextInput {
     pub wrap: Property<TextWrap>,
     pub input_type: Property<InputType>,
     pub letter_spacing: Property<LogicalLength>,
-    pub x: Property<LogicalLength>,
-    pub y: Property<LogicalLength>,
     pub width: Property<LogicalLength>,
     pub height: Property<LogicalLength>,
     pub cursor_position_byte_offset: Property<i32>,
@@ -255,14 +244,6 @@ pub struct TextInput {
 
 impl Item for TextInput {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
-
-    // FIXME: width / height.  or maybe it doesn't matter?  (
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
-    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -479,6 +460,7 @@ impl Item for TextInput {
                 {
                     return KeyEventResult::EventIgnored;
                 }
+
                 if let Some(shortcut) = event.shortcut() {
                     match shortcut {
                         StandardShortcut::SelectAll => {
@@ -503,6 +485,21 @@ impl Item for TextInput {
                         _ => (),
                     }
                 }
+
+                let input_type = self.input_type();
+                if input_type == InputType::Number
+                    && !event.text.as_str().chars().all(|ch| ch.is_ascii_digit())
+                {
+                    return KeyEventResult::EventIgnored;
+                }
+                if input_type == InputType::Decimal {
+                    let text = self.text().clone() + event.text.as_str();
+                    if text.as_str() != "." && text.as_str() != "-" && text.parse::<f64>().is_err()
+                    {
+                        return KeyEventResult::EventIgnored;
+                    }
+                }
+
                 if self.read_only() || event.modifiers.control {
                     return KeyEventResult::EventIgnored;
                 }
@@ -1232,7 +1229,7 @@ pub unsafe extern "C" fn slint_textinput_select_all(
     text_input: *const TextInput,
     window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
     self_component: &vtable::VRc<crate::component::ComponentVTable>,
-    self_index: usize,
+    self_index: u32,
 ) {
     let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
     let self_rc = ItemRc::new(self_component.clone(), self_index);
@@ -1245,7 +1242,7 @@ pub unsafe extern "C" fn slint_textinput_clear_selection(
     text_input: *const TextInput,
     window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
     self_component: &vtable::VRc<crate::component::ComponentVTable>,
-    self_index: usize,
+    self_index: u32,
 ) {
     let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
     let self_rc = ItemRc::new(self_component.clone(), self_index);
@@ -1258,7 +1255,7 @@ pub unsafe extern "C" fn slint_textinput_cut(
     text_input: *const TextInput,
     window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
     self_component: &vtable::VRc<crate::component::ComponentVTable>,
-    self_index: usize,
+    self_index: u32,
 ) {
     let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
     let self_rc = ItemRc::new(self_component.clone(), self_index);
@@ -1271,7 +1268,7 @@ pub unsafe extern "C" fn slint_textinput_copy(
     text_input: *const TextInput,
     window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
     self_component: &vtable::VRc<crate::component::ComponentVTable>,
-    self_index: usize,
+    self_index: u32,
 ) {
     let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
     let self_rc = ItemRc::new(self_component.clone(), self_index);
@@ -1284,7 +1281,7 @@ pub unsafe extern "C" fn slint_textinput_paste(
     text_input: *const TextInput,
     window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
     self_component: &vtable::VRc<crate::component::ComponentVTable>,
-    self_index: usize,
+    self_index: u32,
 ) {
     let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
     let self_rc = ItemRc::new(self_component.clone(), self_index);

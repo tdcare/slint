@@ -17,7 +17,7 @@ use crate::input::{
 use crate::item_rendering::CachedRenderingData;
 use crate::item_tree::{ItemTreeNode, ItemVisitorVTable, TraversalOrder, VisitChildrenResult};
 use crate::layout::{LayoutInfo, Orientation};
-use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, LogicalSize};
+use crate::lengths::{LogicalLength, LogicalSize};
 use crate::properties::{Property, PropertyTracker};
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
@@ -60,7 +60,7 @@ pub struct ComponentContainer {
     component: RefCell<Option<ComponentRc>>,
 
     my_component: OnceCell<ComponentWeak>,
-    embedding_item_tree_index: OnceCell<usize>,
+    embedding_item_tree_index: OnceCell<u32>,
 }
 
 impl ComponentContainer {
@@ -158,22 +158,14 @@ impl Item for ComponentContainer {
         let pin_rc = vtable::VRc::borrow_pin(rc);
         let item_tree = pin_rc.as_ref().get_item_tree();
         let ItemTreeNode::Item { children_index: child_item_tree_index, .. } =
-            item_tree[self_rc.index()]
+            item_tree[self_rc.index() as usize]
         else {
             panic!("Internal compiler error: ComponentContainer had no child.");
         };
 
-        self.embedding_item_tree_index.set(child_item_tree_index as usize).ok().unwrap();
+        self.embedding_item_tree_index.set(child_item_tree_index).ok().unwrap();
 
         self.component_tracker.set(Box::pin(PropertyTracker::default())).ok().unwrap();
-    }
-
-    fn geometry(self: Pin<&Self>) -> LogicalRect {
-        // Our geometry is fine since our width/height are bound to the component!
-        LogicalRect::new(
-            LogicalPoint::from_lengths(self.x(), self.y()),
-            LogicalSize::from_lengths(self.width(), self.height()),
-        )
     }
 
     fn layout_info(

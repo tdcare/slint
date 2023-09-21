@@ -17,8 +17,12 @@ use i_slint_core::platform::PlatformError;
 use winitwindowadapter::*;
 pub(crate) mod event_loop;
 
-/// Internal type used by the winit backend for thread communcation and window system updates.
+/// Re-export of the winit crate.
+pub use winit;
+
+/// Internal type used by the winit backend for thread communication and window system updates.
 #[non_exhaustive]
+#[derive(Debug)]
 pub enum SlintUserEvent {
     CustomEvent { event: CustomEvent },
 }
@@ -36,6 +40,9 @@ mod renderer {
         fn render(&self, window: &i_slint_core::api::Window) -> Result<(), PlatformError>;
 
         fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer;
+
+        // Got WindowEvent::Occluded
+        fn occluded(&self, _: bool) {}
     }
 
     #[cfg(feature = "renderer-femtovg")]
