@@ -15,7 +15,7 @@ RUN  cd ohos &&  cargo zigbuild --release --target aarch64-unknown-linux-musl
 
 
 # Need cacerts
-#FROM --platform=linux/arm64/v8 alpine:3.16.0
+#FROM --ohos=linux/arm64/v8 alpine:3.16.0
 
 FROM alpine:3.16.0
 

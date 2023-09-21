@@ -424,6 +424,7 @@ impl FontCache {
         target_family = "windows",
         target_os = "macos",
         target_os = "ios",
+        target_os = "linux",
         target_arch = "wasm32"
     )))]
     fn font_fallbacks_for_request(
@@ -445,6 +446,20 @@ impl FontCache {
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn font_fallbacks_for_request(
+        &self,
+        _family: Option<&SharedString>,
+        _pixel_size: PhysicalLength,
+        _primary_font: &LoadedFont,
+        _reference_text: &str,
+    ) -> Vec<SharedString> {
+        [SharedString::from("DejaVu Sans")]
+            .iter()
+            .filter(|family_name| self.is_known_family(&family_name))
+            .cloned()
+            .collect()
+    }
+    #[cfg(target_os = "linux")]
     fn font_fallbacks_for_request(
         &self,
         _family: Option<&SharedString>,

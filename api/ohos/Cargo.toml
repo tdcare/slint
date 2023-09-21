@@ -1,34 +1,64 @@
 [package]
+name = "slint-ohos"
+version = "1.2.0"
+authors = ["TDCare <tzw@tdcare.cn>"]
 edition = "2021"
-name = "ohos"
-version = "0.0.0"
+license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial"
+description = "Slint for OpenHarmony"
+repository = "https://github.com/tdcare/slint"
+homepage = "https://slint.rs"
+categories = ["gui", "rendering::engine"]
+keywords = ["gui", "toolkit", "graphics", "design", "ui","OpenHarmony","OHOS"]
 
 
-[[bin]]
-path = "src/main.rs"
-name = "ohos"
+#[[bin]]
+#path = "src/main.rs"
+#name = "ohos"
 
+#
 [lib]
-path="src/lib.rs"
+##path="src/lib.rs"
 crate-type = ["cdylib"]
+#crate-type = ["staticlib"]
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
-napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
+napi = { version = "2.12.2", default-features = false, features = ["napi4","tokio_rt"] }
 napi-derive = "2.12.2"
 
-#slint = { path = "../api/rs/slint", default-features = false, features = [
-#    "compat-1-0",
-#    "std",
-#] }
+slint = { path = "../rs/slint", default-features = false, features = [
+    "compat-1-0",
+    "std",
+] }
 
-i-slint-core = { version = "=1.2.0", path="../../internal/core", default-features = false, features = ["ffi"] }
+i-slint-core = { version = "=1.2.0", path="../../internal/core", default-features = false, features = ["std","ffi","software-renderer"] }
+i-slint-renderer-femtovg = { version = "=1.2.0", path = "../../internal/renderers/femtovg" }
 slint-interpreter = { version = "=1.2.0", path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
 
+glutin = {git="https://gitee.com/tdcare/glutin.git",branch="0.30.x",default-features = false,features=["egl"]}
+
+#glutin_egl_sys = "0.5.1"
+
+calloop = { version = "0.10.5" }
+softbuffer = { version = "0.3.0" }
+raw-window-handle = { git="https://gitee.com/tdcare/raw-window-handle.git",branch="0.5", features = ["alloc"] }
+#libseat = { version = "0.1.7" }
+#input = { version = "0.8.2" }
+
+once_cell = "1.5"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"]}
+
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2.0.1"
 slint-build = { path = "../rs/build" }
 
+gl_generator = "0.14"
+cfg_aliases = "0.1.1"
+
 [profile.release]
 lto = true
+
+[target.'cfg(target_os = "ohos")']
+rustflags = ["--crate-type cdylib"]

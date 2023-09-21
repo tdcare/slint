@@ -5,9 +5,10 @@
 #![doc(html_logo_url = "https://slint.dev/logo/slint-logo-square-light.svg")]
 
 use std::cell::{Cell, RefCell};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
+use femtovg::TextContext;
 
 use i_slint_common::sharedfontdb;
 use i_slint_core::api::{RenderingNotifier, RenderingState, SetRenderingNotifierError};
@@ -122,7 +123,8 @@ impl FemtoVGRenderer {
             femtovg::renderer::OpenGl::new_from_function_cstr(|name| {
                 opengl_context.get_proc_address(name)
             })
-            .unwrap()
+                .map_err(|e| format!("Femtovg Error new_from_function_cstr: {e}"))?
+                // .unwrap()
         };
 
         #[cfg(target_arch = "wasm32")]
@@ -147,12 +149,19 @@ impl FemtoVGRenderer {
                 panic!("Cannot proceed without WebGL - aborting")
             }
         };
+       //TODO 字体加载需要处理
+        let text_context=self::fonts::FONT_CACHE.with(|cache| cache.borrow().text_context.clone());
+
+        // return Err(PlatformError::NoPlatform);
 
         let femtovg_canvas = femtovg::Canvas::new_with_text_context(
             gl_renderer,
-            self::fonts::FONT_CACHE.with(|cache| cache.borrow().text_context.clone()),
-        )
-        .unwrap();
+            text_context,
+        ).map_err(|e| format!("Femtovg Error canvas: {e}"))?;
+        // .unwrap();
+
+        // return Err(PlatformError::NoPlatform);
+
         let canvas = Rc::new(RefCell::new(femtovg_canvas));
 
         Ok(Self {
@@ -380,7 +389,7 @@ impl RendererSealed for FemtoVGRenderer {
         let paint = font.init_paint(text_input.letter_spacing() * scale_factor, Default::default());
         let text_context =
             crate::fonts::FONT_CACHE.with(|cache| cache.borrow().text_context.clone());
-        let font_height = text_context.measure_font(&paint).unwrap().height();
+        let font_height = text_context.measure_font(&paint).unwrap_or_default().height();
         crate::fonts::layout_text_lines(
             &visual_representation.text,
             &font,

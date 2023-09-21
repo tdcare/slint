@@ -158,7 +158,7 @@ fn embed_glyphs_with_fontdb<'a>(
             let (source, _) =
                 fontdb.face_source(*id).expect("internal error: fontdb provided ids are not valid");
             match source {
-                fontdb::Source::Binary(_) => unreachable!(),
+                fontdb::Source::Binary(_) => std::path::PathBuf::new(),
                 fontdb::Source::File(path_buf) => path_buf,
                 fontdb::Source::SharedFile(path_buf, _) => path_buf,
             }
@@ -297,11 +297,18 @@ fn get_fallback_fonts(fontdb: &sharedfontdb::FontDatabase) -> Vec<fontdue::Font>
             .map(Into::into)
             .collect::<Vec<String>>();
     }
-
+    #[cfg(target_os = "linux")]
+    {
+        fallback_families = ["Menlo", "Apple Symbols", "Apple Color Emoji"]
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<String>>();
+    }
     #[cfg(not(any(
         target_family = "windows",
         target_os = "macos",
         target_os = "ios",
+        target_os = "linux",
         target_arch = "wasm32"
     )))]
     {
