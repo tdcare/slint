@@ -1,6 +1,6 @@
 [package]
 name = "slint-ohos"
-version = "1.2.0"
+version = "1.3.0"
 authors = ["TDCare <tzw@tdcare.cn>"]
 edition = "2021"
 license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial"
@@ -20,6 +20,7 @@ keywords = ["gui", "toolkit", "graphics", "design", "ui","OpenHarmony","OHOS"]
 ##path="src/lib.rs"
 crate-type = ["cdylib"]
 #crate-type = ["staticlib"]
+[features]
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
@@ -29,11 +30,12 @@ napi-derive = "2.12.2"
 slint = { path = "../rs/slint", default-features = false, features = [
     "compat-1-0",
     "std",
+    "ohos",
 ] }
 
-i-slint-core = { version = "=1.2.0", path="../../internal/core", default-features = false, features = ["std","ffi","software-renderer"] }
-i-slint-renderer-femtovg = { version = "=1.2.0", path = "../../internal/renderers/femtovg" }
-slint-interpreter = { version = "=1.2.0", path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
+i-slint-core = { version = "=1.3.0", path="../../internal/core", default-features = false, features = ["std","ffi","software-renderer","ohos"] }
+i-slint-renderer-femtovg = { version = "=1.3.0", path = "../../internal/renderers/femtovg",features=["ohos"] }
+slint-interpreter = { version = "=1.3.0", path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
 
 glutin = {git="https://gitee.com/tdcare/glutin.git",branch="0.30.x",default-features = false,features=["egl"]}
 

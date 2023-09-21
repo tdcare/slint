@@ -424,7 +424,7 @@ impl FontCache {
         target_family = "windows",
         target_os = "macos",
         target_os = "ios",
-        target_os = "linux",
+        feature = "ohos",
         target_arch = "wasm32"
     )))]
     fn font_fallbacks_for_request(
@@ -459,7 +459,7 @@ impl FontCache {
             .cloned()
             .collect()
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "ohos")]
     fn font_fallbacks_for_request(
         &self,
         _family: Option<&SharedString>,

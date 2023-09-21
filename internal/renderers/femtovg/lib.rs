@@ -149,7 +149,6 @@ impl FemtoVGRenderer {
                 panic!("Cannot proceed without WebGL - aborting")
             }
         };
-       //TODO 字体加载需要处理
         let text_context=self::fonts::FONT_CACHE.with(|cache| cache.borrow().text_context.clone());
 
         // return Err(PlatformError::NoPlatform);

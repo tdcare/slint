@@ -14,8 +14,8 @@ pub struct FontDatabase {
         target_family = "windows",
         target_os = "macos",
         target_os = "ios",
-        target_os = "linux",
-       target_arch = "wasm32"
+        feature = "ohos",
+        target_arch = "wasm32"
     )))]
     pub fontconfig_fallback_families: Vec<String>,
     // Default font families to use instead of SansSerif when SLINT_DEFAULT_FONT env var is set.
@@ -58,7 +58,7 @@ thread_local! {
     target_family = "windows",
     target_os = "macos",
     target_os = "ios",
-    target_os = "linux",
+    feature = "ohos",
     target_arch = "wasm32"
 )))]
 mod fontconfig;
@@ -104,7 +104,7 @@ fn init_fontdb() -> FontDatabase {
             })
             .unwrap_or_default();
 
-    #[cfg(any(target_arch = "wasm32",target_os = "linux"))]
+    #[cfg(any(target_arch = "wasm32",feature = "ohos"))]
     let (default_font_family_ids, default_font_family_names) =
         (Default::default(), Default::default());
 
@@ -112,19 +112,19 @@ fn init_fontdb() -> FontDatabase {
         target_family = "windows",
         target_os = "macos",
         target_os = "ios",
-        target_os = "linux",
+        feature = "ohos",
         target_arch = "wasm32"
     )))]
     let mut fontconfig_fallback_families = Vec::new();
 
-    #[cfg(any(target_arch = "wasm32",target_os = "linux"))]
+    #[cfg(any(target_arch = "wasm32",feature = "ohos"))]
     {
         let data = include_bytes!("sharedfontdb/DejaVuSans.ttf");
         font_db.load_font_data(data.to_vec());
         font_db.set_sans_serif_family("DejaVu Sans");
     }
 
-    #[cfg(not(any(target_arch = "wasm32",target_os = "linux")))]
+    #[cfg(not(any(target_arch = "wasm32",feature = "ohos")))]
     {
         font_db.load_system_fonts();
         cfg_if::cfg_if! {
@@ -132,7 +132,7 @@ fn init_fontdb() -> FontDatabase {
                 target_family = "windows",
                 target_os = "macos",
                 target_os = "ios",
-                target_os = "linux",
+                feature = "ohos",
                 target_arch = "wasm32"
             )))] {
                 match fontconfig::find_families("sans-serif") {
@@ -166,7 +166,7 @@ fn init_fontdb() -> FontDatabase {
             target_family = "windows",
             target_os = "macos",
             target_os = "ios",
-            target_os = "linux",
+            feature = "ohos",
             target_arch = "wasm32"
         )))]
         fontconfig_fallback_families,

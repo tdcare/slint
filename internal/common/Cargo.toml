@@ -17,6 +17,7 @@ path = "lib.rs"
 
 [features]
 shared-fontdb = ["dep:fontdb", "dep:libloading", "derive_more", "cfg-if"]
+ohos=[]
 
 [dependencies]
 fontdb = { workspace = true, optional = true }

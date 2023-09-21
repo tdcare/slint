@@ -18,7 +18,7 @@ use glutin::{
     prelude::*,
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
-
+use i_slint_renderer_femtovg::OpenGLInterface;
 use crate::display::egldisplay::EglDisplay;
 use crate::ohoswindowadapter::OhosRenderer;
 
@@ -126,8 +126,8 @@ impl GlContextWrapper {
 
     }
 }
-unsafe impl i_slint_core::platform::OpenGLInterface for GlContextWrapper {
-    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error>> {
+unsafe impl OpenGLInterface for GlContextWrapper {
+    fn ensure_current(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.glutin_context.is_current() {
             self.glutin_context.make_current(&self.glutin_surface).map_err(
                 |glutin_error| -> PlatformError {
@@ -138,7 +138,7 @@ unsafe impl i_slint_core::platform::OpenGLInterface for GlContextWrapper {
         Ok(())
     }
 
-    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn swap_buffers(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.glutin_surface.swap_buffers(&self.glutin_context).map_err(
             |glutin_error| -> PlatformError {
                 format!("FemtoVG: Error swapping buffers: {glutin_error}").into()
@@ -152,7 +152,7 @@ unsafe impl i_slint_core::platform::OpenGLInterface for GlContextWrapper {
         &self,
         width: NonZeroU32,
         height: NonZeroU32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // if self.egl_display.size.height != height.get()
         //     || self.egl_display.size.width != width.get()
         // {

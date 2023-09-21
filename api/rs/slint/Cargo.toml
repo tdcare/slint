@@ -149,6 +149,8 @@ renderer-software = ["i-slint-backend-selector/renderer-software", "i-slint-core
 ## windowing system. (Experimental)
 backend-linuxkms = ["i-slint-backend-selector/backend-linuxkms", "std"]
 
+ohos=["i-slint-core/ohos"]
+
 [dependencies]
 i-slint-core = { version = "=1.3.0", path = "../../../internal/core", default-features = false }
 slint-macros = { version = "=1.3.0", path = "../macros" }
