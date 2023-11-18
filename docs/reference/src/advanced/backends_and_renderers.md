@@ -59,8 +59,14 @@ The Qt renderer comes with the [Qt backend](backend_qt.md) and renders using QPa
 - Runs anywhere, highly portable, and lightweight.
 - Software rendering, no GPU acceleration.
 - Supports partial rendering.
+- Supports line-by-line rendering (Rust only).
 - Suitable for Microcontrollers.
-- No support for `Path` rendering and image rotation yet.
+- Some features haven't been implemented yet:
+  * No support for `Path`.
+  * No image rotation or smooth scaling.
+  * No support for `drop-shadow-*` properties.
+  * No support for `border-radius` in combination with `clip: true`.
+  * No circular gradients.
 - Text rendering currently limited to western scripts.
 - Available in the [Winit backend](backend_winit.md).
 - Public [Rust](slint-rust:platform/software_renderer/) and [C++](slint-cpp:api/classslint_1_1platform_1_1SoftwareRenderer) API.
@@ -97,3 +103,20 @@ issues we're aware of and how to resolve them.
   The error happens when that path contains spaces. By default that's in `%HOMEPATH%\.cargo`,
   which contains spaces if the login name contains spaces. To resolve this issue, set the `CARGO_HOME`
   environment variable to a path without spaces, such as `c:\cargo_home`.
+
+* Compilation error when compiling for ARMv7 with hardware floating-pointer support
+
+  You may see compiler errors that contain this message:
+
+  ```
+   Unable to generate bindings: ClangDiagnostic("/home/runner/work/slint/yocto-sdk/sysroots/cortexa15t2hf-neon-poky-linux-gnueabi/usr/include/gnu/stubs-32.h:7:11: fatal error: 'gnu/stubs-soft.h' file not found\n")
+  ```
+
+  The Skia build invokes clang in multiple occasions and is sensitive to compiler flags
+  that affect the floating point abi (such as `-mfloat-abi=hard`), as they affect header file lookups.
+
+  The solve this, set the `BINDGEN_EXTRA_CLANG_ARGS` environment variable to contain the same
+  flags that your build environment also passes to the C++ compiler.
+
+  For example, if you're building against a Yocto SDK, then you can find these flags in the
+  `OECORE_TUNE_CCARGS` environment variable.

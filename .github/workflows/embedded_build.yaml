@@ -6,6 +6,9 @@ name: Embedded Build
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: '0 1 * * *'
+
 jobs:
   build_containers:
     runs-on: ubuntu-22.04
@@ -68,7 +71,7 @@ jobs:
       with:
         crate: cross
     - name: Build
-      run: cross build --release --target=${{ matrix.target }} --workspace --exclude slint-node --exclude mcu-board-support --exclude printerdemo_mcu ${{ env.EXTRA_ARGS }}
+      run: cross build --release --target=${{ matrix.target }} --workspace --exclude slint-node --exclude slint-napi --exclude ffmpeg --exclude mcu-board-support --exclude printerdemo_mcu --exclude i-slint-backend-linuxkms --exclude uefi-demo ${{ env.EXTRA_ARGS }}
     - name: "Upload printerdemo artifact"
       uses: actions/upload-artifact@v3
       with:

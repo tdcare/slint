@@ -28,18 +28,18 @@ impl TestView {
 
 #[cfg(test)]
 impl ModelChangeListener for TestView {
-    fn row_changed(&self, row: usize) {
+    fn row_changed(self: Pin<&Self>, row: usize) {
         self.changed_rows.borrow_mut().push(row);
     }
 
-    fn row_added(&self, index: usize, count: usize) {
+    fn row_added(self: Pin<&Self>, index: usize, count: usize) {
         self.added_rows.borrow_mut().push((index, count));
     }
 
-    fn row_removed(&self, index: usize, count: usize) {
+    fn row_removed(self: Pin<&Self>, index: usize, count: usize) {
         self.removed_rows.borrow_mut().push((index, count));
     }
-    fn reset(&self) {
+    fn reset(self: Pin<&Self>) {
         *self.reset.borrow_mut() += 1;
     }
 }
@@ -165,9 +165,14 @@ where
     M: Model<Data = T>,
 {
     /// Creates a new MapModel based on the given `wrapped_model` and `map_function`.
-    /// Alternativly you can use [`ModelExt::map`] on your Model.
+    /// Alternatively you can use [`ModelExt::map`] on your Model.
     pub fn new(wrapped_model: M, map_function: F) -> Self {
         Self { wrapped_model, map_function }
+    }
+
+    /// Returns a reference to the inner model
+    pub fn source_model(&self) -> &M {
+        &self.wrapped_model
     }
 }
 
@@ -217,7 +222,7 @@ where
     M: Model + 'static,
     F: Fn(&M::Data) -> bool + 'static,
 {
-    fn row_changed(&self, row: usize) {
+    fn row_changed(self: Pin<&Self>, row: usize) {
         let mut mapping = self.mapping.borrow_mut();
 
         let (index, is_contained) = match mapping.binary_search(&row) {
@@ -242,7 +247,7 @@ where
         }
     }
 
-    fn row_added(&self, index: usize, count: usize) {
+    fn row_added(self: Pin<&Self>, index: usize, count: usize) {
         if count == 0 {
             return;
         }
@@ -273,7 +278,7 @@ where
         }
     }
 
-    fn row_removed(&self, index: usize, count: usize) {
+    fn row_removed(self: Pin<&Self>, index: usize, count: usize) {
         if count == 0 {
             return;
         }
@@ -295,7 +300,7 @@ where
         }
     }
 
-    fn reset(&self) {
+    fn reset(self: Pin<&Self>) {
         self.build_mapping_vec();
         self.notify.reset();
     }
@@ -372,7 +377,7 @@ where
     F: Fn(&M::Data) -> bool + 'static,
 {
     /// Creates a new FilterModel based on the given `wrapped_model` and filtered by `filter_function`.
-    /// Alternativly you can use [`ModelExt::filter`] on your Model.
+    /// Alternatively you can use [`ModelExt::filter`] on your Model.
     pub fn new(wrapped_model: M, filter_function: F) -> Self {
         let filter_model_inner = FilterModelInner {
             wrapped_model,
@@ -393,12 +398,17 @@ where
     /// Manually reapply the filter. You need to run this e.g. if the filtering function depends on
     /// mutable state and it has changed.
     pub fn reset(&self) {
-        self.0.reset();
+        self.0.as_ref().get().reset();
     }
 
     /// Gets the row index of the underlying unfiltered model for a given filtered row index.
     pub fn unfiltered_row(&self, filtered_row: usize) -> usize {
         self.0.mapping.borrow()[filtered_row]
+    }
+
+    /// Returns a reference to the inner model
+    pub fn source_model(&self) -> &M {
+        &self.0.as_ref().get().get_ref().wrapped_model
     }
 }
 
@@ -428,6 +438,10 @@ where
 
     fn model_tracker(&self) -> &dyn ModelTracker {
         &self.0.notify
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }
 
@@ -469,6 +483,24 @@ fn test_filter_model() {
     assert_eq!(filter.row_count(), 5);
 }
 
+#[test]
+fn test_filter_model_source_model() {
+    let wrapped_rc = Rc::new(VecModel::from(vec![1, 2, 3, 4]));
+    let model = FilterModel::new(wrapped_rc.clone(), |x| x % 2 == 0);
+
+    let observer = Box::pin(ModelChangeListenerContainer::<TestView>::default());
+    model.model_tracker().attach_peer(Pin::as_ref(&observer).model_peer());
+
+    model.source_model().push(5);
+    model.source_model().push(6);
+
+    let expected = &[2, 4, 6];
+    assert_eq!(model.row_count(), expected.len());
+    for (i, v) in expected.iter().enumerate() {
+        assert_eq!(model.row_data(i), Some(*v), "Expected {} at index {}", v, i);
+    }
+}
+
 pub trait SortHelper<D> {
     fn cmp(&mut self, lhs: &D, rhs: &D) -> core::cmp::Ordering;
 }
@@ -496,7 +528,7 @@ where
 struct SortModelInner<M, S>
 where
     M: Model + 'static,
-    S: SortHelper<M::Data>,
+    S: SortHelper<M::Data> + 'static,
 {
     wrapped_model: M,
     sort_helper: RefCell<S>,
@@ -534,9 +566,9 @@ where
 impl<M, S> ModelChangeListener for SortModelInner<M, S>
 where
     M: Model + 'static,
-    S: SortHelper<M::Data>,
+    S: SortHelper<M::Data> + 'static,
 {
-    fn row_changed(&self, row: usize) {
+    fn row_changed(self: Pin<&Self>, row: usize) {
         if self.sorted_rows_dirty.get() {
             self.reset();
             return;
@@ -566,7 +598,7 @@ where
         }
     }
 
-    fn row_added(&self, index: usize, count: usize) {
+    fn row_added(self: Pin<&Self>, index: usize, count: usize) {
         if count == 0 {
             return;
         }
@@ -597,7 +629,7 @@ where
         }
     }
 
-    fn row_removed(&self, index: usize, count: usize) {
+    fn row_removed(self: Pin<&Self>, index: usize, count: usize) {
         if count == 0 {
             return;
         }
@@ -636,7 +668,7 @@ where
         }
     }
 
-    fn reset(&self) {
+    fn reset(self: Pin<&Self>) {
         self.sorted_rows_dirty.set(true);
         self.notify.reset();
     }
@@ -738,7 +770,7 @@ where
 pub struct SortModel<M, F>(Pin<Box<ModelChangeListenerContainer<SortModelInner<M, F>>>>)
 where
     M: Model + 'static,
-    F: SortHelper<M::Data>;
+    F: SortHelper<M::Data> + 'static;
 
 impl<M, F> SortModel<M, F>
 where
@@ -746,7 +778,7 @@ where
     F: FnMut(&M::Data, &M::Data) -> core::cmp::Ordering + 'static,
 {
     /// Creates a new SortModel based on the given `wrapped_model` and sorted by `sort_function`.
-    /// Alternativly you can use [`ModelExt::sort_by`] on your Model.
+    /// Alternatively you can use [`ModelExt::sort_by`] on your Model.
     pub fn new(wrapped_model: M, sort_function: F) -> Self
     where
         F: FnMut(&M::Data, &M::Data) -> core::cmp::Ordering + 'static,
@@ -765,6 +797,11 @@ where
 
         Self(container)
     }
+
+    /// Returns a reference to the inner model
+    pub fn source_model(&self) -> &M {
+        &self.0.as_ref().get().get_ref().wrapped_model
+    }
 }
 
 impl<M> SortModel<M, AscendingSortHelper>
@@ -773,7 +810,7 @@ where
     M::Data: core::cmp::Ord,
 {
     /// Creates a new SortModel based on the given `wrapped_model` and sorted in ascending order.
-    /// Alternativly you can use [`ModelExt::sort`] on your Model.
+    /// Alternatively you can use [`ModelExt::sort`] on your Model.
     pub fn new_ascending(wrapped_model: M) -> Self
     where
         M::Data: core::cmp::Ord,
@@ -796,7 +833,7 @@ where
     /// Manually reapply the sorting. You need to run this e.g. if the sort function depends
     /// on mutable state and it has changed.
     pub fn reset(&self) {
-        self.0.reset();
+        self.0.as_ref().get().reset();
     }
 
     /// Gets the row index of the underlying unsorted model for a given sorted row index.
@@ -834,6 +871,10 @@ where
 
     fn model_tracker(&self) -> &dyn ModelTracker {
         &self.0.notify
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }
 
@@ -949,6 +990,24 @@ mod sort_tests {
         assert_eq!(sorted_model.row_data(2).unwrap(), 2);
         assert_eq!(sorted_model.row_data(3).unwrap(), 3);
     }
+
+    #[test]
+    fn test_sorted_model_source_model() {
+        let wrapped_rc = Rc::new(VecModel::from(vec![3, 4, 1, 2]));
+        let model = SortModel::new(wrapped_rc.clone(), |lhs, rhs| lhs.cmp(rhs));
+
+        let observer = Box::pin(ModelChangeListenerContainer::<TestView>::default());
+        model.model_tracker().attach_peer(Pin::as_ref(&observer).model_peer());
+
+        model.source_model().push(6);
+        model.source_model().push(5);
+
+        let expected = &[1, 2, 3, 4, 5, 6];
+        assert_eq!(model.row_count(), expected.len());
+        for (i, v) in expected.iter().enumerate() {
+            assert_eq!(model.row_data(i), Some(*v), "Expected {} at index {}", v, i);
+        }
+    }
 }
 
 /// Provides a reversed view of another [`Model`].
@@ -1030,25 +1089,25 @@ impl<M> ModelChangeListener for ReverseModelInner<M>
 where
     M: Model + 'static,
 {
-    fn row_changed(&self, row: usize) {
+    fn row_changed(self: Pin<&Self>, row: usize) {
         self.notify.row_changed(self.wrapped_model.row_count() - 1 - row);
     }
 
-    fn row_added(&self, index: usize, count: usize) {
+    fn row_added(self: Pin<&Self>, index: usize, count: usize) {
         let row_count = self.wrapped_model.row_count();
         let old_row_count = row_count - count;
         let index = old_row_count - index;
         self.notify.row_added(index, count);
     }
 
-    fn row_removed(&self, index: usize, count: usize) {
+    fn row_removed(self: Pin<&Self>, index: usize, count: usize) {
         let row_count = self.wrapped_model.row_count();
         let old_row_count = row_count + count;
         let index = old_row_count - index - 1;
         self.notify.row_removed(index, count);
     }
 
-    fn reset(&self) {
+    fn reset(self: Pin<&Self>) {
         self.notify.reset()
     }
 }
@@ -1058,12 +1117,17 @@ where
     M: Model + 'static,
 {
     /// Creates a new ReverseModel based on the given `wrapped_model`.
-    /// Alternativly you can use [`ModelExt::reverse`] on your Model.
+    /// Alternatively you can use [`ModelExt::reverse`] on your Model.
     pub fn new(wrapped_model: M) -> Self {
         let inner = ReverseModelInner { wrapped_model, notify: Default::default() };
         let container = Box::pin(ModelChangeListenerContainer::new(inner));
         container.wrapped_model.model_tracker().attach_peer(container.as_ref().model_peer());
         Self(container)
+    }
+
+    /// Returns a reference to the inner model
+    pub fn source_model(&self) -> &M {
+        &self.0.as_ref().get().get_ref().wrapped_model
     }
 }
 
@@ -1088,6 +1152,10 @@ where
 
     fn model_tracker(&self) -> &dyn ModelTracker {
         &self.0.notify
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
     }
 }
 
@@ -1186,5 +1254,18 @@ mod reversed_tests {
             assert_eq!(*observer.reset.borrow(), 0);
             assert_eq!(model.row_data(mapped_idx), Some(10));
         }
+    }
+
+    #[test]
+    fn test_reversed_model_source_model() {
+        let wrapped_rc = Rc::new(VecModel::from(vec![1, 2, 3, 4]));
+        let model = ReverseModel::new(wrapped_rc.clone());
+
+        let observer = Box::pin(ModelChangeListenerContainer::<TestView>::default());
+        model.model_tracker().attach_peer(Pin::as_ref(&observer).model_peer());
+
+        model.source_model().push(5);
+
+        check_content(&model, &[5, 4, 3, 2, 1]);
     }
 }

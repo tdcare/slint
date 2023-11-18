@@ -1,18 +1,18 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-// cSpell: ignore antialiasing frameless qbrush qpointf qreal qwidgetsize svgz
+// cSpell: ignore frameless qbrush qpointf qreal qwidgetsize svgz
 
 use cpp::*;
 use euclid::approxeq::ApproxEq;
-use i_slint_core::component::{ComponentRc, ComponentRef};
 use i_slint_core::graphics::euclid::num::Zero;
 use i_slint_core::graphics::rendering_metrics_collector::{
     RenderingMetrics, RenderingMetricsCollector,
 };
 use i_slint_core::graphics::{euclid, Brush, Color, FontRequest, Image, Point, SharedImageBuffer};
-use i_slint_core::input::{KeyEventType, KeyInputEvent, MouseEvent};
+use i_slint_core::input::{KeyEvent, KeyEventType, MouseEvent};
 use i_slint_core::item_rendering::{ItemCache, ItemRenderer};
+use i_slint_core::item_tree::{ItemTreeRc, ItemTreeRef};
 use i_slint_core::items::{
     self, FillRule, ImageRendering, ItemRc, ItemRef, Layer, MouseCursor, Opacity,
     PointerEventButton, RenderingResult, TextOverflow, TextWrap,
@@ -83,7 +83,10 @@ cpp! {{
     struct SlintWidget : QWidget {
         void *rust_window;
         bool isMouseButtonDown = false;
-        QPoint ime_position;
+        QRect ime_position;
+        QString ime_text;
+        int ime_cursor;
+        int ime_anchor;
 
         SlintWidget() {
             setMouseTracking(true);
@@ -228,7 +231,7 @@ cpp! {{
         QSize sizeHint() const override {
             auto preferred_size = rust!(Slint_sizeHint [rust_window: &QtWindow as "void*"] -> qttypes::QSize as "QSize" {
                 let component_rc = WindowInner::from_pub(&rust_window.window).component();
-                let component = ComponentRc::borrow_pin(&component_rc);
+                let component = ItemTreeRc::borrow_pin(&component_rc);
                 let layout_info_h = component.as_ref().layout_info(Orientation::Horizontal);
                 let layout_info_v = component.as_ref().layout_info(Orientation::Vertical);
                 qttypes::QSize {
@@ -245,9 +248,13 @@ cpp! {{
 
         QVariant inputMethodQuery(Qt::InputMethodQuery query) const override {
             switch (query) {
-            case Qt::ImCursorRectangle: {
-                return QRect(ime_position.x(), ime_position.y(), 1, 1);
-            }
+            case Qt::ImCursorRectangle: return ime_position;
+            case Qt::ImCursorPosition: return ime_cursor;
+            case Qt::ImSurroundingText: return ime_text;
+            case Qt::ImCurrentSelection: return ime_text.mid(qMin(ime_cursor, ime_anchor), qAbs(ime_cursor - ime_anchor));
+            case Qt::ImAnchorPosition: return ime_anchor;
+            case Qt::ImTextBeforeCursor: return ime_text.left(ime_cursor);
+            case Qt::ImTextAfterCursor: return ime_text.right(ime_cursor);
             default: break;
             }
             return QWidget::inputMethodQuery(query);
@@ -257,18 +264,17 @@ cpp! {{
             QString commit_string = event->commitString();
             QString preedit_string = event->preeditString();
             int replacement_start = event->replacementStart();
+            QStringView ime_text(this->ime_text);
+            replacement_start = replacement_start < 0 ?
+                -ime_text.mid(ime_cursor,-replacement_start).toUtf8().size() :
+                ime_text.mid(ime_cursor,replacement_start).toUtf8().size();
             int replacement_length = qMax(0, event->replacementLength());
-            if (replacement_start < 0) {
-                // Not sure if this can happen yet, but this way we can safely cast to usize below.
-                replacement_start = 0;
-                replacement_length = 0;
-            }
-
+            ime_text.mid(ime_cursor + replacement_start, replacement_length).toUtf8().size();
             int preedit_cursor = -1;
             for (const QInputMethodEvent::Attribute &attribute: event->attributes()) {
                 if (attribute.type == QInputMethodEvent::Cursor) {
                     if (attribute.length > 0) {
-                        preedit_cursor = attribute.start;
+                        preedit_cursor = QStringView(preedit_string).left(attribute.start).toUtf8().size();
                     }
                 }
             }
@@ -278,22 +284,15 @@ cpp! {{
                 preedit_cursor: i32 as "int"] {
                     let runtime_window = WindowInner::from_pub(&rust_window.window);
 
-                    let event = KeyInputEvent {
+                    let event = KeyEvent {
                         event_type: KeyEventType::UpdateComposition,
-                        text: preedit_string.to_string().into(),
-                        preedit_selection_start: replacement_start as usize,
-                        preedit_selection_end: replacement_start as usize + replacement_length as usize,
+                        text: i_slint_core::format!("{}", commit_string),
+                        preedit_text: i_slint_core::format!("{}", preedit_string),
+                        preedit_selection: (preedit_cursor >= 0).then_some(preedit_cursor..preedit_cursor),
+                        replacement_range: Some(replacement_start..replacement_start+replacement_length),
+                        ..Default::default()
                     };
                     runtime_window.process_key_input(event);
-
-                    if !commit_string.is_empty() {
-                        let event = KeyInputEvent {
-                            event_type: KeyEventType::CommitComposition,
-                            text: commit_string.to_string().into(),
-                            ..Default::default()
-                        };
-                        runtime_window.process_key_input(event);
-                    }
                 });
         }
     };
@@ -1327,7 +1326,7 @@ impl QtItemRenderer<'_> {
 
             i_slint_core::item_rendering::render_item_children(
                 self,
-                &item_rc.component(),
+                &item_rc.item_tree(),
                 item_rc.index() as isize,
             );
 
@@ -1345,7 +1344,7 @@ impl QtItemRenderer<'_> {
             let children_rect = i_slint_core::properties::evaluate_no_tracking(|| {
                 self_rc.geometry().union(
                     &i_slint_core::item_rendering::item_children_bounding_rect(
-                        &self_rc.component(),
+                        &self_rc.item_tree(),
                         self_rc.index() as isize,
                         &current_clip,
                     ),
@@ -1530,11 +1529,25 @@ impl WindowAdapter for QtWindow {
             self.rendering_metrics_collector.take();
             let widget_ptr = self.widget_ptr();
             cpp! {unsafe [widget_ptr as "QWidget*"] {
+
+                bool wasVisible = widget_ptr->isVisible();
+
                 widget_ptr->hide();
                 // Since we don't call close(), this will force Qt to recompute wether there are any
                 // visible windows, and ends the application if needed
-                QEventLoopLocker();
+                auto _locker = QEventLoopLocker();
+
+                // Compute the same thing also manually, when the event loop is driven by processEvents
+                // like in the NodeJS port.
+                if (wasVisible) {
+                    auto windows = QGuiApplication::topLevelWindows();
+                    bool visible_windows_left = std::any_of(windows.begin(), windows.end(), [](auto window) {
+                        return window->isVisible() || window->transientParent();
+                    });
+                    g_lastWindowClosed = !visible_windows_left;
+                }
             }};
+
             Ok(())
         }
     }
@@ -1683,13 +1696,13 @@ fn into_qsize(logical_size: i_slint_core::api::LogicalSize) -> qttypes::QSize {
 }
 
 impl WindowAdapterInternal for QtWindow {
-    fn register_component(&self) {
+    fn register_item_tree(&self) {
         self.tree_structure_changed.replace(true);
     }
 
-    fn unregister_component(
+    fn unregister_item_tree(
         &self,
-        _component: ComponentRef,
+        _component: ItemTreeRef,
         _: &mut dyn Iterator<Item = Pin<ItemRef<'_>>>,
     ) {
         self.tree_structure_changed.replace(true);
@@ -1752,28 +1765,43 @@ impl WindowAdapterInternal for QtWindow {
 
     fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
         let widget_ptr = self.widget_ptr();
-        match request {
-            i_slint_core::window::InputMethodRequest::Enable { input_type, .. } => {
-                let enable: bool = matches!(input_type, i_slint_core::items::InputType::Text);
-                cpp! {unsafe [widget_ptr as "QWidget*", enable as "bool"] {
-                    widget_ptr->setAttribute(Qt::WA_InputMethodEnabled, enable);
-                }};
-            }
-            i_slint_core::window::InputMethodRequest::Disable { .. } => {
+        let props = match request {
+            i_slint_core::window::InputMethodRequest::Enable(props) => {
                 cpp! {unsafe [widget_ptr as "QWidget*"] {
+                    widget_ptr->setAttribute(Qt::WA_InputMethodEnabled, true);
+                }};
+                props
+            }
+            i_slint_core::window::InputMethodRequest::Disable => {
+                cpp! {unsafe [widget_ptr as "SlintWidget*"] {
+                    widget_ptr->ime_text = "";
+                    widget_ptr->ime_cursor = 0;
+                    widget_ptr->ime_anchor = 0;
                     widget_ptr->setAttribute(Qt::WA_InputMethodEnabled, false);
                 }};
+                return;
             }
-            i_slint_core::window::InputMethodRequest::SetPosition { position, .. } => {
-                let pos = qttypes::QPoint { x: position.x as _, y: position.y as _ };
-                let widget_ptr = self.widget_ptr();
-                cpp! {unsafe [widget_ptr as "SlintWidget*", pos as "QPoint"]  {
-                    widget_ptr->ime_position = pos;
-                    QGuiApplication::inputMethod()->update(Qt::ImQueryInput);
-                }};
-            }
-            _ => {}
-        }
+            i_slint_core::window::InputMethodRequest::Update(props) => props,
+            _ => return,
+        };
+
+        let rect = qttypes::QRectF {
+            x: props.cursor_rect_origin.x as _,
+            y: props.cursor_rect_origin.y as _,
+            width: props.cursor_rect_size.width as _,
+            height: props.cursor_rect_size.height as _,
+        };
+        let cursor: i32 = props.text[..props.cursor_position].encode_utf16().count() as _;
+        let anchor: i32 =
+            props.anchor_position.map_or(cursor, |a| props.text[..a].encode_utf16().count() as _);
+        let text: qttypes::QString = props.text.as_str().into();
+        cpp! {unsafe [widget_ptr as "SlintWidget*", rect as "QRectF", cursor as "int", anchor as "int", text as "QString"]  {
+            widget_ptr->ime_position = rect.toRect();
+            widget_ptr->ime_text = text;
+            widget_ptr->ime_cursor = cursor;
+            widget_ptr->ime_anchor = anchor;
+            QGuiApplication::inputMethod()->update(Qt::ImQueryInput);
+        }};
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1968,7 +1996,7 @@ impl i_slint_core::renderer::RendererSealed for QtWindow {
 
     fn free_graphics_resources(
         &self,
-        component: ComponentRef,
+        component: ItemTreeRef,
         _items: &mut dyn Iterator<Item = Pin<i_slint_core::items::ItemRef<'_>>>,
     ) -> Result<(), i_slint_core::platform::PlatformError> {
         // Invalidate caches:
@@ -2074,7 +2102,7 @@ pub(crate) fn timer_event() {
 
 mod key_codes {
     macro_rules! define_qt_key_to_string_fn {
-        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident)|* # $($_xkb:ident)|*;)*) => {
+        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident $(($_pos:ident))?)|* # $($_xkb:ident)|*;)*) => {
             use crate::key_generated;
             pub fn qt_key_to_string(key: key_generated::Qt_Key) -> Option<i_slint_core::SharedString> {
 

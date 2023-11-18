@@ -91,15 +91,12 @@ impl Item for NativeScrollView {
         orientation: Orientation,
         _window_adapter: &Rc<dyn WindowAdapter>,
     ) -> LayoutInfo {
-        LayoutInfo {
-            min: match orientation {
-                Orientation::Horizontal => self.native_padding_left() + self.native_padding_right(),
-                Orientation::Vertical => self.native_padding_top() + self.native_padding_bottom(),
-            }
-            .get(),
-            stretch: 1.,
-            ..LayoutInfo::default()
+        let min = match orientation {
+            Orientation::Horizontal => self.native_padding_left() + self.native_padding_right(),
+            Orientation::Vertical => self.native_padding_top() + self.native_padding_bottom(),
         }
+        .get();
+        LayoutInfo { min, preferred: min, stretch: 1., ..LayoutInfo::default() }
     }
 
     fn input_event_filter_before_children(
@@ -212,8 +209,16 @@ impl Item for NativeScrollView {
                         InputEventResult::EventAccepted
                     }
                 }
-                MouseEvent::Wheel { .. } => {
-                    // TODO
+                MouseEvent::Wheel { delta_x, delta_y, .. } => {
+                    if horizontal {
+                        let max = max as f32;
+                        let new_val = value as f32 + delta_x;
+                        value_prop.set(LogicalLength::new(new_val.min(0.).max(-max)));
+                    } else {
+                        let max = max as f32;
+                        let new_val = value as f32 + delta_y;
+                        value_prop.set(LogicalLength::new(new_val.min(0.).max(-max)));
+                    }
                     InputEventResult::EventAccepted
                 }
             };

@@ -5,26 +5,68 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [1.3.0] - 2023-11-10
+
 ### General
 
- - Minimum Rust version is now 1.70.
- - Skia renderer: Fixed the `source` property of `Image` elements sometimes not changing when setting dynamically loaded images. (#3510)
- - Skia / FemtoVG renderers: Default to vsync swap interval when rendering with OpenGL to avoid excessive CPU usage. (#3516)
+ - The minimum Rust version is now 1.70.
+ - The `SLINT_DEBUG_PERFORMANCE` environment variable is now also compatible with the software renderer.
+ - Fixed issues with text rendering and cursor positioning in elided or aligned multi-line text.
+ - The default style has been changed to `fluent` on Windows and `cupertino` on macOS.
+ - LinuxKMS backend: Added support for absolute motion pointer events, fixed support for touch input on scaled screens, and improved encoder/CRTC handling for EGL rendering.
+ - Skia renderer / winit backend: Fall back to Skia software rendering when GPU acceleration is not available.
+ - Fixed a bug where accessing model data in a callback after changing it within the same callback did not reflect the update. (#3740)
 
 ### Slint Language
 
- - Added `Number`, `Decimal` variant to enum `InputType`
+ - Added `Number`, `Decimal` variants to the `InputType` enum.
+ - Added `spacing-horizontal` and `spacing-vertical` to `GridLayout`.
+ - Fixed conversion in an array of an array of structs (#3574).
+ - Added `scroll-event` callback to `TouchArea`.
+ - Added support for `protected` functions.
+ - `ComboBox` selection can now be changed by a scroll event.
+ - `SpinBox` value can now be incremented and decremented by a scroll event.
+ - Added `focus-changed-event` callback to `FocusScope`.
+ - Added many new easing curves.
+ - Added `Spinner`.
 
-### Rust API
+### JavaScript
+
+ - The system has been ported to napi-rs.
+ - The API has been refreshed.
+
+### Rust
+
+ - Improved support for the `slint!` macro for rust-analyzer.
+ - Added `source_model()` to `MapModel`, `FilterModel`, `SortModel`, `ReverseModel` to access the inner model.
 
 ### C++
 
  - Removed the need for C++ exceptions in generated code.
- - Added ability to only build the Slint compiler or use an external compiler.
+ - Added the ability to only build the Slint compiler or use an external compiler.
+ - ESP-IDF: Wait for vsync before swapping frame buffers.
+ - Fixed a crash when accessing an empty model from Slint.
 
 ### LSP
 
- - Added "Wrap in element" and "Remove element" code actions
+ - Added "Wrap in element", "Remove element", "Repeat element", and "Make conditional" code actions.
+ - Added a toolbar with a style picker in the preview.
+
+## [1.2.2] - 2023-10-02
+
+### General
+
+ - Skia renderer: Fixed the `source` property of `Image` elements sometimes not changing when setting dynamically loaded images. (#3510)
+ - Fix compiler panic with `popup.close()` from outside of the popup. (#3513)
+ - Fixed native style (Qt) not finishing its animations with Breeze. (#3482)
+ - Fixed native style not clipping correctly GroupBox. (#3541)
+ - Fixed native style ComboBox not always being shown. (#3527)
+ - Winit backend: Fixed window resizing on macOS Sonoma. (#3559)
+ - Skia / FemtoVG renderers: Default to vsync swap interval when rendering with OpenGL to avoid excessive CPU usage. (#3516)
+
+### C++
+
+ - Fixed cross-compilation with CMake (against Yocto SDKs)
 
 ## [1.2.1] - 2023-09-19
 
@@ -1003,3 +1045,5 @@ as well as the [Rust migration guide for the `sixtyfps` crate](api/rs/slint/migr
 [1.1.1]: https://github.com/slint-ui/slint/releases/tag/v1.1.1
 [1.2.0]: https://github.com/slint-ui/slint/releases/tag/v1.2.0
 [1.2.1]: https://github.com/slint-ui/slint/releases/tag/v1.2.1
+[1.2.2]: https://github.com/slint-ui/slint/releases/tag/v1.2.2
+[1.3.0]: https://github.com/slint-ui/slint/releases/tag/v1.3.0

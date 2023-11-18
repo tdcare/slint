@@ -17,11 +17,11 @@ In your Cargo.toml:
 build = "build.rs"
 
 [dependencies]
-slint = "1.2.0"
+slint = "1.3.0"
 ...
 
 [build-dependencies]
-slint-build = "1.2.0"
+slint-build = "1.3.0"
 ```
 
 In the `build.rs` file:
@@ -50,6 +50,7 @@ compile_error!(
     forward compatibility with future version of this crate"
 );
 
+use std::collections::HashMap;
 use std::env;
 use std::io::Write;
 use std::path::Path;
@@ -98,6 +99,39 @@ impl CompilerConfiguration {
     pub fn with_include_paths(self, include_paths: Vec<std::path::PathBuf>) -> Self {
         let mut config = self.config;
         config.include_paths = include_paths;
+        Self { config }
+    }
+
+    /// Create a new configuration that sets the library paths used for looking up
+    /// `@library` imports to the specified map of paths.
+    ///
+    /// Each library path can either be a path to a `.slint` file or a directory.
+    /// If it's a file, the library is imported by its name prefixed by `@` (e.g.
+    /// `@example`). The specified file is the only entry-point for the library
+    /// and other files from the library won't be accessible from the outside.
+    /// If it's a directory, a specific file in that directory must be specified
+    /// when importing the library (e.g. `@example/widgets.slint`). This allows
+    /// exposing multiple entry-points for a single library.
+    ///
+    /// Compile `ui/main.slint` and specify an "example" library path:
+    /// ```rust,no_run
+    /// let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    /// let library_paths = std::collections::HashMap::from([(
+    ///     "example".to_string(),
+    ///     manifest_dir.join("third_party/example/ui/lib.slint"),
+    /// )]);
+    /// let config = slint_build::CompilerConfiguration::new().with_library_paths(library_paths);
+    /// slint_build::compile_with_config("ui/main.slint", config).unwrap();
+    /// ```
+    ///
+    /// Import the "example" library in `ui/main.slint`:
+    /// ```slint,ignore
+    /// import { Example } from "@example";
+    /// ```
+    #[must_use]
+    pub fn with_library_paths(self, library_paths: HashMap<String, std::path::PathBuf>) -> Self {
+        let mut config = self.config;
+        config.library_paths = library_paths;
         Self { config }
     }
 
@@ -221,8 +255,8 @@ impl<Sink: Write> Write for CodeFormatter<Sink> {
 fn formatter_test() {
     fn format_code(code: &str) -> String {
         let mut res = Vec::new();
-        let mut formater = CodeFormatter::new(&mut res);
-        formater.write_all(code.as_bytes()).unwrap();
+        let mut formatter = CodeFormatter::new(&mut res);
+        formatter.write_all(code.as_bytes()).unwrap();
         String::from_utf8(res).unwrap()
     }
 
@@ -300,21 +334,6 @@ pub fn compile_with_config(
     let mut compiler_config = config.config;
     compiler_config.translation_domain = std::env::var("CARGO_PKG_NAME").ok();
 
-    let mut rerun_if_changed = String::new();
-
-    if std::env::var_os("SLINT_STYLE").is_none() && compiler_config.style.is_none() {
-        compiler_config.style = std::env::var_os("OUT_DIR").and_then(|path| {
-            // Same logic as in i-slint-backend-selector's build script to get the path
-            let path = Path::new(&path).parent()?.parent()?.join("SLINT_DEFAULT_STYLE.txt");
-            // unfortunately, if for some reason the file is changed by the i-slint-backend-selector's build script,
-            // it is changed after cargo decide to re-run this build script or not. So that means one will need two build
-            // to settle the right thing.
-            rerun_if_changed = format!("cargo:rerun-if-changed={}", path.display());
-            let style = std::fs::read_to_string(path).ok()?;
-            Some(style.trim().into())
-        });
-    }
-
     let syntax_node = syntax_node.expect("diags contained no compilation errors");
 
     // 'spin_on' is ok here because the compiler in single threaded and does not block if there is no blocking future
@@ -353,7 +372,7 @@ pub fn compile_with_config(
     });
 
     write!(code_formatter, "{}", generated).map_err(CompileError::SaveError)?;
-    println!("{}\ncargo:rerun-if-changed={}", rerun_if_changed, path.display());
+    println!("cargo:rerun-if-changed={}", path.display());
 
     for resource in doc.root_component.embedded_file_resources.borrow().keys() {
         if !resource.starts_with("builtin:") {

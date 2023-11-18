@@ -28,7 +28,7 @@ impl i_slint_core::platform::Platform for TestingBackend {
     ) -> Result<Rc<dyn WindowAdapter>, i_slint_core::platform::PlatformError> {
         Ok(Rc::new_cyclic(|self_weak| TestingWindow {
             window: i_slint_core::api::Window::new(self_weak.clone() as _),
-            size: PhysicalSize::new(600, 800).into(),
+            size: Default::default(),
             ime_requests: Default::default(),
         }))
     }
@@ -97,7 +97,11 @@ impl WindowAdapter for TestingWindow {
     }
 
     fn size(&self) -> PhysicalSize {
-        self.size.get()
+        if self.size.get().width == 0 {
+            PhysicalSize::new(800, 600)
+        } else {
+            self.size.get()
+        }
     }
 
     fn set_size(&self, size: i_slint_core::api::WindowSize) {
@@ -109,6 +113,13 @@ impl WindowAdapter for TestingWindow {
 
     fn renderer(&self) -> &dyn Renderer {
         self
+    }
+
+    fn update_window_properties(&self, properties: i_slint_core::window::WindowProperties<'_>) {
+        if self.size.get().width == 0 {
+            let c = properties.layout_constraints();
+            self.size.set(c.preferred.to_physical(self.window.scale_factor()));
+        }
     }
 
     fn internal(&self, _: i_slint_core::InternalToken) -> Option<&dyn WindowAdapterInternal> {
@@ -228,8 +239,8 @@ mod for_unit_test {
 
     /// Simulate a mouse click
     pub fn send_mouse_click<
-        X: vtable::HasStaticVTable<i_slint_core::component::ComponentVTable> + 'static,
-        Component: Into<vtable::VRc<i_slint_core::component::ComponentVTable, X>> + ComponentHandle,
+        X: vtable::HasStaticVTable<i_slint_core::item_tree::ItemTreeVTable> + 'static,
+        Component: Into<vtable::VRc<i_slint_core::item_tree::ItemTreeVTable, X>> + ComponentHandle,
     >(
         component: &Component,
         x: f32,
@@ -247,8 +258,8 @@ mod for_unit_test {
 
     /// Simulate entering a sequence of ascii characters key by (pressed or released).
     pub fn send_keyboard_char<
-        X: vtable::HasStaticVTable<i_slint_core::component::ComponentVTable>,
-        Component: Into<vtable::VRc<i_slint_core::component::ComponentVTable, X>> + ComponentHandle,
+        X: vtable::HasStaticVTable<i_slint_core::item_tree::ItemTreeVTable>,
+        Component: Into<vtable::VRc<i_slint_core::item_tree::ItemTreeVTable, X>> + ComponentHandle,
     >(
         component: &Component,
         string: char,
@@ -263,8 +274,8 @@ mod for_unit_test {
 
     /// Simulate entering a sequence of ascii characters key by key.
     pub fn send_keyboard_string_sequence<
-        X: vtable::HasStaticVTable<i_slint_core::component::ComponentVTable>,
-        Component: Into<vtable::VRc<i_slint_core::component::ComponentVTable, X>> + ComponentHandle,
+        X: vtable::HasStaticVTable<i_slint_core::item_tree::ItemTreeVTable>,
+        Component: Into<vtable::VRc<i_slint_core::item_tree::ItemTreeVTable, X>> + ComponentHandle,
     >(
         component: &Component,
         sequence: &str,
@@ -278,8 +289,8 @@ mod for_unit_test {
     /// Applies the specified scale factor to the window that's associated with the given component.
     /// This overrides the value provided by the windowing system.
     pub fn set_window_scale_factor<
-        X: vtable::HasStaticVTable<i_slint_core::component::ComponentVTable>,
-        Component: Into<vtable::VRc<i_slint_core::component::ComponentVTable, X>> + ComponentHandle,
+        X: vtable::HasStaticVTable<i_slint_core::item_tree::ItemTreeVTable>,
+        Component: Into<vtable::VRc<i_slint_core::item_tree::ItemTreeVTable, X>> + ComponentHandle,
     >(
         component: &Component,
         factor: f32,

@@ -1,40 +1,60 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
+use crate::winitwindowadapter::physical_size_to_slint;
 use i_slint_core::platform::PlatformError;
-
-use raw_window_handle::HasRawDisplayHandle;
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
 pub struct WinitSkiaRenderer {
     renderer: i_slint_renderer_skia::SkiaRenderer,
 }
 
-impl super::WinitCompatibleRenderer for WinitSkiaRenderer {
-    fn new(
+impl WinitSkiaRenderer {
+    pub fn new(
         window_builder: winit::window::WindowBuilder,
-    ) -> Result<(Self, winit::window::Window), PlatformError> {
+    ) -> Result<(Box<dyn super::WinitCompatibleRenderer>, winit::window::Window), PlatformError>
+    {
         let winit_window = crate::event_loop::with_window_target(|event_loop| {
             window_builder.build(event_loop.event_loop_target()).map_err(|winit_os_error| {
                 format!("Error creating native window for Skia rendering: {}", winit_os_error)
+                    .into()
             })
         })?;
 
-        let size: winit::dpi::PhysicalSize<u32> = winit_window.inner_size();
+        let renderer = i_slint_renderer_skia::SkiaRenderer::default();
 
-        let width: u32 = size.width.try_into().map_err(|_| {
-            format!(
-                "Attempting to create a Skia window surface with an invalid width: {}",
-                size.width
-            )
+        Ok((Box::new(Self { renderer }), winit_window))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    pub fn new_software(
+        window_builder: winit::window::WindowBuilder,
+    ) -> Result<(Box<dyn super::WinitCompatibleRenderer>, winit::window::Window), PlatformError>
+    {
+        let winit_window = crate::event_loop::with_window_target(|event_loop| {
+            window_builder.build(event_loop.event_loop_target()).map_err(|winit_os_error| {
+                format!("Error creating native window for Skia rendering: {}", winit_os_error)
+                    .into()
+            })
         })?;
-        let height: u32 = size.height.try_into().map_err(|_| {
-            format!(
-                "Attempting to create a Skia window surface with an invalid height: {}",
-                size.height
-            )
-        })?;
+
+        let renderer = i_slint_renderer_skia::SkiaRenderer::default_software();
+
+        Ok((Box::new(Self { renderer }), winit_window))
+    }
+}
+
+impl super::WinitCompatibleRenderer for WinitSkiaRenderer {
+    fn render(&self, _window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
+        self.renderer.render()
+    }
+
+    fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer {
+        &self.renderer
+    }
+
+    fn resumed(&self, winit_window: &winit::window::Window) -> Result<(), PlatformError> {
+        let size = winit_window.inner_size();
 
         // Safety: This is safe because the handle remains valid; the next rwh release provides `new()` without unsafe.
         let active_handle = unsafe { raw_window_handle::ActiveHandle::new_unchecked() };
@@ -53,20 +73,10 @@ impl super::WinitCompatibleRenderer for WinitSkiaRenderer {
             )
         };
 
-        let renderer = i_slint_renderer_skia::SkiaRenderer::new(
+        self.renderer.set_window_handle(
             window_handle,
             display_handle,
-            PhysicalWindowSize::new(width, height),
-        )?;
-
-        Ok((Self { renderer }, winit_window))
-    }
-
-    fn render(&self, _window: &i_slint_core::api::Window) -> Result<(), PlatformError> {
-        self.renderer.render()
-    }
-
-    fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer {
-        &self.renderer
+            physical_size_to_slint(&size),
+        )
     }
 }

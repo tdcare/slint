@@ -11,13 +11,11 @@ use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
 };
 use vulkano::image::view::ImageView;
-use vulkano::image::{ImageAccess, ImageUsage, ImageViewAbstract, SwapchainImage};
-use vulkano::instance::{Instance, InstanceCreateInfo, InstanceExtensions};
-use vulkano::swapchain::{
-    AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
-};
-use vulkano::sync::{FlushError, GpuFuture};
-use vulkano::{sync, Handle, VulkanLibrary, VulkanObject};
+use vulkano::image::{Image, ImageUsage};
+use vulkano::instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions};
+use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
+use vulkano::sync::GpuFuture;
+use vulkano::{sync, Handle, Validated, VulkanError, VulkanLibrary, VulkanObject};
 
 use raw_window_handle::HasRawDisplayHandle;
 use raw_window_handle::HasRawWindowHandle;
@@ -30,8 +28,8 @@ pub struct VulkanSurface {
     previous_frame_end: RefCell<Option<Box<dyn GpuFuture>>>,
     queue: Arc<Queue>,
     swapchain: RefCell<Arc<Swapchain>>,
-    swapchain_images: RefCell<Vec<Arc<SwapchainImage>>>,
-    swapchain_image_views: RefCell<Vec<Arc<ImageView<SwapchainImage>>>>,
+    swapchain_images: RefCell<Vec<Arc<Image>>>,
+    swapchain_image_views: RefCell<Vec<Arc<ImageView>>>,
 }
 
 impl VulkanSurface {
@@ -185,8 +183,8 @@ impl super::Surface for VulkanSurface {
         let instance = Instance::new(
             library.clone(),
             InstanceCreateInfo {
+                flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
                 enabled_extensions: required_extensions,
-                enumerate_portability: true,
                 ..Default::default()
             },
         )
@@ -239,7 +237,7 @@ impl super::Surface for VulkanSurface {
     fn render(
         &self,
         size: PhysicalWindowSize,
-        callback: &dyn Fn(&mut skia_safe::Canvas, &mut skia_safe::gpu::DirectContext),
+        callback: &dyn Fn(&skia_safe::Canvas, Option<&mut skia_safe::gpu::DirectContext>),
     ) -> Result<(), i_slint_core::platform::PlatformError> {
         let gr_context = &mut self.gr_context.borrow_mut();
 
@@ -273,9 +271,11 @@ impl super::Surface for VulkanSurface {
         let swapchain = self.swapchain.borrow().clone();
 
         let (image_index, suboptimal, acquire_future) =
-            match vulkano::swapchain::acquire_next_image(swapchain.clone(), None) {
+            match vulkano::swapchain::acquire_next_image(swapchain.clone(), None)
+                .map_err(Validated::unwrap)
+            {
                 Ok(r) => r,
-                Err(AcquireError::OutOfDate) => {
+                Err(VulkanError::OutOfDate) => {
                     self.recreate_swapchain.set(true);
                     return Ok(()); // Try again next frame
                 }
@@ -300,14 +300,14 @@ impl super::Surface for VulkanSurface {
 
         let format = image_view.format();
 
-        debug_assert_eq!(format, Some(vulkano::format::Format::B8G8R8A8_UNORM));
+        debug_assert_eq!(format, vulkano::format::Format::B8G8R8A8_UNORM);
         let (vk_format, color_type) =
             (skia_safe::gpu::vk::Format::B8G8R8A8_UNORM, skia_safe::ColorType::BGRA8888);
 
         let alloc = skia_safe::gpu::vk::Alloc::default();
         let image_info = &unsafe {
             skia_safe::gpu::vk::ImageInfo::new(
-                image_object.inner().image.handle().as_raw() as _,
+                image_object.handle().as_raw() as _,
                 alloc,
                 skia_safe::gpu::vk::ImageTiling::OPTIMAL,
                 skia_safe::gpu::vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -321,7 +321,7 @@ impl super::Surface for VulkanSurface {
         };
 
         let render_target =
-            &skia_safe::gpu::BackendRenderTarget::new_vulkan((width, height), 0, image_info);
+            &skia_safe::gpu::backend_render_targets::make_vk((width, height), image_info);
 
         let mut skia_surface = skia_safe::gpu::surfaces::wrap_backend_render_target(
             gr_context,
@@ -333,7 +333,7 @@ impl super::Surface for VulkanSurface {
         )
         .ok_or_else(|| format!("Error creating Skia Vulkan surface"))?;
 
-        callback(skia_surface.canvas(), gr_context);
+        callback(skia_surface.canvas(), Some(gr_context));
 
         drop(skia_surface);
 
@@ -351,11 +351,11 @@ impl super::Surface for VulkanSurface {
             )
             .then_signal_fence_and_flush();
 
-        match future {
+        match future.map_err(Validated::unwrap) {
             Ok(future) => {
                 *self.previous_frame_end.borrow_mut() = Some(future.boxed());
             }
-            Err(FlushError::OutOfDate) => {
+            Err(VulkanError::OutOfDate) => {
                 self.recreate_swapchain.set(true);
                 *self.previous_frame_end.borrow_mut() = Some(sync::now(device.clone()).boxed());
             }
@@ -389,7 +389,7 @@ fn create_surface(
     instance: &Arc<Instance>,
     window_handle: raw_window_handle::WindowHandle<'_>,
     display_handle: raw_window_handle::DisplayHandle<'_>,
-) -> Result<Arc<Surface>, vulkano::swapchain::SurfaceCreationError> {
+) -> Result<Arc<Surface>, vulkano::Validated<vulkano::VulkanError>> {
     match (window_handle.raw_window_handle(), display_handle.raw_display_handle()) {
         #[cfg(target_os = "macos")]
         (

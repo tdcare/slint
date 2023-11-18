@@ -63,6 +63,7 @@ type ItemRendererRef<'a> = &'a mut dyn crate::item_rendering::ItemRenderer;
 pub type VoidArg = ();
 pub type KeyEventArg = (KeyEvent,);
 type PointerEventArg = (PointerEvent,);
+type PointerScrollEventArg = (PointerScrollEvent,);
 type PointArg = (Point,);
 
 #[cfg(all(feature = "ffi", windows))]
@@ -425,6 +426,7 @@ pub struct TouchArea {
     pub clicked: Callback<VoidArg>,
     pub moved: Callback<VoidArg>,
     pub pointer_event: Callback<PointerEventArg>,
+    pub scroll_event: Callback<PointerScrollEventArg, EventResult>,
     /// FIXME: remove this
     pub cached_rendering_data: CachedRenderingData,
     /// true when we are currently grabbing the mouse
@@ -536,12 +538,26 @@ impl Item for TouchArea {
                     InputEventResult::EventAccepted
                 }
             }
-            MouseEvent::Wheel { .. } => {
+            MouseEvent::Wheel { delta_x, delta_y, .. } => {
+                let modifiers = window_adapter.window().0.modifiers.get().into();
+                let r = Self::FIELD_OFFSETS
+                    .scroll_event
+                    .apply_pin(self)
+                    .call(&(PointerScrollEvent { delta_x, delta_y, modifiers },));
                 return if self.grabbed.get() {
                     InputEventResult::GrabMouse
                 } else {
-                    InputEventResult::EventAccepted
-                }
+                    match r {
+                        EventResult::Reject => {
+                            // We are ignoring the event, so we will be removed from the item_stack,
+                            // therefore we must remove the has_hover flag as there might be a scroll under us.
+                            // It will be put back later.
+                            Self::FIELD_OFFSETS.has_hover.apply_pin(self).set(false);
+                            InputEventResult::EventIgnored
+                        }
+                        EventResult::Accept => InputEventResult::EventAccepted,
+                    }
+                };
             }
         };
         result
@@ -595,6 +611,7 @@ pub struct FocusScope {
     pub has_focus: Property<bool>,
     pub key_pressed: Callback<KeyEventArg, EventResult>,
     pub key_released: Callback<KeyEventArg, EventResult>,
+    pub focus_changed_event: Callback<VoidArg>,
     /// FIXME: remove this
     pub cached_rendering_data: CachedRenderingData,
 }
@@ -669,9 +686,11 @@ impl Item for FocusScope {
         match event {
             FocusEvent::FocusIn | FocusEvent::WindowReceivedFocus => {
                 self.has_focus.set(true);
+                Self::FIELD_OFFSETS.focus_changed_event.apply_pin(self).call(&());
             }
             FocusEvent::FocusOut | FocusEvent::WindowLostFocus => {
                 self.has_focus.set(false);
+                Self::FIELD_OFFSETS.focus_changed_event.apply_pin(self).call(&());
             }
         }
         FocusEventResult::FocusAccepted
@@ -1357,7 +1376,7 @@ i_slint_common::for_each_builtin_structs!(declare_builtin_structs);
 #[cfg(feature = "ffi")]
 #[no_mangle]
 pub unsafe extern "C" fn slint_item_absolute_position(
-    self_component: &vtable::VRc<crate::component::ComponentVTable>,
+    self_component: &vtable::VRc<crate::item_tree::ItemTreeVTable>,
     self_index: u32,
 ) -> LogicalPoint {
     let self_rc = ItemRc::new(self_component.clone(), self_index);

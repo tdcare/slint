@@ -82,7 +82,7 @@ private:
 ///
 /// If the implementation of this bi-directional message passing protocol is incomplete, the user
 /// may experience unexpected behavior, or the intention of the developer calling functions on the
-/// Window API may not be fullfilled.
+/// Window API may not be fulfilled.
 ///
 /// Your WindowAdapter subclass must hold a renderer (either a SoftwareRenderer or a SkiaRenderer).
 /// In the renderer() method, you must return a reference to it.
@@ -459,7 +459,7 @@ inline void set_platform(std::unique_ptr<Platform> platform)
 
                 bool status = maybe_clipboard.has_value();
                 if (status)
-                    *out_text = maybe_clipboard.value();
+                    *out_text = *maybe_clipboard;
                 return status;
             },
             [](void *p) { return reinterpret_cast<Platform *>(p)->run_event_loop(); },
@@ -605,6 +605,30 @@ public:
                 inner, reinterpret_cast<uint16_t *>(buffer.data()), buffer.size(), pixel_stride);
         return PhysicalRegion { r };
     }
+
+#    ifdef SLINT_FEATURE_EXPERIMENTAL
+    /// This enum describes the rotation that is applied to the buffer when rendering.
+    /// To be used in set_window_rotation()
+    enum class WindowRotation {
+        /// No rotation
+        NoRotation = 0,
+        /// Rotate 90° to the left
+        Rotate90 = 90,
+        /// 180° rotation (upside-down)
+        Rotate180 = 180,
+        /// Rotate 90° to the right
+        Rotate270 = 270,
+    };
+
+    /// Set how the window need to be rotated in the buffer.
+    ///
+    /// This is typically used to implement screen rotation in software
+    void set_window_rotation(WindowRotation rotation)
+    {
+        cbindgen_private::slint_software_renderer_set_window_rotation(inner,
+                                                                      static_cast<int>(rotation));
+    }
+#    endif
 };
 #endif
 

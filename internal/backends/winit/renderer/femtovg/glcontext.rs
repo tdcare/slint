@@ -63,11 +63,12 @@ impl OpenGLContext {
         // On EGL/GLX/WGL there are system provided configs that may or may not support transparency. Here in case
         // the system doesn't support transparency, we want to fall back to a config that doesn't - better than not
         // rendering anything at all. So we don't want to limit the configurations we get to see early on.
+        // Commented out due to https://github.com/rust-windowing/glutin/issues/1640
         #[cfg(target_os = "macos")]
         let config_template_builder = config_template_builder.with_transparency(true);
 
         let (window, gl_config) = glutin_winit::DisplayBuilder::new()
-            .with_preference(glutin_winit::ApiPrefence::FallbackEgl)
+            .with_preference(glutin_winit::ApiPreference::FallbackEgl)
             .with_window_builder(Some(window_builder.clone()))
             .build(window_target, config_template_builder, |it| {
                 it.reduce(|accum, config| {

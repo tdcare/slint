@@ -67,7 +67,7 @@ namespace slint::platform::key_codes {{
 "#
     )?;
     macro_rules! print_key_codes {
-        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident)|* # $($_xkb:ident)|*;)*) => {
+        ($($char:literal # $name:ident # $($qt:ident)|* # $($winit:ident $(($_pos:ident))?)|* # $($_xkb:ident)|*;)*) => {
             $(
                 writeln!(enums_pub, "/// A constant that represents the key code to be used in slint::Window::dispatch_key_press_event()")?;
                 writeln!(enums_pub, r#"constexpr std::u8string_view {} = u8"\u{:04x}";"#, stringify!($name), $char as u32)?;
@@ -137,6 +137,9 @@ fn builtin_structs(path: &Path) -> anyhow::Result<()> {
                     let pri_type = match stringify!($pri_type) {
                         "usize" => "uintptr_t",
                         "crate::animations::Instant" => "uint64_t",
+                        // This shouldn't be accessed by the C++ anyway, just need to have the same ABI in a struct
+                        "Option<i32>" => "std::pair<int32_t, int32_t>",
+                        "Option<core::ops::Range<i32>>" => "std::tuple<int32_t, int32_t, int32_t>",
                         other => other,
                     };
                     writeln!(file, "    {} {};", pri_type, stringify!($pri_field))?;
@@ -186,6 +189,7 @@ fn default_config() -> cbindgen::Config {
             ("VoidArg".into(), "void".into()),
             ("KeyEventArg".into(), "KeyEvent".into()),
             ("PointerEventArg".into(), "PointerEvent".into()),
+            ("PointerScrollEventArg".into(), "PointerScrollEvent".into()),
             ("PointArg".into(), "slint::LogicalPosition".into()),
             ("FloatArg".into(), "float".into()),
             ("Coord".into(), "float".into()),
@@ -259,7 +263,7 @@ fn gen_corelib(
 
     config.export.include = [
         "Clipboard",
-        "ComponentVTable",
+        "ItemTreeVTable",
         "Slice",
         "WindowAdapterRcOpaque",
         "PropertyAnimation",
@@ -277,6 +281,7 @@ fn gen_corelib(
         "PointerEventKind",
         "PointerEventButton",
         "PointerEvent",
+        "PointerScrollEvent",
         "Rect",
         "SortOrder",
         "BitmapFont",
@@ -325,6 +330,7 @@ fn gen_corelib(
         "VoidArg",
         "KeyEventArg",
         "PointerEventArg",
+        "PointerScrollEventArg",
         "PointArg",
         "Point",
         "slint_color_brighter",
@@ -597,8 +603,7 @@ fn gen_corelib(
     );
     config.export.body.insert(
         "EasingCurve".to_owned(),
-        "    constexpr EasingCurve() : tag(Tag::Linear), cubic_bezier{{0,0,1,1}} {}
-    constexpr explicit EasingCurve(EasingCurve::Tag tag, float a, float b, float c, float d) : tag(tag), cubic_bezier{{a,b,c,d}} {}".into()
+        "    constexpr EasingCurve(EasingCurve::Tag tag = Tag::Linear, float a = 0, float b = 0, float c = 1, float d = 1) : tag(tag), cubic_bezier{{a,b,c,d}} {}".into()
     );
     config.export.body.insert(
         "LayoutInfo".to_owned(),
@@ -650,7 +655,7 @@ namespace slint {
         using LogicalRect = Rect;
         using LogicalPoint = Point2D<float>;
         using LogicalLength = float;
-        struct ComponentVTable;
+        struct ItemTreeVTable;
         struct ItemVTable;
         using types::IntRect;
     }
@@ -765,13 +770,13 @@ fn gen_interpreter(
     dependencies: &mut Vec<PathBuf>,
 ) -> anyhow::Result<()> {
     let mut config = default_config();
-    // Avoid Value, just export ValueOpaque.
     config.export.exclude = IntoIterator::into_iter([
         "Value",
         "ValueType",
         "PropertyDescriptor",
         "Diagnostic",
         "PropertyDescriptor",
+        "Box",
     ])
     .map(String::from)
     .collect();
@@ -792,7 +797,7 @@ fn gen_interpreter(
         "StructIteratorOpaque",
         "ComponentInstance",
         "StructIteratorResult",
-        "ValueOpaque",
+        "Value",
         "StructOpaque",
         "ModelNotifyOpaque",
     ])
@@ -818,6 +823,7 @@ fn gen_interpreter(
                 using slint::interpreter::ValueType;
                 using slint::interpreter::PropertyDescriptor;
                 using slint::interpreter::Diagnostic;
+                template <typename T> using Box = T*;
             }",
         )
         .generate()
@@ -858,7 +864,7 @@ macro_rules! declare_features {
     };
 }
 
-declare_features! {interpreter backend_qt freestanding renderer_software renderer_skia}
+declare_features! {interpreter backend_qt freestanding renderer_software renderer_skia experimental}
 
 /// Generate the headers.
 /// `root_dir` is the root directory of the slint git repo

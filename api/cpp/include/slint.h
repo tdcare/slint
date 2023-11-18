@@ -40,13 +40,13 @@ namespace slint {
 
 // Bring opaque structure in scope
 namespace private_api {
-using cbindgen_private::ComponentVTable;
+using cbindgen_private::ItemTreeVTable;
 using cbindgen_private::ItemVTable;
-using ComponentRef = vtable::VRef<private_api::ComponentVTable>;
+using ItemTreeRef = vtable::VRef<private_api::ItemTreeVTable>;
 using IndexRange = cbindgen_private::IndexRange;
 using ItemRef = vtable::VRef<private_api::ItemVTable>;
 using ItemVisitorRefMut = vtable::VRefMut<cbindgen_private::ItemVisitorVTable>;
-using cbindgen_private::ComponentWeak;
+using cbindgen_private::ItemTreeWeak;
 using cbindgen_private::ItemWeak;
 using cbindgen_private::TraversalOrder;
 }
@@ -59,6 +59,7 @@ using ItemArray = slint::cbindgen_private::Slice<ItemArrayEntry>;
 using cbindgen_private::KeyboardModifiers;
 using cbindgen_private::KeyEvent;
 using cbindgen_private::PointerEvent;
+using cbindgen_private::PointerScrollEvent;
 using cbindgen_private::TableColumn;
 
 constexpr inline ItemTreeNode make_item_node(uint32_t child_count, uint32_t child_index,
@@ -76,13 +77,13 @@ constexpr inline ItemTreeNode make_dyn_node(std::uint32_t offset, std::uint32_t 
                                                            parent_index } };
 }
 
-inline ItemRef get_item_ref(ComponentRef component,
-                            const cbindgen_private::Slice<ItemTreeNode> item_tree,
+inline ItemRef get_item_ref(ItemTreeRef item_tree,
+                            const cbindgen_private::Slice<ItemTreeNode> item_tree_array,
                             const private_api::ItemArray item_array, int index)
 {
-    const auto item_array_index = item_tree.ptr[index].item.item_array_index;
+    const auto item_array_index = item_tree_array.ptr[index].item.item_array_index;
     const auto item = item_array[item_array_index];
-    return ItemRef { item.vtable, reinterpret_cast<char *>(component.instance) + item.offset };
+    return ItemRef { item.vtable, reinterpret_cast<char *>(item_tree.instance) + item.offset };
 }
 
 /// Convert a slint `{height: length, width: length, x: length, y: length}` to a Rect
@@ -93,7 +94,7 @@ inline cbindgen_private::Rect convert_anonymous_rect(std::tuple<float, float, fl
     return cbindgen_private::Rect { .x = x, .y = y, .width = w, .height = h };
 }
 
-inline void dealloc(const ComponentVTable *, uint8_t *ptr, vtable::Layout layout)
+inline void dealloc(const ItemTreeVTable *, uint8_t *ptr, [[maybe_unused]] vtable::Layout layout)
 {
 #ifdef __cpp_sized_deallocation
     ::operator delete(reinterpret_cast<void *>(ptr), layout.size,
@@ -106,9 +107,9 @@ inline void dealloc(const ComponentVTable *, uint8_t *ptr, vtable::Layout layout
 }
 
 template<typename T>
-inline vtable::Layout drop_in_place(ComponentRef component)
+inline vtable::Layout drop_in_place(ItemTreeRef item_tree)
 {
-    reinterpret_cast<T *>(component.instance)->~T();
+    reinterpret_cast<T *>(item_tree.instance)->~T();
     return vtable::Layout { sizeof(T), alignof(T) };
 }
 
@@ -136,12 +137,12 @@ class ComponentWeakHandle;
 template<typename T>
 class ComponentHandle
 {
-    vtable::VRc<private_api::ComponentVTable, T> inner;
+    vtable::VRc<private_api::ItemTreeVTable, T> inner;
     friend class ComponentWeakHandle<T>;
 
 public:
     /// internal constructor
-    ComponentHandle(const vtable::VRc<private_api::ComponentVTable, T> &inner) : inner(inner) { }
+    ComponentHandle(const vtable::VRc<private_api::ItemTreeVTable, T> &inner) : inner(inner) { }
 
     /// Arrow operator that implements pointer semantics.
     const T *operator->() const
@@ -169,14 +170,14 @@ public:
     }
 
     /// internal function that returns the internal handle
-    vtable::VRc<private_api::ComponentVTable> into_dyn() const { return inner.into_dyn(); }
+    vtable::VRc<private_api::ItemTreeVTable> into_dyn() const { return inner.into_dyn(); }
 };
 
 /// A weak reference to the component. Can be constructed from a `ComponentHandle<T>`
 template<typename T>
 class ComponentWeakHandle
 {
-    vtable::VWeak<private_api::ComponentVTable, T> inner;
+    vtable::VWeak<private_api::ItemTreeVTable, T> inner;
 
 public:
     /// Constructs a null ComponentWeakHandle. lock() will always return empty.
@@ -268,16 +269,25 @@ inline LayoutInfo LayoutInfo::merge(const LayoutInfo &other) const
                         std::max(preferred, other.preferred),
                         std::min(stretch, other.stretch) };
 }
+inline bool operator==(const EasingCurve &a, const EasingCurve &b)
+{
+    if (a.tag != b.tag) {
+        return false;
+    } else if (a.tag == EasingCurve::Tag::CubicBezier) {
+        return std::equal(a.cubic_bezier._0, a.cubic_bezier._0 + 4, b.cubic_bezier._0);
+    }
+    return true;
+}
 }
 
 namespace private_api {
 
-inline static void register_component(const vtable::VRc<ComponentVTable> *c,
+inline static void register_item_tree(const vtable::VRc<ItemTreeVTable> *c,
                                       const std::optional<slint::Window> &maybe_window)
 {
     const cbindgen_private::WindowAdapterRcOpaque *window_ptr =
             maybe_window.has_value() ? &maybe_window->window_handle().handle() : nullptr;
-    cbindgen_private::slint_register_component(c, window_ptr);
+    cbindgen_private::slint_register_item_tree(c, window_ptr);
 }
 
 inline SharedVector<float> solve_box_layout(const cbindgen_private::BoxLayoutData &data,
@@ -338,12 +348,25 @@ struct ModelChangeListener
 using ModelPeer = std::weak_ptr<ModelChangeListener>;
 
 template<typename M>
-auto access_array_index(const M &model, size_t index)
+auto access_array_index(const std::shared_ptr<M> &model, size_t index)
 {
-    if (const auto v = model->row_data_tracked(index)) {
+    if (!model) {
+        return decltype(*model->row_data_tracked(index)) {};
+    } else if (const auto v = model->row_data_tracked(index)) {
         return *v;
     } else {
         return decltype(*v) {};
+    }
+}
+
+template<typename M>
+long int model_length(const std::shared_ptr<M> &model)
+{
+    if (!model) {
+        return 0;
+    } else {
+        model->track_row_count_changes();
+        return model->row_count();
     }
 }
 
@@ -501,6 +524,15 @@ public:
             this->row_changed(i);
         }
     }
+};
+
+// Specialize for the empty array. We can't have a Model<void>, but `int` will work for our purpose
+template<>
+class ArrayModel<0, void> : public Model<int>
+{
+public:
+    size_t row_count() const override { return 0; }
+    std::optional<int> row_data(size_t) const override { return {}; }
 };
 
 /// Model to be used when we just want to repeat without data.
@@ -1070,24 +1102,34 @@ class Repeater
     struct RepeaterInner : ModelChangeListener
     {
         enum class State { Clean, Dirty };
-        struct ComponentWithState
+        struct RepeatedInstanceWithState
         {
             State state = State::Dirty;
             std::optional<ComponentHandle<C>> ptr;
         };
-        std::vector<ComponentWithState> data;
+        std::vector<RepeatedInstanceWithState> data;
         private_api::Property<bool> is_dirty { true };
+        std::shared_ptr<Model<ModelData>> model;
 
         void row_added(size_t index, size_t count) override
         {
             is_dirty.set(true);
             data.resize(data.size() + count);
             std::rotate(data.begin() + index, data.end() - count, data.end());
+            for (std::size_t i = index; i < data.size(); ++i) {
+                // all the indexes are dirty
+                data[i].state = State::Dirty;
+            }
         }
         void row_changed(size_t index) override
         {
-            is_dirty.set(true);
-            data[index].state = State::Dirty;
+            auto &c = data[index];
+            if (model && c.ptr) {
+                (*c.ptr)->update_data(index, *model->row_data(index));
+                c.state = State::Clean;
+            } else {
+                c.state = State::Dirty;
+            }
         }
         void row_removed(size_t index, size_t count) override
         {
@@ -1119,15 +1161,9 @@ public:
     void ensure_updated(const Parent *parent) const
     {
         if (model.is_dirty()) {
-            auto preserved_data = inner ? std::make_optional(std::move(inner->data)) : std::nullopt;
             inner = std::make_shared<RepeaterInner>();
-            if (auto data = preserved_data) {
-                inner->data = std::move(*data);
-                for (auto &&compo_with_state : inner->data) {
-                    compo_with_state.state = RepeaterInner::State::Dirty;
-                }
-            }
             if (auto m = model.get()) {
+                inner->model = m;
                 m->attach_peer(inner);
             }
         }
@@ -1188,16 +1224,19 @@ public:
         return std::numeric_limits<uint64_t>::max();
     }
 
-    vtable::VRef<private_api::ComponentVTable> item_at(int i) const
+    vtable::VRef<private_api::ItemTreeVTable> item_at(int i) const
     {
         const auto &x = inner->data.at(i);
         return { &C::static_vtable, const_cast<C *>(&(**x.ptr)) };
     }
 
-    vtable::VWeak<private_api::ComponentVTable> component_at(int i) const
+    vtable::VWeak<private_api::ItemTreeVTable> instance_at(std::size_t i) const
     {
+        if (i >= inner->data.size()) {
+            return {};
+        }
         const auto &x = inner->data.at(i);
-        return vtable::VWeak<private_api::ComponentVTable> { x.ptr->into_dyn() };
+        return vtable::VWeak<private_api::ItemTreeVTable> { x.ptr->into_dyn() };
     }
 
     private_api::IndexRange index_range() const
@@ -1226,12 +1265,6 @@ public:
         if (auto m = model.get()) {
             if (row < m->row_count()) {
                 m->set_row_data(row, data);
-                if (inner && inner->is_dirty.get()) {
-                    auto &c = inner->data[row];
-                    if (c.state == RepeaterInner::State::Dirty && c.ptr) {
-                        (*c.ptr)->update_data(row, *m->row_data(row));
-                    }
-                }
             }
         }
     }

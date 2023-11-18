@@ -1,0 +1,35 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
+
+[package]
+name = "slint-node"
+description = "Internal Slint Runtime Library for NodeJS API."
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+categories = ["gui", "development-tools"]
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2.14.0", default-features = false, features = ["napi8"] }
+napi-derive = "2.14.0"
+i-slint-compiler = { workspace = true, features = ["default"] }
+i-slint-core = { workspace = true, features = ["default"] }
+i-slint-backend-selector = { workspace = true }
+slint-interpreter = { workspace = true, features = ["default", "display-diagnostics", "internal"] }
+spin_on = "0.1"
+css-color-parser2 = { workspace = true }
+itertools = { workspace = true }
+send_wrapper = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1.0"

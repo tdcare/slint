@@ -3,15 +3,17 @@
 
 // cSpell: ignore condvar
 
-use crate::common::{PostLoadBehavior, PreviewComponent};
-use crate::lsp_ext::{Health, ServerStatusNotification, ServerStatusParams};
+use crate::lsp_ext::Health;
+use crate::ServerNotifier;
 
-use lsp_types::notification::Notification;
-use once_cell::sync::Lazy;
+use slint::VecModel;
 use slint_interpreter::ComponentHandle;
-use std::collections::{HashMap, HashSet};
+
+use once_cell::sync::Lazy;
+use std::cell::RefCell;
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::{Condvar, Mutex};
 
 #[derive(PartialEq)]
@@ -22,7 +24,7 @@ enum RequestedGuiEventLoopState {
     /// But the loop hasn't been started yet
     StartLoop,
     /// The Loop is now started so the LSP thread can start posting events
-    LoopStated,
+    LoopStarted,
     /// The LSP thread requested the application to be terminated
     QuitLoop,
 }
@@ -31,7 +33,7 @@ static GUI_EVENT_LOOP_NOTIFIER: Lazy<Condvar> = Lazy::new(Condvar::new);
 static GUI_EVENT_LOOP_STATE_REQUEST: Lazy<Mutex<RequestedGuiEventLoopState>> =
     Lazy::new(|| Mutex::new(RequestedGuiEventLoopState::Uninitialized));
 
-fn run_in_ui_thread<F: Future<Output = ()> + 'static>(
+pub fn run_in_ui_thread<F: Future<Output = ()> + 'static>(
     create_future: impl Send + FnOnce() -> F + 'static,
 ) {
     // Wake up the main thread to start the event loop, if possible
@@ -71,7 +73,7 @@ pub fn start_ui_event_loop() {
             i_slint_core::api::invoke_from_event_loop(|| {
                 let mut state_request = GUI_EVENT_LOOP_STATE_REQUEST.lock().unwrap();
                 if *state_request == RequestedGuiEventLoopState::StartLoop {
-                    *state_request = RequestedGuiEventLoopState::LoopStated;
+                    *state_request = RequestedGuiEventLoopState::LoopStarted;
                     GUI_EVENT_LOOP_NOTIFIER.notify_one();
                 }
             })
@@ -95,297 +97,254 @@ pub fn quit_ui_event_loop() {
         GUI_EVENT_LOOP_NOTIFIER.notify_one();
     }
 
+    close_ui();
+
     let _ = i_slint_core::api::quit_event_loop();
 
-    // Make sure then sender channel gets dropped
-    if let Some(cache) = CONTENT_CACHE.get() {
-        let mut cache = cache.lock().unwrap();
-        cache.sender = None;
+    // Make sure then sender channel gets dropped.
+    if let Some(sender) = SERVER_NOTIFIER.get() {
+        let mut sender = sender.lock().unwrap();
+        *sender = None;
     };
 }
 
-pub fn load_preview(
-    sender: crate::ServerNotifier,
-    component: PreviewComponent,
-    post_load_behavior: PostLoadBehavior,
-) {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static PENDING_EVENTS: AtomicU32 = AtomicU32::new(0);
-    if PENDING_EVENTS.load(Ordering::SeqCst) > 0 {
-        return;
+pub fn open_ui(sender: &ServerNotifier) {
+    // Wake up the main thread to start the event loop, if possible
+    {
+        let mut state_request = GUI_EVENT_LOOP_STATE_REQUEST.lock().unwrap();
+        if *state_request == RequestedGuiEventLoopState::Uninitialized {
+            *state_request = RequestedGuiEventLoopState::StartLoop;
+            GUI_EVENT_LOOP_NOTIFIER.notify_one();
+        }
+        // We don't want to call post_event before the loop is properly initialized
+        while *state_request == RequestedGuiEventLoopState::StartLoop {
+            state_request = GUI_EVENT_LOOP_NOTIFIER.wait(state_request).unwrap();
+        }
     }
-    PENDING_EVENTS.fetch_add(1, Ordering::SeqCst);
-    run_in_ui_thread(move || async move {
-        PENDING_EVENTS.fetch_sub(1, Ordering::SeqCst);
-        reload_preview(sender, component, post_load_behavior).await
+
+    let default_style = {
+        let mut cache = super::CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
+        if cache.ui_is_visible {
+            return; // UI is already up!
+        }
+        cache.ui_is_visible = true;
+
+        let mut s = SERVER_NOTIFIER.get_or_init(Default::default).lock().unwrap();
+        *s = Some(sender.clone());
+
+        cache.default_style.clone()
+    };
+
+    i_slint_core::api::invoke_from_event_loop(move || {
+        PREVIEW_STATE.with(|preview_state| {
+            let mut preview_state = preview_state.borrow_mut();
+            open_ui_impl(&mut preview_state, default_style);
+        });
+    })
+    .unwrap();
+}
+
+fn open_ui_impl(preview_state: &mut PreviewState, default_style: String) {
+    // TODO: Handle Error!
+    let ui = preview_state.ui.get_or_insert_with(|| super::ui::create_ui(default_style).unwrap());
+    ui.on_show_document(|url, line, column| {
+        ask_editor_to_show_document(
+            url.as_str().to_string(),
+            line as u32,
+            column as u32,
+            line as u32,
+            column as u32,
+        )
     });
+    ui.window().on_close_requested(|| {
+        let mut cache = super::CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
+        cache.ui_is_visible = false;
+
+        let mut sender = SERVER_NOTIFIER.get_or_init(Default::default).lock().unwrap();
+        *sender = None;
+
+        slint::CloseRequestResponse::HideWindow
+    });
+    ui.show().unwrap();
 }
 
-#[derive(Default)]
-struct ContentCache {
-    source_code: HashMap<PathBuf, String>,
-    dependency: HashSet<PathBuf>,
-    current: PreviewComponent,
-    sender: Option<crate::ServerNotifier>,
-    highlight: Option<(PathBuf, u32)>,
-    design_mode: bool,
-}
-
-static CONTENT_CACHE: once_cell::sync::OnceCell<Mutex<ContentCache>> =
-    once_cell::sync::OnceCell::new();
-
-pub fn set_contents(path: &Path, content: String) {
-    let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-    cache.source_code.insert(path.to_owned(), content);
-    if cache.dependency.contains(path) {
-        let current = cache.current.clone();
-        let sender = cache.sender.clone();
-        drop(cache);
-        if let Some(sender) = sender {
-            load_preview(sender, current, PostLoadBehavior::DoNothing);
+pub fn close_ui() {
+    {
+        let mut cache = super::CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
+        if !cache.ui_is_visible {
+            return; // UI is already down!
         }
+        cache.ui_is_visible = false;
+    }
+
+    i_slint_core::api::invoke_from_event_loop(move || {
+        PREVIEW_STATE.with(move |preview_state| {
+            let mut preview_state = preview_state.borrow_mut();
+            close_ui_impl(&mut preview_state)
+        });
+    })
+    .unwrap(); // TODO: Handle Error
+}
+
+fn close_ui_impl(preview_state: &mut PreviewState) {
+    let ui = preview_state.ui.take();
+    if let Some(ui) = ui {
+        ui.hide().unwrap();
     }
 }
 
-pub fn config_changed(style: &str, include_paths: &[PathBuf]) {
-    if let Some(cache) = CONTENT_CACHE.get() {
-        let mut cache = cache.lock().unwrap();
-        let style = style.to_string();
-        if cache.current.style != style || cache.current.include_paths != include_paths {
-            cache.current.style = style;
-            cache.current.include_paths = include_paths.to_vec();
-            let current = cache.current.clone();
-            let sender = cache.sender.clone();
-            drop(cache);
-            if let Some(sender) = sender {
-                load_preview(sender, current, PostLoadBehavior::DoNothing);
-            }
-        }
-    };
-}
-
-/// If the file is in the cache, returns it.
-/// In any was, register it as a dependency
-fn get_file_from_cache(path: PathBuf) -> Option<String> {
-    let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-    let r = cache.source_code.get(&path).cloned();
-    cache.dependency.insert(path);
-    r
-}
+static SERVER_NOTIFIER: std::sync::OnceLock<Mutex<Option<ServerNotifier>>> =
+    std::sync::OnceLock::new();
 
 #[derive(Default)]
 struct PreviewState {
-    handle: Option<slint_interpreter::ComponentInstance>,
+    ui: Option<super::ui::PreviewUi>,
+    handle: Rc<RefCell<Option<slint_interpreter::ComponentInstance>>>,
 }
 thread_local! {static PREVIEW_STATE: std::cell::RefCell<PreviewState> = Default::default();}
 
-pub fn design_mode() -> bool {
-    let cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-    cache.design_mode
-}
+pub fn notify_diagnostics(diagnostics: &[slint_interpreter::Diagnostic]) -> Option<()> {
+    set_diagnostics(diagnostics);
 
-pub fn set_design_mode(sender: crate::ServerNotifier, enable: bool) {
-    let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-    cache.design_mode = enable;
-
-    configure_design_mode(enable, &sender);
-    send_notification(
-        &sender,
-        if enable { "Design mode enabled." } else { "Design mode disabled." },
-        Health::Ok,
-    );
-}
-
-fn show_document_request_from_element_callback(
-    file: &str,
-    start_line: u32,
-    start_column: u32,
-    _end_line: u32,
-    _end_column: u32,
-) -> Option<lsp_types::ShowDocumentParams> {
-    use lsp_types::{Position, Range, ShowDocumentParams, Url};
-
-    let start_pos = Position::new(start_line.saturating_sub(1), start_column.saturating_sub(1));
-    // let end_pos = Position::new(end_line.saturating_sub(1), end_column.saturating_sub(1));
-    // Place the cursor at the start of the range and do not mark up the entire range!
-    let selection = Some(Range::new(start_pos, start_pos));
-
-    Url::from_file_path(file).ok().map(|uri| ShowDocumentParams {
-        uri,
-        external: Some(false),
-        take_focus: Some(true),
-        selection,
-    })
-}
-
-fn configure_design_mode(enabled: bool, sender: &crate::ServerNotifier) {
-    let sender = sender.clone();
-    run_in_ui_thread(move || async move {
-        PREVIEW_STATE.with(|preview_state| {
-            let preview_state = preview_state.borrow();
-            if let Some(handle) = &preview_state.handle {
-                handle.set_design_mode(enabled);
-
-                handle.on_element_selected(Box::new(
-                    move |file: &str,
-                          start_line: u32,
-                          start_column: u32,
-                          end_line: u32,
-                          end_column: u32| {
-                        let Some(params) = show_document_request_from_element_callback(
-                            file,
-                            start_line,
-                            start_column,
-                            end_line,
-                            end_column,
-                        ) else {
-                            return;
-                        };
-                        let Ok(fut) =
-                            sender.send_request::<lsp_types::request::ShowDocument>(params)
-                        else {
-                            return;
-                        };
-                        i_slint_core::future::spawn_local(fut).unwrap();
-                    },
-                ));
-            }
-        })
-    });
-}
-
-async fn reload_preview(
-    sender: crate::ServerNotifier,
-    preview_component: PreviewComponent,
-    post_load_behavior: PostLoadBehavior,
-) {
-    send_notification(&sender, "Loading Preview…", Health::Ok);
-
-    let design_mode;
-
-    {
-        let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-        cache.dependency.clear();
-        cache.current = preview_component.clone();
-        design_mode = cache.design_mode;
-    }
-
-    let mut builder = slint_interpreter::ComponentCompiler::default();
-
-    if !preview_component.style.is_empty() {
-        builder.set_style(preview_component.style);
-    }
-    builder.set_include_paths(preview_component.include_paths);
-
-    builder.set_file_loader(|path| {
-        let path = path.to_owned();
-        Box::pin(async move { get_file_from_cache(path).map(Result::Ok) })
-    });
-
-    let compiled = if let Some(mut from_cache) = get_file_from_cache(preview_component.path.clone())
-    {
-        if let Some(component) = &preview_component.component {
-            from_cache =
-                format!("{}\nexport component _Preview inherits {} {{ }}\n", from_cache, component);
-        }
-        builder.build_from_source(from_cache, preview_component.path).await
-    } else {
-        builder.build_from_path(preview_component.path).await
+    let Some(sender) = SERVER_NOTIFIER.get_or_init(Default::default).lock().unwrap().clone() else {
+        return Some(());
     };
 
-    notify_diagnostics(builder.diagnostics(), &sender);
+    let lsp_diags = crate::preview::convert_diagnostics(diagnostics);
 
-    if let Some(compiled) = compiled {
-        PREVIEW_STATE.with(|preview_state| {
-            let mut preview_state = preview_state.borrow_mut();
-            let handle = if let Some(handle) = preview_state.handle.take() {
-                let window = handle.window();
-                let handle = compiled.create_with_existing_window(window).unwrap();
-                match post_load_behavior {
-                    PostLoadBehavior::ShowAfterLoad => handle.show().unwrap(),
-                    PostLoadBehavior::DoNothing => {}
-                }
-                handle
-            } else {
-                let handle = compiled.create().unwrap();
-                handle.show().unwrap();
-                handle
-            };
-            if let Some((path, offset)) =
-                CONTENT_CACHE.get().and_then(|c| c.lock().unwrap().highlight.clone())
-            {
-                handle.highlight(path, offset);
-            }
-            preview_state.handle = Some(handle);
-        });
-        send_notification(&sender, "Preview Loaded", Health::Ok);
-    } else {
-        send_notification(&sender, "Preview not updated", Health::Error);
-    }
-
-    configure_design_mode(design_mode, &sender);
-
-    CONTENT_CACHE.get_or_init(Default::default).lock().unwrap().sender.replace(sender);
-}
-
-fn notify_diagnostics(
-    diagnostics: &[slint_interpreter::Diagnostic],
-    sender: &crate::ServerNotifier,
-) -> Option<()> {
-    let mut lsp_diags: HashMap<lsp_types::Url, Vec<lsp_types::Diagnostic>> = Default::default();
-    for d in diagnostics {
-        if d.source_file().map_or(true, |f| f.is_relative()) {
-            continue;
-        }
-        let uri = lsp_types::Url::from_file_path(d.source_file().unwrap()).unwrap();
-        lsp_diags.entry(uri).or_default().push(crate::util::to_lsp_diag(d));
-    }
-
-    for (uri, diagnostics) in lsp_diags {
-        sender
-            .send_notification(
-                "textDocument/publishDiagnostics".into(),
-                lsp_types::PublishDiagnosticsParams { uri, diagnostics, version: None },
-            )
-            .ok()?;
+    for (url, diagnostics) in lsp_diags {
+        crate::preview::notify_lsp_diagnostics(&sender, url, diagnostics)?;
     }
     Some(())
 }
 
-fn send_notification(sender: &crate::ServerNotifier, arg: &str, health: Health) {
-    sender
-        .send_notification(
-            ServerStatusNotification::METHOD.into(),
-            ServerStatusParams { health, quiescent: false, message: Some(arg.into()) },
-        )
-        .unwrap_or_else(|e| eprintln!("Error sending notification: {:?}", e));
+pub fn set_current_style(style: String) {
+    PREVIEW_STATE.with(move |preview_state| {
+        let preview_state = preview_state.borrow_mut();
+        if let Some(ui) = &preview_state.ui {
+            ui.set_current_style(style.into())
+        }
+    });
+}
+
+pub fn get_current_style() -> String {
+    PREVIEW_STATE.with(|preview_state| -> String {
+        let preview_state = preview_state.borrow();
+        if let Some(ui) = &preview_state.ui {
+            ui.get_current_style().as_str().to_string()
+        } else {
+            String::new()
+        }
+    })
+}
+
+pub fn set_status_text(text: &str) {
+    let text = text.to_string();
+
+    i_slint_core::api::invoke_from_event_loop(move || {
+        PREVIEW_STATE.with(|preview_state| {
+            let preview_state = preview_state.borrow_mut();
+            if let Some(ui) = &preview_state.ui {
+                ui.set_status_text(text.into());
+            }
+        });
+    })
+    .unwrap();
+}
+
+pub fn set_diagnostics(diagnostics: &[slint_interpreter::Diagnostic]) {
+    let data = crate::preview::ui::convert_diagnostics(diagnostics);
+
+    i_slint_core::api::invoke_from_event_loop(move || {
+        PREVIEW_STATE.with(|preview_state| {
+            let preview_state = preview_state.borrow_mut();
+            if let Some(ui) = &preview_state.ui {
+                let model = VecModel::from(data);
+                ui.set_diagnostics(Rc::new(model).into());
+            }
+        });
+    })
+    .unwrap();
+}
+
+pub fn send_status(message: &str, health: Health) {
+    let Some(sender) = SERVER_NOTIFIER.get_or_init(Default::default).lock().unwrap().clone() else {
+        return;
+    };
+
+    crate::preview::send_status_notification(&sender, message, health)
+}
+
+pub fn ask_editor_to_show_document(
+    file: String,
+    start_line: u32,
+    start_column: u32,
+    end_line: u32,
+    end_column: u32,
+) {
+    let Some(sender) = SERVER_NOTIFIER.get_or_init(Default::default).lock().unwrap().clone() else {
+        return;
+    };
+
+    let fut = crate::send_show_document_to_editor(
+        sender,
+        file,
+        start_line,
+        start_column,
+        end_line,
+        end_column,
+    );
+
+    slint_interpreter::spawn_local(fut).unwrap(); // Fire and forget.
+}
+
+pub fn configure_design_mode(enabled: bool) {
+    run_in_ui_thread(move || async move {
+        PREVIEW_STATE.with(|preview_state| {
+            let preview_state = preview_state.borrow();
+            let handle = preview_state.handle.borrow();
+            if let Some(handle) = &*handle {
+                super::configure_handle_for_design_mode(handle, enabled);
+            }
+        })
+    });
+}
+
+/// This runs `set_preview_factory` in the UI thread
+pub fn update_preview_area(compiled: slint_interpreter::ComponentDefinition, design_mode: bool) {
+    let default_style = {
+        let cache = super::CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
+        cache.default_style.clone()
+    };
+
+    PREVIEW_STATE.with(|preview_state| {
+        let mut preview_state = preview_state.borrow_mut();
+
+        open_ui_impl(&mut preview_state, default_style);
+
+        let shared_handle = preview_state.handle.clone();
+
+        super::set_preview_factory(
+            preview_state.ui.as_ref().unwrap(),
+            compiled,
+            Box::new(move |instance| {
+                shared_handle.replace(Some(instance));
+            }),
+            design_mode,
+        );
+    });
 }
 
 /// Highlight the element pointed at the offset in the path.
 /// When path is None, remove the highlight.
-pub fn highlight(path: Option<PathBuf>, offset: u32) {
-    let highlight = path.map(|x| (x, offset));
-    let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-
-    if cache.highlight == highlight {
-        return;
-    }
-    cache.highlight = highlight;
-
-    if cache.highlight.as_ref().map_or(true, |(path, _)| cache.dependency.contains(path)) {
-        run_in_ui_thread(move || async move {
-            PREVIEW_STATE.with(|preview_state| {
-                let preview_state = preview_state.borrow();
-                if let (Some(cache), Some(handle)) =
-                    (CONTENT_CACHE.get(), preview_state.handle.as_ref())
-                {
-                    if let Some((path, offset)) = cache.lock().unwrap().highlight.clone() {
-                        handle.highlight(path, offset);
-                    } else {
-                        handle.highlight(PathBuf::default(), 0);
-                    }
-                }
-            })
+pub fn update_highlight(path: PathBuf, offset: u32) {
+    run_in_ui_thread(move || async move {
+        PREVIEW_STATE.with(|preview_state| {
+            let preview_state = preview_state.borrow();
+            let handle = preview_state.handle.borrow();
+            if let Some(handle) = &*handle {
+                handle.highlight(path, offset);
+            }
         })
-    }
+    })
 }

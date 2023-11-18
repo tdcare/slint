@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 import { Palette, Typography, Icons } from "styling.slint";
+import { SpinBoxBase } from "../common/spinbox-base.slint";
 
 component SpinBoxButton {
     callback clicked <=> i-touch-area.clicked;
@@ -10,6 +11,12 @@ component SpinBoxButton {
 
     min-width: 28px;
     horizontal-stretch: 0;
+
+    states [
+        pressed when i-touch-area.pressed : {
+            i-background.background: Palette.subtle;
+        }
+    ]
 
     i-background := Rectangle {
         border-radius: 3px;
@@ -24,22 +31,16 @@ component SpinBoxButton {
     }
 
     i-touch-area := TouchArea {}
-
-    states [
-        pressed when i-touch-area.pressed : {
-            i-background.background: Palette.subtle;
-        }
-    ]
 }
 
 export component SpinBox {
-    callback edited(int /* value */);
-
-    in property <int> minimum;
-    in property <int> maximum: 100;
-    in property <bool> enabled <=> i-text-input.enabled;
+    in property <int> minimum <=> i-base.minimum;
+    in property <int> maximum <=> i-base.maximum;
+    in property <bool> enabled <=> i-base.enabled;
     out property <bool> has-focus <=> i-text-input.has-focus;
-    in-out property <int> value;
+    in-out property <int> value <=> i-base.value;
+
+    callback edited( /* value */ int);
 
     min-width: 128px;
     min-height: 30px;
@@ -50,6 +51,30 @@ export component SpinBox {
     accessible-value-minimum: root.minimum;
     accessible-value-maximum: root.maximum;
     accessible-value-step: (root.maximum - root.minimum) / 100;
+
+    states [
+        disabled when !root.enabled : {
+            i-background.background: Palette.control-disabled;
+            i-background.border-color: Palette.control-stroke;
+            i-text-input.color: Palette.text-disabled;
+            i-text-input.selection-foreground-color: Palette.text-on-accent-disabled;
+        }
+        focused when root.has-focus : {
+            i-background.background: Palette.control-input-active;
+            i-background.border-color: Palette.control-stroke;
+            i-focus-border.background: Palette.accent-default;
+        }
+    ]
+
+    i-base := SpinBoxBase {
+        width: 100%;
+        height: 100%;
+
+        edited(value) => {
+            i-text-input.text = value;
+            root.edited(value);
+        }
+    }
 
     i-background := Rectangle {
         border-radius: 4px;
@@ -74,9 +99,10 @@ export component SpinBox {
                     font-size: Typography.body.font-size;
                     font-weight: Typography.body.font-weight;
                     selection-background-color: Palette.accent-selected-text;
-                    selection-foreground-color: self.color;
+                    selection-foreground-color: Palette.text-on-accent-primary;
                     horizontal-stretch: 1;
                     text: root.value;
+                    enabled: root.enabled;
 
                     accepted => {
                         if (!self.text.is-float()) {
@@ -86,7 +112,7 @@ export component SpinBox {
 
                     edited => {
                         if (self.text.is-float()) {
-                            root.update-value(self.text.to-float());
+                            i-base.update-value(self.text.to-float());
                         }
                     }
                 }
@@ -103,7 +129,7 @@ export component SpinBox {
                 icon: Icons.chevron-up;
 
                 clicked => {
-                    root.increment();
+                    i-base.increment();
                 }
             }
 
@@ -112,7 +138,7 @@ export component SpinBox {
                 icon: Icons.chevron-down;
 
                 clicked => {
-                    root.decrement();
+                    i-base.decrement();
                 }
             }
         }
@@ -124,34 +150,4 @@ export component SpinBox {
             height: 2px;
         }
     }
-
-    function update-value(value: int) {
-        if (value >= root.minimum && value <= root.maximum) {
-            root.value = value;
-            root.edited(value);
-        }
-
-        i-text-input.text = root.value;
-    }
-
-    function increment() {
-        root.update-value(root.value + 1);
-    }
-
-    function decrement() {
-        root.update-value(root.value - 1);
-    }
-
-    states [
-        disabled when !root.enabled : {
-            i-background.background: Palette.control-disabled;
-            i-background.border-color: Palette.control-stroke;
-            i-text-input.color: Palette.text-disabled;
-        }
-        focused when root.has-focus : {
-            i-background.background: Palette.control-input-active;
-            i-background.border-color: Palette.control-stroke;
-            i-focus-border.background: Palette.accent-default;
-        }
-    ]
 }

@@ -1,7 +1,6 @@
 <!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial -->
-# ![Slint](./logo/slint-logo-full-light.svg#gh-light-mode-only)![Slint](./logo/slint-logo-full-dark.svg#gh-dark-mode-only)
 
-<!-- cSpell: ignore ChipTrack Moiré Trolltech valign Woboq -->
+![Slint](./logo/slint-logo-full-light.svg#gh-light-mode-only) ![Slint](./logo/slint-logo-full-dark.svg#gh-dark-mode-only)
 
 [![Build Status](https://github.com/slint-ui/slint/workflows/CI/badge.svg)](https://github.com/slint-ui/slint/actions)
 [![REUSE status](https://api.reuse.software/badge/github.com/slint-ui/slint)](https://api.reuse.software/info/github.com/slint-ui/slint)
@@ -35,7 +34,7 @@ We invite you to use Slint and be part of its community.
 Slint is in active development. The state of support for each platform is as
 follows:
 
-- **Embedded**: *Ready* Slint is being used by customers in production on embedded
+- **Embedded**: *Ready*. Slint is being used by customers in production on embedded
     devices running embedded Linux and Windows. The Slint run-time requires less than
     300KiB of RAM and can run on different processor architectures such as ARM Cortex M,
     ESP32, STM32 from the MCU category to ARM Cortex A, Intel x86 from the MPU category.

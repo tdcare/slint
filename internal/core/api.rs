@@ -7,10 +7,10 @@ This module contains types that are public and re-exported in the slint-rs as we
 
 #![warn(missing_docs)]
 
-use crate::component::ComponentVTable;
 #[cfg(target_has_atomic = "ptr")]
 pub use crate::future::*;
-use crate::input::{KeyEventType, KeyInputEvent, MouseEvent};
+use crate::input::{KeyEventType, MouseEvent};
+use crate::item_tree::ItemTreeVTable;
 use crate::window::{WindowAdapter, WindowInner};
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -148,6 +148,10 @@ impl LogicalSize {
 
     pub(crate) fn to_euclid(self) -> crate::lengths::LogicalSize {
         [self.width as _, self.height as _].into()
+    }
+
+    pub(crate) fn from_euclid(p: crate::lengths::LogicalSize) -> Self {
+        Self::new(p.width as _, p.height as _)
     }
 }
 
@@ -473,8 +477,8 @@ impl Window {
             crate::platform::WindowEvent::PointerScrolled { position, delta_x, delta_y } => {
                 self.0.process_mouse_input(MouseEvent::Wheel {
                     position: position.to_euclid().cast(),
-                    delta_x,
-                    delta_y,
+                    delta_x: delta_x as _,
+                    delta_y: delta_y as _,
                 });
             }
             crate::platform::WindowEvent::PointerExited => {
@@ -482,14 +486,14 @@ impl Window {
             }
 
             crate::platform::WindowEvent::KeyPressed { text } => {
-                self.0.process_key_input(KeyInputEvent {
+                self.0.process_key_input(crate::input::KeyEvent {
                     text,
                     event_type: KeyEventType::KeyPressed,
                     ..Default::default()
                 })
             }
             crate::platform::WindowEvent::KeyReleased { text } => {
-                self.0.process_key_input(KeyInputEvent {
+                self.0.process_key_input(crate::input::KeyEvent {
                     text,
                     event_type: KeyEventType::KeyReleased,
                     ..Default::default()
@@ -591,7 +595,7 @@ pub trait ComponentHandle {
 
     /// Internal function used when upgrading a weak reference to a strong one.
     #[doc(hidden)]
-    fn from_inner(_: vtable::VRc<ComponentVTable, Self::Inner>) -> Self;
+    fn from_inner(_: vtable::VRc<ItemTreeVTable, Self::Inner>) -> Self;
 
     /// Convenience function for [`crate::Window::show()`](struct.Window.html#method.show).
     /// This shows the window on the screen and maintains an extra strong reference while
@@ -638,7 +642,7 @@ mod weak_handle {
     /// as the one it has been created from.
     /// This is useful to use with [`invoke_from_event_loop()`] or [`Self::upgrade_in_event_loop()`].
     pub struct Weak<T: ComponentHandle> {
-        inner: vtable::VWeak<ComponentVTable, T::Inner>,
+        inner: vtable::VWeak<ItemTreeVTable, T::Inner>,
         #[cfg(feature = "std")]
         thread: std::thread::ThreadId,
     }
@@ -665,7 +669,7 @@ mod weak_handle {
 
     impl<T: ComponentHandle> Weak<T> {
         #[doc(hidden)]
-        pub fn new(rc: &vtable::VRc<ComponentVTable, T::Inner>) -> Self {
+        pub fn new(rc: &vtable::VRc<ItemTreeVTable, T::Inner>) -> Self {
             Self {
                 inner: vtable::VRc::downgrade(rc),
                 #[cfg(feature = "std")]
@@ -699,7 +703,7 @@ mod weak_handle {
 
         /// A helper function to allow creation on `component_factory::Component` from
         /// a `ComponentHandle`
-        pub(crate) fn inner(&self) -> vtable::VWeak<ComponentVTable, T::Inner> {
+        pub(crate) fn inner(&self) -> vtable::VWeak<ItemTreeVTable, T::Inner> {
             self.inner.clone()
         }
 

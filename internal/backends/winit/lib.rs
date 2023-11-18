@@ -30,19 +30,18 @@ pub enum SlintUserEvent {
 mod renderer {
     use i_slint_core::platform::PlatformError;
 
-    pub(crate) trait WinitCompatibleRenderer {
-        fn new(
-            window_builder: winit::window::WindowBuilder,
-        ) -> Result<(Self, winit::window::Window), PlatformError>
-        where
-            Self: Sized;
-
+    pub trait WinitCompatibleRenderer {
         fn render(&self, window: &i_slint_core::api::Window) -> Result<(), PlatformError>;
 
         fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer;
 
         // Got WindowEvent::Occluded
         fn occluded(&self, _: bool) {}
+
+        // Got winit::Event::Resumed
+        fn resumed(&self, _winit_window: &winit::window::Window) -> Result<(), PlatformError> {
+            Ok(())
+        }
     }
 
     #[cfg(feature = "renderer-femtovg")]
@@ -60,61 +59,63 @@ mod accesskit;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_input_helper;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "renderer-femtovg"))]
 pub fn create_gl_window_with_canvas_id(
     canvas_id: &str,
 ) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-    WinitWindowAdapter::new::<crate::renderer::femtovg::GlutinFemtoVGRenderer>(canvas_id)
-}
-
-fn window_factory_fn<R: WinitCompatibleRenderer + 'static>(
-) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-    WinitWindowAdapter::new::<R>(
-        #[cfg(target_arch = "wasm32")]
-        "canvas".into(),
-    )
+    WinitWindowAdapter::new(renderer::femtovg::GlutinFemtoVGRenderer::new, canvas_id)
 }
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "renderer-femtovg")] {
-        type DefaultRenderer = renderer::femtovg::GlutinFemtoVGRenderer;
         const DEFAULT_RENDERER_NAME: &str = "FemtoVG";
     } else if #[cfg(enable_skia_renderer)] {
-        type DefaultRenderer = renderer::skia::WinitSkiaRenderer;
         const DEFAULT_RENDERER_NAME: &'static str = "Skia";
     } else if #[cfg(feature = "renderer-software")] {
-        type DefaultRenderer = renderer::sw::WinitSoftwareRenderer;
         const DEFAULT_RENDERER_NAME: &'static str = "Software";
     } else {
         compile_error!("Please select a feature to build with the winit backend: `renderer-femtovg`, `renderer-skia`, `renderer-skia-opengl`, `renderer-skia-vulkan` or `renderer-software`");
     }
 }
 
-fn try_create_window_with_fallback_renderer() -> Option<Rc<dyn WindowAdapter>> {
-    #[cfg(any(
-        feature = "renderer-skia",
-        feature = "renderer-skia-opengl",
-        feature = "renderer-skia-vulkan"
-    ))]
-    {
-        if let Ok(window) = window_factory_fn::<renderer::skia::WinitSkiaRenderer>() {
-            return Some(window);
+fn default_renderer_factory(
+    window_builder: winit::window::WindowBuilder,
+) -> Result<(Box<dyn WinitCompatibleRenderer>, winit::window::Window), PlatformError> {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "renderer-femtovg")] {
+            renderer::femtovg::GlutinFemtoVGRenderer::new(window_builder)
+        } else if #[cfg(enable_skia_renderer)] {
+            renderer::skia::WinitSkiaRenderer::new(window_builder)
+        } else if #[cfg(feature = "renderer-software")] {
+            renderer::sw::WinitSoftwareRenderer::new(window_builder)
+        } else {
+            compile_error!("Please select a feature to build with the winit backend: `renderer-femtovg`, `renderer-skia`, `renderer-skia-opengl`, `renderer-skia-vulkan` or `renderer-software`");
         }
     }
-    #[cfg(any(feature = "renderer-femtovg"))]
-    {
-        if let Ok(window) = window_factory_fn::<renderer::femtovg::GlutinFemtoVGRenderer>() {
-            return Some(window);
-        }
-    }
-    #[cfg(any(feature = "renderer-software"))]
-    {
-        if let Ok(window) = window_factory_fn::<renderer::sw::WinitSoftwareRenderer>() {
-            return Some(window);
-        }
-    }
+}
 
-    None
+fn try_create_window_with_fallback_renderer() -> Option<Rc<dyn WindowAdapter>> {
+    [
+        #[cfg(any(
+            feature = "renderer-skia",
+            feature = "renderer-skia-opengl",
+            feature = "renderer-skia-vulkan"
+        ))]
+        renderer::skia::WinitSkiaRenderer::new,
+        #[cfg(any(feature = "renderer-femtovg"))]
+        renderer::femtovg::GlutinFemtoVGRenderer::new,
+        #[cfg(any(feature = "renderer-software"))]
+        renderer::sw::WinitSoftwareRenderer::new,
+    ]
+    .into_iter()
+    .find_map(|renderer_factory| {
+        WinitWindowAdapter::new(
+            renderer_factory,
+            #[cfg(target_arch = "wasm32")]
+            "canvas".into(),
+        )
+        .ok()
+    })
 }
 
 #[doc(hidden)]
@@ -126,55 +127,55 @@ pub const HAS_NATIVE_STYLE: bool = false;
 #[doc(hidden)]
 pub mod native_widgets {}
 
-#[doc = concat!("This struct implements the Slint Platform trait. Use this in conjuction with [`slint::platform::set_platform`](https://slint.dev/releases/", env!("CARGO_PKG_VERSION"), "/docs/rust/slint/platform/fn.set_platform.html) to initialize.")]
+#[doc = concat!("This struct implements the Slint Platform trait. Use this in conjunction with [`slint::platform::set_platform`](https://slint.dev/releases/", env!("CARGO_PKG_VERSION"), "/docs/rust/slint/platform/fn.set_platform.html) to initialize.")]
 /// Slint to use winit for all windowing system interaction.
 ///
 /// ```rust,no_run
 /// # use i_slint_backend_winit::Backend;
-/// slint::platform::set_platform(Box::new(Backend::new()));
+/// slint::platform::set_platform(Box::new(Backend::new().unwrap()));
 /// ```
 pub struct Backend {
-    window_factory_fn: fn() -> Result<Rc<dyn WindowAdapter>, PlatformError>,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Self::new()
-    }
+    renderer_factory_fn:
+        fn(
+            window_builder: winit::window::WindowBuilder,
+        )
+            -> Result<(Box<dyn WinitCompatibleRenderer>, winit::window::Window), PlatformError>,
+    event_loop_state: std::cell::RefCell<Option<crate::event_loop::EventLoopState>>,
 }
 
 impl Backend {
     #[doc = concat!("Creates a new winit backend with the default renderer that's compiled in. See the [backend documentation](https://slint.dev/releases/", env!("CARGO_PKG_VERSION"), "/docs/rust/slint/index.html#backends) for")]
     /// details on how to select the default renderer.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, PlatformError> {
         Self::new_with_renderer_by_name(None)
     }
 
     #[doc = concat!("Creates a new winit backend with the renderer specified by name. See the [backend documentation](https://slint.dev/releases/", env!("CARGO_PKG_VERSION"), "/docs/rust/slint/index.html#backends) for")]
     /// details on how to select the default renderer.
     /// If the renderer name is `None` or the name is not recognized, the default renderer is selected.
-    pub fn new_with_renderer_by_name(renderer_name: Option<&str>) -> Self {
-        let window_factory_fn = match renderer_name {
+    pub fn new_with_renderer_by_name(renderer_name: Option<&str>) -> Result<Self, PlatformError> {
+        // Initialize the winit event loop and propagate errors if for example `DISPLAY` or `WAYLAND_DISPLAY` isn't set.
+        crate::event_loop::with_window_target(|_| Ok(()))?;
+
+        let renderer_factory_fn = match renderer_name {
             #[cfg(feature = "renderer-femtovg")]
-            Some("gl") | Some("femtovg") => {
-                window_factory_fn::<renderer::femtovg::GlutinFemtoVGRenderer>
-            }
+            Some("gl") | Some("femtovg") => renderer::femtovg::GlutinFemtoVGRenderer::new,
             #[cfg(enable_skia_renderer)]
-            Some("skia") => window_factory_fn::<renderer::skia::WinitSkiaRenderer>,
+            Some("skia") => renderer::skia::WinitSkiaRenderer::new,
+            #[cfg(all(enable_skia_renderer, not(target_os = "android")))]
+            Some("skia-software") => renderer::skia::WinitSkiaRenderer::new_software,
             #[cfg(feature = "renderer-software")]
-            Some("sw") | Some("software") => {
-                window_factory_fn::<renderer::sw::WinitSoftwareRenderer>
-            }
-            None => window_factory_fn::<DefaultRenderer>,
+            Some("sw") | Some("software") => renderer::sw::WinitSoftwareRenderer::new,
+            None => default_renderer_factory,
             Some(renderer_name) => {
                 eprintln!(
                     "slint winit: unrecognized renderer {}, falling back to {}",
                     renderer_name, DEFAULT_RENDERER_NAME
                 );
-                window_factory_fn::<DefaultRenderer>
+                default_renderer_factory
             }
         };
-        Self { window_factory_fn }
+        Ok(Self { renderer_factory_fn, event_loop_state: Default::default() })
     }
 }
 
@@ -213,7 +214,12 @@ fn send_event_via_global_event_loop_proxy(
 
 impl i_slint_core::platform::Platform for Backend {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-        (self.window_factory_fn)().or_else(|e| {
+        WinitWindowAdapter::new(
+            self.renderer_factory_fn,
+            #[cfg(target_arch = "wasm32")]
+            "canvas".into(),
+        )
+        .or_else(|e| {
             try_create_window_with_fallback_renderer().ok_or_else(|| {
                 format!("Winit backend failed to find a suitable renderer. Last failure was: {e}")
                     .into()
@@ -228,7 +234,33 @@ impl i_slint_core::platform::Platform for Backend {
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
-        crate::event_loop::run()
+        let loop_state = self.event_loop_state.borrow_mut().take().unwrap_or_default();
+        let new_state = loop_state.run()?;
+        *self.event_loop_state.borrow_mut() = Some(new_state);
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn process_events(
+        &self,
+        timeout: core::time::Duration,
+        _: i_slint_core::InternalToken,
+    ) -> Result<core::ops::ControlFlow<()>, PlatformError> {
+        let loop_state = self.event_loop_state.borrow_mut().take().unwrap_or_default();
+        let (new_state, status) = loop_state.pump_events(Some(timeout))?;
+        *self.event_loop_state.borrow_mut() = Some(new_state);
+        match status {
+            winit::platform::pump_events::PumpStatus::Continue => {
+                Ok(core::ops::ControlFlow::Continue(()))
+            }
+            winit::platform::pump_events::PumpStatus::Exit(code) => {
+                if code == 0 {
+                    Ok(core::ops::ControlFlow::Break(()))
+                } else {
+                    return Err(format!("Event loop exited with non-zero code {code}").into());
+                }
+            }
+        }
     }
 
     fn new_event_loop_proxy(&self) -> Option<Box<dyn EventLoopProxy>> {
@@ -251,17 +283,43 @@ impl i_slint_core::platform::Platform for Backend {
         Some(Box::new(Proxy))
     }
 
+    #[cfg(target_arch = "wasm32")]
     fn set_clipboard_text(&self, text: &str, clipboard: i_slint_core::platform::Clipboard) {
-        crate::event_loop::with_window_target(|event_loop_target| {
-            event_loop_target.clipboard(clipboard)?.set_contents(text.into()).ok()
-        });
+        crate::wasm_input_helper::set_clipboard_text(text.into(), clipboard);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_clipboard_text(&self, text: &str, clipboard: i_slint_core::platform::Clipboard) {
+        crate::event_loop::with_window_target(|event_loop_target| {
+            if let Some(mut clipboard) = event_loop_target.clipboard(clipboard) {
+                clipboard.set_contents(text.into()).ok();
+            }
+            Ok(())
+        })
+        .ok();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn clipboard_text(&self, clipboard: i_slint_core::platform::Clipboard) -> Option<String> {
+        crate::wasm_input_helper::get_clipboard_text(clipboard)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard_text(&self, clipboard: i_slint_core::platform::Clipboard) -> Option<String> {
         crate::event_loop::with_window_target(|event_loop_target| {
-            event_loop_target.clipboard(clipboard)?.get_contents().ok()
+            Ok(event_loop_target
+                .clipboard(clipboard)
+                .and_then(|mut clipboard| clipboard.get_contents().ok()))
         })
+        .ok()
+        .flatten()
     }
+}
+
+/// Spawn the event loop, using [`winit::platform::web::EventLoopExtWebSys::spawn()`]
+#[cfg(target_arch = "wasm32")]
+pub fn spawn_event_loop() -> Result<(), PlatformError> {
+    crate::event_loop::spawn()
 }
 
 /// Invokes the specified callback with a reference to the [`winit::event_loop::EventLoopWindowTarget`].
@@ -269,8 +327,10 @@ impl i_slint_core::platform::Platform for Backend {
 ///
 /// *Note*: This function can only be called from within the Slint main thread.
 pub fn with_event_loop_window_target<R>(
-    callback: impl FnOnce(&winit::event_loop::EventLoopWindowTarget<SlintUserEvent>) -> R,
-) -> R {
+    callback: impl FnOnce(
+        &winit::event_loop::EventLoopWindowTarget<SlintUserEvent>,
+    ) -> Result<R, Box<dyn std::error::Error + Send + Sync>>,
+) -> Result<R, Box<dyn std::error::Error + Send + Sync>> {
     crate::event_loop::with_window_target(|event_loop_interface| {
         callback(event_loop_interface.event_loop_target())
     })
@@ -329,7 +389,7 @@ mod testui {
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos", target_os = "ios")))]
 #[test]
 fn test_window_accessor() {
-    slint::platform::set_platform(Box::new(crate::Backend::new())).unwrap();
+    slint::platform::set_platform(Box::new(crate::Backend::new().unwrap())).unwrap();
 
     use testui::*;
     let app = App::new().unwrap();

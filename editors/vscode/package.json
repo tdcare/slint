@@ -11,7 +11,7 @@
         "url": "https://github.com/slint-ui/slint"
     },
     "engines": {
-        "vscode": "^1.70.0"
+        "vscode": "^1.82.0"
     },
     "categories": [
         "Programming Languages"
@@ -66,11 +66,6 @@
                 "icon": "$(preview)"
             },
             {
-                "command": "slint.toggleDesignMode",
-                "title": "Toggle Design Mode in Slint Preview (experimental)",
-                "category": "Slint"
-            },
-            {
                 "command": "slint.reload",
                 "title": "Restart server",
                 "category": "Slint",
@@ -101,7 +96,7 @@
                 },
                 "slint.preview.style": {
                     "type": "string",
-                    "description": "The style to be used for the preview (eg: 'fluent', 'material', or 'native')"
+                    "description": "The default style to be used for the preview (eg: 'fluent', 'material', or 'native')"
                 },
                 "slint.preview.providedByEditor": {
                     "type": "boolean",
@@ -113,6 +108,15 @@
                         "type": "string"
                     },
                     "description": "List of paths in which the `import` statement and `@image-url` are looked up"
+                },
+                "slint.libraryPaths": {
+                    "type": "object",
+                    "patternProperties": {
+                        "^[a-zA-Z][a-zA-Z0-9-_]*$": {
+                            "type": "string"
+                        }
+                    },
+                    "description": "Map of paths in which the `import` statement for `@library` imports are looked up"
                 }
             }
         },
@@ -176,15 +180,17 @@
         ]
     },
     "dependencies": {
-        "@vscode/codicons": "0.0.32",
-        "vscode-languageclient": "^7.0.0",
-        "vscode-languageserver": "^8.0.2"
+        "@vscode/codicons": "0.0.33",
+        "vscode-languageclient": "^8.1.0",
+        "vscode-languageserver": "^8.1.0"
     },
     "files": [
         "bin/slint-lsp-*"
     ],
     "scripts": {
         "vscode:prepublish": "npm run build:wasm_lsp-release && npm run compile && shx echo \"GPL-3.0-only OR LicenseRef-Slint-commercial\" > LICENSE.txt",
+        "build:lsp": "cargo build -p slint-lsp",
+        "build:lsp-release": "cargo build --release -p slint-lsp",
         "build:wasm_lsp": "env-var wasm-pack build --dev     --target web ../../tools/lsp --out-dir {{npm_config_local_prefix}}/out -- --no-default-features --features backend-winit,renderer-femtovg,preview",
         "build:wasm_lsp-release": "env-var wasm-pack build --release --target web ../../tools/lsp --out-dir {{npm_config_local_prefix}}/out -- --no-default-features --features backend-winit,renderer-femtovg,preview",
         "compile": "node ./esbuild.js",
@@ -197,22 +203,22 @@
     },
     "devDependencies": {
         "@rauschma/env-var": "^1.0.1",
-        "@types/glob": "^7.2.0",
-        "@types/mocha": "^8.2.3",
-        "@types/node": "^12.20.55",
-        "@types/vscode": "1.70.0",
-        "@typescript-eslint/eslint-plugin": "^5.44.0",
-        "@typescript-eslint/parser": "^5.44.0",
-        "esbuild": "^0.14.54",
-        "eslint": "^8.28.0",
-        "glob": "^7.2.3",
-        "mocha": "^8.4.0",
+        "@types/glob": "^8.1.0",
+        "@types/mocha": "^10.0.1",
+        "@types/node": "^16.0",
+        "@types/vscode": "1.82.0",
+        "@typescript-eslint/eslint-plugin": "^6.4.1",
+        "@typescript-eslint/parser": "^6.4.1",
+        "esbuild": "^0.19.2",
+        "eslint": "^8.48.0",
+        "glob": "^10.3.3",
+        "mocha": "^10.0.1",
         "path-browserify": "^1.0.1",
         "shx": "^0.3.4",
-        "ts-loader": "^9.4.1",
-        "typescript": "^4.9.3",
+        "ts-loader": "^9.4.4",
+        "typescript": "5.1.6",
         "vscode-test": "^1.6.1",
-        "webpack": "^5.75.0",
-        "webpack-cli": "^4.10.0"
+        "webpack": "^5.88.2",
+        "webpack-cli": "^5.1.4"
     }
 }

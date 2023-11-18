@@ -14,6 +14,7 @@ use i_slint_core::graphics::{Image, IntRect, Point, Size};
 use i_slint_core::item_rendering::{ItemCache, ItemRenderer};
 use i_slint_core::items::{
     self, Clip, FillRule, ImageFit, ImageRendering, ItemRc, Layer, Opacity, RenderingResult,
+    TextHorizontalAlignment,
 };
 use i_slint_core::lengths::{
     LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector, PointLengths,
@@ -520,7 +521,14 @@ impl<'a> ItemRenderer for GLItemRenderer<'a> {
         );
 
         if let Some(cursor_point) = cursor_point.or_else(|| {
-            cursor_visible.then(|| PhysicalPoint::from_lengths(PhysicalLength::default(), next_y))
+            cursor_visible.then(|| {
+                let x = match text_input.horizontal_alignment() {
+                    TextHorizontalAlignment::Left => PhysicalLength::default(),
+                    TextHorizontalAlignment::Center => width / 2.,
+                    TextHorizontalAlignment::Right => width,
+                };
+                PhysicalPoint::from_lengths(x, next_y)
+            })
         }) {
             let mut cursor_rect = femtovg::Path::new();
             cursor_rect.rect(
@@ -1150,7 +1158,7 @@ impl<'a> GLItemRenderer<'a> {
 
                 i_slint_core::item_rendering::render_item_children(
                     self,
-                    &item_rc.component(),
+                    &item_rc.item_tree(),
                     item_rc.index() as isize,
                 );
 
@@ -1177,7 +1185,7 @@ impl<'a> GLItemRenderer<'a> {
                 let children_rect = i_slint_core::properties::evaluate_no_tracking(|| {
                     item_rc.geometry().union(
                         &i_slint_core::item_rendering::item_children_bounding_rect(
-                            &item_rc.component(),
+                            &item_rc.item_tree(),
                             item_rc.index() as isize,
                             &current_clip,
                         ),

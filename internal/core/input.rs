@@ -5,6 +5,7 @@
 */
 #![warn(missing_docs)]
 
+use crate::item_tree::ItemTreeRc;
 use crate::item_tree::{ItemRc, ItemWeak, VisitChildrenResult};
 pub use crate::items::PointerEventButton;
 use crate::items::{ItemRef, TextCursorDirection};
@@ -12,8 +13,7 @@ pub use crate::items::{KeyEvent, KeyboardModifiers};
 use crate::lengths::{LogicalPoint, LogicalVector};
 use crate::timers::Timer;
 use crate::window::{WindowAdapter, WindowInner};
-use crate::Property;
-use crate::{component::ComponentRc, SharedString};
+use crate::{Coord, Property, SharedString};
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 use const_field_offset::FieldOffsets;
@@ -44,7 +44,7 @@ pub enum MouseEvent {
     /// `pos` is the position of the mouse when the event happens.
     /// `delta_x` is the amount of pixels to scroll in horizontal direction,
     /// `delta_y` is the amount of pixels to scroll in vertical direction.
-    Wheel { position: LogicalPoint, delta_x: f32, delta_y: f32 },
+    Wheel { position: LogicalPoint, delta_x: Coord, delta_y: Coord },
     /// The mouse exited the item or component
     Exit,
 }
@@ -112,8 +112,6 @@ pub enum InputEventFilterResult {
     /// The event will not be forwarded to children, if a children already had the grab, the
     /// grab will be cancelled with a [`MouseEvent::Exit`] event
     Intercept,
-    /// Similar to `Intercept` but the contained [`MouseEvent`] will be forwarded to children
-    InterceptAndDispatch(MouseEvent),
     /// The event will be forwarding to the children with a delay (in milliseconds), unless it is
     /// being intercepted.
     /// This is what happens when the flickable wants to delay the event.
@@ -127,7 +125,7 @@ pub enum InputEventFilterResult {
 #[allow(missing_docs, non_upper_case_globals)]
 pub mod key_codes {
     macro_rules! declare_consts_for_special_keys {
-       ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident)|*    # $($_xkb:ident)|*;)*) => {
+       ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident $(($_pos:ident))?)|*    # $($_xkb:ident)|*;)*) => {
             $(pub const $name : char = $char;)*
 
             #[allow(missing_docs)]
@@ -266,25 +264,6 @@ pub enum KeyEventType {
     UpdateComposition = 2,
     /// The input method replaces the currently composed text with the final result of the composition.
     CommitComposition = 3,
-}
-
-/// Represents a key event sent by the windowing system.
-#[derive(Debug, Clone, PartialEq, Default)]
-#[repr(C)]
-pub struct KeyInputEvent {
-    /// The unicode representation of the key pressed.
-    pub text: SharedString,
-
-    // note: this field is not exported in the .slint in the KeyEvent builtin struct
-    /// Indicates whether the key was pressed or released
-    pub event_type: KeyEventType,
-
-    /// If the event type is KeyEventType::UpdateComposition, then this field specifies
-    /// the start of the selection as byte offsets within the preedit text.
-    pub preedit_selection_start: usize,
-    /// If the event type is KeyEventType::UpdateComposition, then this field specifies
-    /// the end of the selection as byte offsets within the preedit text.
-    pub preedit_selection_end: usize,
 }
 
 impl KeyEvent {
@@ -658,7 +637,7 @@ fn send_exit_events(
 /// of mouse grabber.
 /// Returns a new mouse grabber stack.
 pub fn process_mouse_input(
-    component: ComponentRc,
+    component: ItemTreeRc,
     mouse_event: MouseEvent,
     window_adapter: &Rc<dyn WindowAdapter>,
     mut mouse_input_state: MouseInputState,
@@ -673,7 +652,7 @@ pub fn process_mouse_input(
     };
 
     let mut result = MouseInputState::default();
-    let root = ItemRc::new(component, 0);
+    let root = ItemRc::new(component.clone(), 0);
     let r = send_mouse_event_to_item(mouse_event, root, window_adapter, &mut result, false);
     if mouse_input_state.delayed.is_some()
         && (!r.has_aborted()
@@ -684,6 +663,18 @@ pub fn process_mouse_input(
         return mouse_input_state;
     }
     send_exit_events(&mouse_input_state, &mut result, mouse_event.position(), window_adapter);
+
+    if let MouseEvent::Wheel { position, .. } = mouse_event {
+        if r.has_aborted() {
+            // An accepted wheel event might have moved things. Send a move event at the position to reset the has-hover
+            return process_mouse_input(
+                component,
+                MouseEvent::Moved { position },
+                window_adapter,
+                result,
+            );
+        }
+    }
 
     result
 }
@@ -704,7 +695,7 @@ pub(crate) fn process_delayed_event(
     };
 
     let mut actual_visitor =
-        |component: &ComponentRc, index: u32, _: Pin<ItemRef>| -> VisitChildrenResult {
+        |component: &ItemTreeRc, index: u32, _: Pin<ItemRef>| -> VisitChildrenResult {
             send_mouse_event_to_item(
                 event,
                 ItemRc::new(component.clone(), index),
@@ -714,7 +705,7 @@ pub(crate) fn process_delayed_event(
             )
         };
     vtable::new_vref!(let mut actual_visitor : VRefMut<crate::item_tree::ItemVisitorVTable> for crate::item_tree::ItemVisitor = &mut actual_visitor);
-    vtable::VRc::borrow_pin(top_item.component()).as_ref().visit_children_item(
+    vtable::VRc::borrow_pin(top_item.item_tree()).as_ref().visit_children_item(
         top_item.index() as isize,
         crate::item_tree::TraversalOrder::FrontToBack,
         actual_visitor,
@@ -752,10 +743,6 @@ fn send_mouse_event_to_item(
         InputEventFilterResult::ForwardAndIgnore => (true, true),
         InputEventFilterResult::ForwardAndInterceptGrab => (true, false),
         InputEventFilterResult::Intercept => (false, false),
-        InputEventFilterResult::InterceptAndDispatch(new_event) => {
-            event_for_children = new_event;
-            (true, false)
-        }
         InputEventFilterResult::DelayForwarding(_) if ignore_delays => (true, false),
         InputEventFilterResult::DelayForwarding(duration) => {
             let timer = Timer::default();
@@ -780,7 +767,7 @@ fn send_mouse_event_to_item(
     result.item_stack.push((item_rc.downgrade(), filter_result));
     if forward_to_children {
         let mut actual_visitor =
-            |component: &ComponentRc, index: u32, _: Pin<ItemRef>| -> VisitChildrenResult {
+            |component: &ItemTreeRc, index: u32, _: Pin<ItemRef>| -> VisitChildrenResult {
                 send_mouse_event_to_item(
                     event_for_children,
                     ItemRc::new(component.clone(), index),
@@ -790,18 +777,12 @@ fn send_mouse_event_to_item(
                 )
             };
         vtable::new_vref!(let mut actual_visitor : VRefMut<crate::item_tree::ItemVisitorVTable> for crate::item_tree::ItemVisitor = &mut actual_visitor);
-        let r = vtable::VRc::borrow_pin(item_rc.component()).as_ref().visit_children_item(
+        let r = vtable::VRc::borrow_pin(item_rc.item_tree()).as_ref().visit_children_item(
             item_rc.index() as isize,
             crate::item_tree::TraversalOrder::FrontToBack,
             actual_visitor,
         );
         if r.has_aborted() {
-            // the event was intercepted by a children
-            if matches!(filter_result, InputEventFilterResult::InterceptAndDispatch(_)) {
-                let mut event = mouse_event;
-                event.translate(-geom.origin.to_vector());
-                item.as_ref().input_event(event, window_adapter, &item_rc);
-            }
             return r;
         }
     };

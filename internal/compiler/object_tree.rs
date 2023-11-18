@@ -23,6 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 macro_rules! unwrap_or_continue {
@@ -180,14 +181,21 @@ impl Document {
                     || import.file.ends_with(".ttf")
                     || import.file.ends_with(".otf")
                 {
+                    let token_path = import.import_uri_token.source_file.path();
+                    let import_file_path = PathBuf::from(import.file.clone());
+                    let import_file_path = crate::pathutils::join(token_path, &import_file_path)
+                        .unwrap_or(import_file_path);
+
                     // Assume remote urls are valid, we need to load them at run-time (which we currently don't). For
                     // local paths we should try to verify the existence and let the developer know ASAP.
-                    if import.file.starts_with("http://")
-                        || import.file.starts_with("https://")
-                        || crate::fileaccess::load_file(std::path::Path::new(&import.file))
+                    if crate::pathutils::is_url(&import_file_path)
+                        || crate::fileaccess::load_file(std::path::Path::new(&import_file_path))
                             .is_some()
                     {
-                        Some((import.file, import.import_uri_token))
+                        Some((
+                            import_file_path.to_string_lossy().to_string(),
+                            import.import_uri_token,
+                        ))
                     } else {
                         diag.push_error(
                             format!("File \"{}\" not found", import.file),
@@ -435,6 +443,7 @@ pub enum PropertyVisibility {
     InOut,
     /// For functions, not properties
     Public,
+    Protected,
 }
 
 impl Display for PropertyVisibility {
@@ -445,6 +454,7 @@ impl Display for PropertyVisibility {
             PropertyVisibility::Output => f.write_str("output"),
             PropertyVisibility::InOut => f.write_str("input output"),
             PropertyVisibility::Public => f.write_str("public"),
+            PropertyVisibility::Protected => f.write_str("protected"),
         }
     }
 }
@@ -639,6 +649,9 @@ pub struct Element {
 
     /// The AST node, if available
     pub node: Option<syntax_nodes::Element>,
+
+    /// This element was a layout that has been lowered to a Rectangle
+    pub layout: Option<crate::layout::Layout>,
 }
 
 impl Spanned for Element {
@@ -1134,7 +1147,13 @@ impl Element {
                 match token.as_token().unwrap().text() {
                     "pure" => pure = Some(true),
                     "public" => {
+                        debug_assert_eq!(visibility, PropertyVisibility::Private);
                         visibility = PropertyVisibility::Public;
+                        pure = pure.or(Some(false));
+                    }
+                    "protected" => {
+                        debug_assert_eq!(visibility, PropertyVisibility::Private);
+                        visibility = PropertyVisibility::Protected;
                         pure = pure.or(Some(false));
                     }
                     _ => (),
@@ -1482,6 +1501,7 @@ impl Element {
         self.property_declarations.get(name).map_or_else(
             || {
                 let mut r = self.base_type.lookup_property(name);
+                r.is_in_direct_base = r.is_local_to_component;
                 r.is_local_to_component = false;
                 r
             },
@@ -1491,6 +1511,7 @@ impl Element {
                 property_visibility: p.visibility,
                 declared_pure: p.pure,
                 is_local_to_component: true,
+                is_in_direct_base: false,
             },
         )
     }
@@ -2109,6 +2130,9 @@ pub fn visit_all_named_references_in_element(
     let mut layout_info_prop = std::mem::take(&mut elem.borrow_mut().layout_info_prop);
     layout_info_prop.as_mut().map(|(h, b)| (vis(h), vis(b)));
     elem.borrow_mut().layout_info_prop = layout_info_prop;
+    let mut layout = std::mem::take(&mut elem.borrow_mut().layout);
+    layout.as_mut().map(|l| l.visit_named_references(&mut vis));
+    elem.borrow_mut().layout = layout;
 
     let mut accessibility_props = std::mem::take(&mut elem.borrow_mut().accessibility_props);
     accessibility_props.0.iter_mut().for_each(|(_, x)| vis(x));
@@ -2526,32 +2550,20 @@ pub fn inject_element_as_repeated_element(repeated_element: &ElementRc, new_root
 /// Make the geometry of the `injected_parent` that of the old_elem. And the old_elem
 /// will cover the `injected_parent`
 pub fn adjust_geometry_for_injected_parent(injected_parent: &ElementRc, old_elem: &ElementRc) {
-    // The values for properties that affect the geometry may be supplied in two different ways:
-    //
-    //   * When coming from the outside, for example by the repeater being inside a layout, we need
-    //     the values to apply to the new root element and the old root just needs to follow.
-    //   * When coming from the inside, for example when the repeater just creates rectangles that
-    //     calculate their own position, we need to move those bindings as well to the new root.
-    injected_parent.borrow_mut().bindings.extend(Iterator::chain(
-        ["x", "y", "z"].iter().filter_map(|x| old_elem.borrow_mut().bindings.remove_entry(*x)),
-        ["width", "height"].iter().map(|x| {
-            (
-                x.to_string(),
-                BindingExpression::from(Expression::PropertyReference(NamedReference::new(
-                    old_elem, x,
-                )))
-                .into(),
-            )
-        }),
-    ));
-    injected_parent.borrow().property_analysis.borrow_mut().extend(
-        ["x", "y", "z"].into_iter().filter_map(|x| {
-            old_elem
-                .borrow()
-                .property_analysis
-                .borrow()
-                .get_key_value(x)
-                .map(|(k, v)| (k.clone(), v.clone()))
-        }),
+    let mut injected_parent_mut = injected_parent.borrow_mut();
+    injected_parent_mut.bindings.insert(
+        "z".into(),
+        RefCell::new(BindingExpression::new_two_way(NamedReference::new(old_elem, "z".into()))),
     );
+    // (should be removed by const propagation in the llr)
+    injected_parent_mut.property_declarations.insert(
+        "dummy".into(),
+        PropertyDeclaration { property_type: Type::LogicalLength, ..Default::default() },
+    );
+    let mut old_elem_mut = old_elem.borrow_mut();
+    injected_parent_mut.default_fill_parent = std::mem::take(&mut old_elem_mut.default_fill_parent);
+    injected_parent_mut.geometry_props = old_elem_mut.geometry_props.clone();
+    drop(injected_parent_mut);
+    old_elem_mut.geometry_props.as_mut().unwrap().x = NamedReference::new(injected_parent, "dummy");
+    old_elem_mut.geometry_props.as_mut().unwrap().y = NamedReference::new(injected_parent, "dummy");
 }

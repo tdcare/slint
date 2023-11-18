@@ -135,7 +135,7 @@ impl<Pixel: Clone> SharedPixelBuffer<Pixel> {
         [SourcePixelType]: rgb::AsPixels<Pixel>,
     {
         use rgb::AsPixels;
-        Self { width, height, data: pixel_slice.as_pixels().iter().cloned().collect() }
+        Self { width, height, data: pixel_slice.as_pixels().into() }
     }
 }
 
@@ -330,27 +330,28 @@ impl ImageCacheKey {
 pub enum ImageInner {
     /// A resource that does not represent any data.
     #[default]
-    None,
+    None = 0,
     EmbeddedImage {
         cache_key: ImageCacheKey,
         buffer: SharedImageBuffer,
-    },
+    } = 1,
     #[cfg(feature = "svg")]
-    Svg(vtable::VRc<OpaqueImageVTable, svg::ParsedSVG>),
-    StaticTextures(&'static StaticTextures),
+    Svg(vtable::VRc<OpaqueImageVTable, svg::ParsedSVG>) = 2,
+    StaticTextures(&'static StaticTextures) = 3,
     #[cfg(target_arch = "wasm32")]
-    HTMLImage(vtable::VRc<OpaqueImageVTable, htmlimage::HTMLImage>),
-    BackendStorage(vtable::VRc<OpaqueImageVTable>),
+    HTMLImage(vtable::VRc<OpaqueImageVTable, htmlimage::HTMLImage>) = 4,
+    BackendStorage(vtable::VRc<OpaqueImageVTable>) = 5,
     #[cfg(not(target_arch = "wasm32"))]
-    BorrowedOpenGLTexture(BorrowedOpenGLTexture),
+    BorrowedOpenGLTexture(BorrowedOpenGLTexture) = 6,
 }
 
 impl ImageInner {
     /// Return or render the image into a buffer
     ///
     /// `target_size_for_scalable_source` is the size to use if the image is scalable.
+    /// (when unspecified, will default to the intrinsic size of the image)
     ///
-    /// Returns None if the image can't be rendered in a buffer
+    /// Returns None if the image can't be rendered in a buffer or if the image is empty
     pub fn render_to_buffer(
         &self,
         _target_size_for_scalable_source: Option<euclid::Size2D<u32, PhysicalPx>>,
@@ -358,15 +359,15 @@ impl ImageInner {
         match self {
             ImageInner::EmbeddedImage { buffer, .. } => Some(buffer.clone()),
             #[cfg(feature = "svg")]
-            ImageInner::Svg(svg) => {
-                match svg.render(_target_size_for_scalable_source.unwrap_or_default()) {
-                    Ok(b) => Some(b),
-                    Err(err) => {
-                        eprintln!("Error rendering SVG: {}", err);
-                        None
-                    }
+            ImageInner::Svg(svg) => match svg.render(_target_size_for_scalable_source) {
+                Ok(b) => Some(b),
+                // Ignore error when rendering a 0x0 image, that's just an empty image
+                Err(resvg::usvg::Error::InvalidSize) => None,
+                Err(err) => {
+                    eprintln!("Error rendering SVG: {err}");
+                    None
                 }
-            }
+            },
             ImageInner::StaticTextures(ts) => {
                 let mut buffer =
                     SharedPixelBuffer::<Rgba8Pixel>::new(ts.size.width, ts.size.height);
@@ -625,7 +626,7 @@ impl Image {
     ///
     /// # Safety
     ///
-    /// This function is unsafe because invalid texture ids may lead to undefind behavior in OpenGL
+    /// This function is unsafe because invalid texture ids may lead to undefined behavior in OpenGL
     /// drivers. A valid texture id is one that was created by the same OpenGL context that is
     /// current during any of the invocations of the callback set on [`Window::set_rendering_notifier()`](crate::api::Window::set_rendering_notifier).
     /// OpenGL contexts between instances of [`slint::Window`](crate::api::Window) are not sharing resources. Consequently
@@ -735,7 +736,7 @@ impl BorrowedOpenGLTextureBuilder {
     ///
     /// # Safety
     ///
-    /// This function is unsafe because invalid texture ids may lead to undefind behavior in OpenGL
+    /// This function is unsafe because invalid texture ids may lead to undefined behavior in OpenGL
     /// drivers. A valid texture id is one that was created by the same OpenGL context that is
     /// current during any of the invocations of the callback set on [`Window::set_rendering_notifier()`](crate::api::Window::set_rendering_notifier).
     /// OpenGL contexts between instances of [`slint::Window`](crate::api::Window) are not sharing resources. Consequently

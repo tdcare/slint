@@ -58,7 +58,7 @@ pub struct LibInputHandler<'a> {
     mouse_pos: Pin<Rc<Property<Option<LogicalPosition>>>>,
     last_touch_pos: LogicalPosition,
     window: &'a i_slint_core::api::Window,
-    keystate: xkb::State,
+    keystate: Option<xkb::State>,
 }
 
 impl<'a> LibInputHandler<'a> {
@@ -74,11 +74,6 @@ impl<'a> LibInputHandler<'a> {
         });
         libinput.udev_assign_seat(&seat_name).unwrap();
 
-        let xkb_context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-        let keymap = xkb::Keymap::new_from_names(&xkb_context, "", "", "", "", None, 0)
-            .ok_or_else(|| format!("Error compiling keymap"))?;
-        let keystate = xkb::State::new(&keymap);
-
         let mouse_pos_property = Rc::pin(Property::new(None));
 
         let handler = Self {
@@ -87,7 +82,7 @@ impl<'a> LibInputHandler<'a> {
             mouse_pos: mouse_pos_property.clone(),
             last_touch_pos: Default::default(),
             window,
-            keystate,
+            keystate: Default::default(),
         };
 
         event_loop_handle
@@ -119,13 +114,13 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
 
         self.libinput.dispatch()?;
 
+        let screen_size = self.window.size().to_logical(self.window.scale_factor());
+
         for event in &mut self.libinput {
             match event {
                 input::Event::Pointer(pointer_event) => {
                     match pointer_event {
                         input::event::PointerEvent::Motion(motion_event) => {
-                            let screen_size =
-                                self.window.size().to_logical(self.window.scale_factor());
                             let mut mouse_pos =
                                 self.mouse_pos.as_ref().get().unwrap_or(LogicalPosition {
                                     x: screen_size.width / 2.,
@@ -135,6 +130,18 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                                 .clamp(0., screen_size.width);
                             mouse_pos.y = (mouse_pos.y + motion_event.dy() as f32)
                                 .clamp(0., screen_size.height);
+                            self.mouse_pos.set(Some(mouse_pos));
+                            let event = WindowEvent::PointerMoved { position: mouse_pos };
+                            self.window.dispatch_event(event);
+                        }
+                        input::event::PointerEvent::MotionAbsolute(abs_motion_event) => {
+                            let mouse_pos = LogicalPosition {
+                                x: abs_motion_event.absolute_x_transformed(screen_size.width as u32)
+                                    as _,
+                                y: abs_motion_event
+                                    .absolute_y_transformed(screen_size.height as u32)
+                                    as _,
+                            };
                             self.mouse_pos.set(Some(mouse_pos));
                             let event = WindowEvent::PointerMoved { position: mouse_pos };
                             self.window.dispatch_event(event);
@@ -165,7 +172,6 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                     }
                 }
                 input::Event::Touch(touch_event) => {
-                    let screen_size = self.window.size();
                     if let Some(event) = match touch_event {
                         input::event::TouchEvent::Down(touch_down_event) => {
                             self.last_touch_pos = LogicalPosition::new(
@@ -198,9 +204,17 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                     let key_code = xkb::Keycode::new(key_event.key() + 8);
                     let state = key_event.key_state();
 
-                    let sym = self.keystate.key_get_one_sym(key_code);
+                    let xkb_key_state = self.keystate.get_or_insert_with(|| {
+                        let xkb_context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+                        let keymap =
+                            xkb::Keymap::new_from_names(&xkb_context, "", "", "", "", None, 0)
+                                .expect("Error compiling keymap");
+                        xkb::State::new(&keymap)
+                    });
 
-                    self.keystate.update_key(
+                    let sym = xkb_key_state.key_get_one_sym(key_code);
+
+                    xkb_key_state.update_key(
                         key_code,
                         match state {
                             input::event::tablet_pad::KeyState::Pressed => xkb::KeyDirection::Down,
@@ -208,11 +222,9 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
                         },
                     );
 
-                    let control = self
-                        .keystate
+                    let control = xkb_key_state
                         .mod_name_is_active(xkb::MOD_NAME_CTRL, xkb::STATE_MODS_EFFECTIVE);
-                    let alt = self
-                        .keystate
+                    let alt = xkb_key_state
                         .mod_name_is_active(xkb::MOD_NAME_ALT, xkb::STATE_MODS_EFFECTIVE);
 
                     if state == KeyState::Pressed {
@@ -256,12 +268,14 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
         token_factory: &mut calloop::TokenFactory,
     ) -> calloop::Result<()> {
         self.token = Some(token_factory.token());
-        poll.register(
-            &self.libinput,
-            calloop::Interest::READ,
-            calloop::Mode::Level,
-            self.token.unwrap(),
-        )
+        unsafe {
+            poll.register(
+                &self.libinput,
+                calloop::Interest::READ,
+                calloop::Mode::Level,
+                self.token.unwrap(),
+            )
+        }
     }
 
     fn reregister(
@@ -286,7 +300,7 @@ impl<'a> calloop::EventSource for LibInputHandler<'a> {
 
 fn map_key_sym(sym: xkb::Keysym) -> Option<SharedString> {
     macro_rules! keysym_to_string {
-        ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident)|* # $($xkb:ident)|*;)*) => {
+        ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident $(($_pos:ident))?)|* # $($xkb:ident)|*;)*) => {
             match(sym) {
                 $($(xkb::Keysym::$xkb => $char,)*)*
                 _ => std::char::from_u32(xkbcommon::xkb::keysym_to_utf32(sym))?,

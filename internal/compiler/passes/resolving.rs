@@ -337,7 +337,7 @@ impl Expression {
 
         let absolute_source_path = {
             let path = std::path::Path::new(&s);
-            if path.is_absolute() || s.starts_with("http://") || s.starts_with("https://") {
+            if crate::pathutils::is_absolute(path) {
                 s
             } else {
                 ctx.type_loader
@@ -345,7 +345,14 @@ impl Expression {
                         loader.resolve_import_path(Some(&(*node).clone().into()), &s)
                     })
                     .map(|i| i.0.to_string_lossy().to_string())
-                    .unwrap_or(s)
+                    .unwrap_or_else(|| {
+                        crate::pathutils::join(
+                            &crate::pathutils::dirname(node.source_file.path()),
+                            path,
+                        )
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or(s.clone())
+                    })
             }
         };
 
@@ -1144,9 +1151,11 @@ impl Expression {
         let mut values: Vec<Expression> =
             node.Expression().map(|e| Expression::from_expression_node(e, ctx)).collect();
 
-        // FIXME: what's the type of an empty array ?
-        let element_ty =
-            Self::common_target_type_for_type_list(values.iter().map(|expr| expr.ty()));
+        let element_ty = if values.is_empty() {
+            Type::Void
+        } else {
+            Self::common_target_type_for_type_list(values.iter().map(|expr| expr.ty()))
+        };
 
         for e in values.iter_mut() {
             *e = core::mem::replace(e, Expression::Invalid).maybe_convert_to(
@@ -1184,7 +1193,7 @@ impl Expression {
     /// This function is used to find a type that's suitable for casting each instance of a bunch of expressions
     /// to a type that captures most aspects. For example for an array of object literals the result is a merge of
     /// all seen fields.
-    fn common_target_type_for_type_list(types: impl Iterator<Item = Type>) -> Type {
+    pub fn common_target_type_for_type_list(types: impl Iterator<Item = Type>) -> Type {
         types.fold(Type::Invalid, |target_type, expr_ty| {
             if target_type == expr_ty {
                 target_type
@@ -1203,7 +1212,7 @@ impl Expression {
                             fields: elem_fields,
                             name: elem_name,
                             node: elem_node,
-                            rust_attributes: deriven,
+                            rust_attributes: derived,
                         },
                     ) => {
                         for (elem_name, elem_ty) in elem_fields.into_iter() {
@@ -1216,7 +1225,7 @@ impl Expression {
                                 ) => {
                                     *existing_field.get_mut() =
                                         Self::common_target_type_for_type_list(
-                                            [existing_field.get().clone(), elem_ty].iter().cloned(),
+                                            [existing_field.get().clone(), elem_ty].into_iter(),
                                         );
                                 }
                             }
@@ -1225,9 +1234,16 @@ impl Expression {
                             name: result_name.or(elem_name),
                             fields: result_fields,
                             node: result_node.or(elem_node),
-                            rust_attributes: rust_attributes.or(deriven),
+                            rust_attributes: rust_attributes.or(derived),
                         }
                     }
+                    (Type::Array(lhs), Type::Array(rhs)) => Type::Array(if *lhs == Type::Void {
+                        rhs
+                    } else if *rhs == Type::Void {
+                        lhs
+                    } else {
+                        Self::common_target_type_for_type_list([*lhs, *rhs].into_iter()).into()
+                    }),
                     (Type::Color, Type::Brush) | (Type::Brush, Type::Color) => Type::Brush,
                     (target_type, expr_ty) => {
                         if expr_ty.can_convert(&target_type) {
@@ -1330,11 +1346,21 @@ fn continue_lookup_within_element(
             Some(NodeOrToken::Token(second)),
         )
     } else if matches!(lookup_result.property_type, Type::Function { .. }) {
-        if !lookup_result.is_local_to_component
-            && lookup_result.property_visibility == PropertyVisibility::Private
+        if lookup_result.property_visibility == PropertyVisibility::Private && !local_to_component {
+            let message = format!("The function '{}' is private. Annotate it with 'public' to make it accessible from other components", second.text());
+            if !lookup_result.is_local_to_component {
+                ctx.diag.push_error(message, &second);
+            } else {
+                ctx.diag.push_warning(message+". Note: this used to be allowed in previous version, but this should be considered an error", &second);
+            }
+        } else if lookup_result.property_visibility == PropertyVisibility::Protected
+            && !local_to_component
+            && !(lookup_result.is_in_direct_base
+                && ctx.component_scope.first().map_or(false, |x| Rc::ptr_eq(x, elem)))
         {
-            ctx.diag.push_error(format!("The function '{}' is private. Annotate it with 'public' to make it accessible from other components", second.text()), &second);
-        } else if let Some(x) = it.next() {
+            ctx.diag.push_error(format!("The function '{}' is protected", second.text()), &second);
+        }
+        if let Some(x) = it.next() {
             ctx.diag.push_error("Cannot access fields of a function".into(), &x)
         }
         if let Some(f) =

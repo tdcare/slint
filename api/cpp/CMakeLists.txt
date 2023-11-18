@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 cmake_minimum_required(VERSION 3.21)
-project(Slint HOMEPAGE_URL "https://slint.dev/" LANGUAGES CXX VERSION 1.0.0)
+# Select C++ and C as languages, as Corrosion needs ${CMAKE_C_COMPILER}
+# for linking
+project(Slint HOMEPAGE_URL "https://slint.dev/" LANGUAGES C CXX VERSION 1.0.0)
 
 include(FeatureSummary)
 include(CMakeDependentOption)
@@ -24,7 +26,7 @@ add_feature_info(SLINT_FEATURE_COMPILER SLINT_FEATURE_COMPILER "Enable support f
 option(SLINT_BUILD_RUNTIME "Actually build the Slint runtime libraries (Disable that to only build the compiler)" ON)
 add_feature_info(SLINT_BUILD_RUNTIME SLINT_BUILD_RUNTIME "Actually build the Slint runtime libraries (Disable that to only build the compiler)")
 
-set(SLINT_COMPILER "" CACHE STRING "Path to the slint-compiler executable. When unset, it the compiler will be build as part of the build process")
+set(SLINT_COMPILER "" CACHE FILEPATH "Path to the slint-compiler executable. When unset, it the compiler will be build as part of the build process")
 set(SLINT_LIBRARY_CARGO_FLAGS "" CACHE STRING
     "Flags to pass to cargo when building the Slint runtime library")
 
@@ -97,6 +99,7 @@ define_cargo_dependent_feature(backend-linuxkms "Enable support for the backend 
 
 define_cargo_dependent_feature(gettext "Enable support of translations using gettext" OFF "NOT SLINT_FEATURE_FREESTANDING")
 define_cargo_dependent_feature(accessibility "Enable integration with operating system provided accessibility APIs" ON "NOT SLINT_FEATURE_FREESTANDING")
+define_cargo_feature(experimental "Enable experimental features. (No backward compatibility guarantees)" OFF)
 
 if (SLINT_BUILD_RUNTIME)
     if(SLINT_FEATURE_COMPILER AND NOT SLINT_COMPILER)
@@ -189,14 +192,13 @@ if (SLINT_BUILD_RUNTIME)
         endif()
     endif(SLINT_FEATURE_BACKEND_QT)
 
-    if(TARGET Qt::qmake)
+    if(SLINT_FEATURE_BACKEND_QT AND TARGET Qt::qmake)
         set_property(
             TARGET slint-cpp
             APPEND
             PROPERTY CORROSION_ENVIRONMENT_VARIABLES
             QMAKE=$<TARGET_PROPERTY:Qt::qmake,LOCATION>
         )
-        set(SLINT_STYLE_DEFAULT "native")
     else()
         set_property(
             TARGET slint-cpp
@@ -204,27 +206,54 @@ if (SLINT_BUILD_RUNTIME)
             PROPERTY CORROSION_ENVIRONMENT_VARIABLES
             SLINT_NO_QT=1
         )
+    endif()
+
+
+    if(ANDROID)
+        set(SLINT_STYLE_DEFAULT "material")
+    elseif(WIN32)
+        set(SLINT_STYLE_DEFAULT "fluent")
+    elseif(APPLE)
+        set(SLINT_STYLE_DEFAULT "cupertino")
+    elseif (SLINT_FEATURE_BACKEND_QT AND TARGET Qt::qmake)
+        set(SLINT_STYLE_DEFAULT "qt")
+    else ()
         set(SLINT_STYLE_DEFAULT "fluent")
     endif()
 
     set(SLINT_STYLE "" CACHE STRING "The Slint Widget Style")
 
-    if(SLINT_STYLE)
+    if(SLINT_STYLE AND NOT SLINT_STYLE STREQUAL "native")
         set_property(GLOBAL PROPERTY SLINT_STYLE ${SLINT_STYLE})
-    else(SLINT_STYLE)
+    else()
         set_property(GLOBAL PROPERTY SLINT_STYLE ${SLINT_STYLE_DEFAULT})
-    endif(SLINT_STYLE)
+    endif()
+
+    # Build environments such as buildroot set PKG_CONFIG_SYSROOT_DIR in their toolchain file
+    # and thus it's only available at cmake configure time. Our build dependencies that use pkg-config
+    # however invoke pkg-config in build.rs, which means we need to defer/propagate the environment variable
+    # to build time.
+    if(DEFINED ENV{PKG_CONFIG_SYSROOT_DIR})
+        set_property(
+            TARGET slint-cpp
+            APPEND
+            PROPERTY CORROSION_ENVIRONMENT_VARIABLES
+            "PKG_CONFIG_SYSROOT_DIR=$ENV{PKG_CONFIG_SYSROOT_DIR}"
+        )
+    endif()
 
     if(SLINT_FEATURE_RENDERER_SKIA OR SLINT_FEATURE_RENDERER_SKIA_OPENGL OR SLINT_FEATURE_RENDERER_SKIA_VULKAN)
         find_program(CLANGCC clang)
         find_program(CLANGCXX clang++)
-        if(CLANGCC AND CLANGCXX)
+        if(CLANGCC AND NOT DEFINED ENV{CLANGCC})
             set_property(
                 TARGET slint-cpp
                 APPEND
                 PROPERTY CORROSION_ENVIRONMENT_VARIABLES
                 CLANGCC=${CLANGCC}
             )
+        endif()
+        if(CLANGCXX AND NOT DEFINED ENV{CLANGCXX})
             set_property(
                 TARGET slint-cpp
                 APPEND
@@ -357,6 +386,16 @@ if(SLINT_BUILD_RUNTIME)
             if(value)
                 get_filename_component(value ${value} NAME)
                 list(APPEND SLINT_LIB_PROPERTIES ${prop} "\${_IMPORT_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${value}")
+            endif()
+        endforeach()
+
+        # Corrosion sets IMPORTED_NO_SONAME and for macOS we reset that
+        # and set IMPORTED_SONAME. Make sure to propagate these locally
+        # set properties also to the installed cmake target.
+        foreach(prop IMPORTED_NO_SONAME IMPORTED_SONAME)
+            get_target_property(value ${slint_cpp_impl} ${prop})
+            if(value)
+                list(APPEND SLINT_LIB_PROPERTIES ${prop} ${value})
             endif()
         endforeach()
 

@@ -63,7 +63,7 @@ pub enum Type {
         name: Option<String>,
         /// When declared in .slint, this is the node of the declaration.
         node: Option<syntax_nodes::ObjectType>,
-        /// deriven
+        /// derived
         rust_attributes: Option<Vec<String>>,
     },
     Enumeration(Rc<Enumeration>),
@@ -413,6 +413,7 @@ impl ElementType {
                                 property_visibility: PropertyVisibility::Private,
                                 declared_pure: None,
                                 is_local_to_component: false,
+                                is_in_direct_base: false,
                             }
                         } else {
                             crate::typeregister::reserved_property(name)
@@ -424,6 +425,7 @@ impl ElementType {
                         property_visibility: p.property_visibility,
                         declared_pure: None,
                         is_local_to_component: false,
+                        is_in_direct_base: false,
                     },
                 }
             }
@@ -441,6 +443,7 @@ impl ElementType {
                     property_visibility: PropertyVisibility::InOut,
                     declared_pure: None,
                     is_local_to_component: false,
+                    is_in_direct_base: false,
                 }
             }
             _ => PropertyLookupResult {
@@ -449,6 +452,7 @@ impl ElementType {
                 property_visibility: PropertyVisibility::Private,
                 declared_pure: None,
                 is_local_to_component: false,
+                is_in_direct_base: false,
             },
         }
     }
@@ -705,6 +709,8 @@ pub struct PropertyLookupResult<'a> {
     pub declared_pure: Option<bool>,
     /// True if the property is part of the the current component (for visibility purposes)
     pub is_local_to_component: bool,
+    /// True if the property in the direct base of the component (for visibility purposes)
+    pub is_in_direct_base: bool,
 }
 
 impl<'a> PropertyLookupResult<'a> {

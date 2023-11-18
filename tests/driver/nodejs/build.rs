@@ -4,16 +4,6 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-fn os_dylib_prefix_and_suffix() -> (&'static str, &'static str) {
-    if cfg!(target_os = "windows") {
-        ("", "dll")
-    } else if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
-        ("lib", "dylib")
-    } else {
-        ("lib", "so")
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // target/{debug|release}/build/package/out/ -> target/{debug|release}
     let mut target_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
@@ -21,14 +11,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     target_dir.pop();
     target_dir.pop();
 
-    let nodejs_native_lib_name = {
-        let (prefix, suffix) = os_dylib_prefix_and_suffix();
-        format!("{}slint_node_native.{}", prefix, suffix)
-    };
-    println!(
-        "cargo:rustc-env=SLINT_NODE_NATIVE_LIB={}",
-        target_dir.join(nodejs_native_lib_name).display()
-    );
     println!("cargo:rustc-env=SLINT_ENABLE_EXPERIMENTAL_FEATURES=1",);
 
     let tests_file_path =
@@ -39,17 +21,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for testcase in test_driver_lib::collect_test_cases("cases")? {
         println!("cargo:rerun-if-changed={}", testcase.absolute_path.display());
         let test_function_name = testcase.identifier();
-
-        if &test_function_name == "elements_component_container" {
-            // FIXME: Skip embedding test on NodeJS since ComponentFactory is not
-            // implemented there!
-            continue;
-        }
+        let ignored = testcase.is_ignored("js");
 
         write!(
             tests_file,
             r##"
             #[test]
+            {ignore}
             fn test_nodejs_{function_name}() {{
                 nodejs::test(&test_driver_lib::TestCase{{
                     absolute_path: std::path::PathBuf::from(r#"{absolute_path}"#),
@@ -57,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }}).unwrap();
             }}
         "##,
+            ignore = if ignored { "#[ignore]" } else { "" },
             function_name = test_function_name,
             absolute_path = testcase.absolute_path.to_string_lossy(),
             relative_path = testcase.relative_path.to_string_lossy(),

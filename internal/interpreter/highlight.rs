@@ -3,9 +3,7 @@
 
 //! This module contains the code for the highlight of some elements
 
-// cSpell: ignore unerase
-
-use crate::dynamic_component::{ComponentBox, DynamicComponentVRc, ErasedComponentBox};
+use crate::dynamic_item_tree::{DynamicComponentVRc, ErasedItemTreeBox, ItemTreeBox};
 use crate::Value;
 use i_slint_compiler::diagnostics::{SourceFile, Spanned};
 use i_slint_compiler::expression_tree::{Expression, Unit};
@@ -16,7 +14,8 @@ use i_slint_compiler::object_tree::{
     PropertyVisibility, RepeatedElementInfo,
 };
 use i_slint_compiler::parser::TextRange;
-use i_slint_core::item_tree::ItemWeak;
+use i_slint_compiler::pathutils;
+use i_slint_core::item_tree::{ItemTreeRc, ItemWeak};
 use i_slint_core::items::ItemRc;
 use i_slint_core::lengths::LogicalPoint;
 use i_slint_core::model::{ModelRc, VecModel};
@@ -30,13 +29,12 @@ const CURRENT_ELEMENT_CALLBACK_PROP: &str = "$currentElementCallback";
 const DESIGN_MODE_PROP: &str = "$designMode";
 
 /// We do a depth-first walk of the tree.
-fn next_item(item: &ItemRc) -> ItemRc {
+fn next_item(item: &ItemRc, root_item_tree: &ItemTreeRc) -> ItemRc {
     // We have a sibling, so find the "deepest first_child"
     if let Some(s) = item.next_sibling() {
         next_item_down(&s)
-    } else if let Some(p) = item.parent_item() {
-        // Walk further up the tree once out of siblings...
-        p
+    } else if !item.is_root_item_of(root_item_tree) {
+        item.parent_item().unwrap() // We are not at this component's root!
     } else {
         // We are at the root of the tree: Start over, going for the
         // deepest first child again!
@@ -52,7 +50,7 @@ fn next_item_down(item: &ItemRc) -> ItemRc {
     }
 }
 
-fn element_providing_item(component: &ErasedComponentBox, index: u32) -> Option<ElementRc> {
+fn element_providing_item(component: &ErasedItemTreeBox, index: u32) -> Option<ElementRc> {
     generativity::make_guard!(guard);
     let c = component.unerase(guard);
 
@@ -96,17 +94,18 @@ fn find_start_item(
     component: &DynamicComponentVRc,
     position: &LogicalPoint,
 ) -> ItemRc {
+    let component_rc = VRc::into_dyn(component.clone());
     state
         .try_borrow()
         .ok()
         .and_then(|s| s.current_item.clone())
         .and_then(|i| i.upgrade())
-        .filter(|i| item_contains(i, position))
-        .unwrap_or_else(|| ItemRc::new(VRc::into_dyn(component.clone()), 0))
+        .filter(|i| item_contains(i, position, &component_rc))
+        .unwrap_or_else(|| ItemRc::new(component_rc, 0))
 }
 
-fn item_contains(item: &ItemRc, position: &LogicalPoint) -> bool {
-    let offset = item.map_to_window(LogicalPoint::default());
+fn item_contains(item: &ItemRc, position: &LogicalPoint, item_tree: &ItemTreeRc) -> bool {
+    let offset = item.map_to_item_tree(LogicalPoint::default(), item_tree);
     let geometry = item.geometry().translate(offset.to_vector());
 
     geometry.contains(*position)
@@ -137,26 +136,30 @@ pub fn on_element_selected(
             };
 
             let start_item = find_start_item(&state, &c, &position);
+            let component_rc = {
+                let component = c.clone();
+                VRc::into_dyn(component)
+            };
 
             let stop_at_item = start_item.clone();
             let mut i = start_item;
             let (f, sl, sc, el, ec) = loop {
-                i = next_item(&i);
+                i = next_item(&i, &component_rc);
 
                 if i == stop_at_item {
                     // Break out: We went round once.
                     break (String::new(), 0, 0, 0, 0);
                 }
 
-                if !item_contains(&i, &position) {
+                if !item_contains(&i, &position, &component_rc) {
                     continue; // wrong position
                 }
 
                 state.borrow_mut().current_item = Some(i.downgrade());
 
-                let component = i.component();
+                let component = i.item_tree();
                 let component_ref = VRc::borrow(component);
-                let Some(component_box) = component_ref.downcast::<ErasedComponentBox>() else {
+                let Some(component_box) = component_ref.downcast::<ErasedItemTreeBox>() else {
                     continue; // Skip components of unexpected type!
                 };
 
@@ -184,16 +187,6 @@ pub fn on_element_selected(
     );
 }
 
-fn design_mode(component: &std::pin::Pin<&ComponentBox>) -> bool {
-    matches!(
-        component
-            .description()
-            .get_property(component.borrow(), DESIGN_MODE_PROP)
-            .unwrap_or_default(),
-        Value::Bool(true)
-    )
-}
-
 pub fn set_design_mode(component_instance: &DynamicComponentVRc, active: bool) {
     generativity::make_guard!(guard);
     let c = component_instance.unerase(guard);
@@ -217,7 +210,7 @@ fn highlight_elements(
         let mut values = Vec::<Value>::new();
         for element in elements.iter().filter_map(|e| e.upgrade()) {
             if let Some(repeater_path) = repeater_path(&element) {
-                fill_model(&repeater_path, &element, &c, &mut values);
+                fill_model(&repeater_path, &element, &c, &c, &mut values);
             }
         }
         Value::Model(ModelRc::new(VecModel::from(values)))
@@ -233,9 +226,7 @@ pub fn highlight(component_instance: &DynamicComponentVRc, path: PathBuf, offset
     generativity::make_guard!(guard);
     let c = component_instance.unerase(guard);
 
-    if design_mode(&c) {
-        return;
-    }
+    let path = pathutils::clean_path(&path);
 
     let elements = find_element_at_offset(&c.description().original, path, offset);
     if elements.is_empty() {
@@ -254,31 +245,41 @@ pub fn highlight(component_instance: &DynamicComponentVRc, path: PathBuf, offset
 fn fill_model(
     repeater_path: &[String],
     element: &ElementRc,
-    component_instance: &ComponentBox,
+    component_instance: &ItemTreeBox,
+    root_component_instance: &ItemTreeBox,
     values: &mut Vec<Value>,
 ) {
     if let [first, rest @ ..] = repeater_path {
         generativity::make_guard!(guard);
-        let rep = crate::dynamic_component::get_repeater_by_name(
+        let rep = crate::dynamic_item_tree::get_repeater_by_name(
             component_instance.borrow_instance(),
             first.as_str(),
             guard,
         );
         for idx in rep.0.range() {
-            if let Some(c) = rep.0.component_at(idx) {
+            if let Some(c) = rep.0.instance_at(idx) {
                 generativity::make_guard!(guard);
-                fill_model(rest, element, &c.unerase(guard), values);
+                fill_model(rest, element, &c.unerase(guard), root_component_instance, values);
             }
         }
     } else {
         let vrc = VRc::into_dyn(
             component_instance.borrow_instance().self_weak().get().unwrap().upgrade().unwrap(),
         );
+        let root_vrc = VRc::into_dyn(
+            root_component_instance.borrow_instance().self_weak().get().unwrap().upgrade().unwrap(),
+        );
         let index = element.borrow().item_index.get().copied().unwrap();
-        let item_rc = ItemRc::new(vrc, index);
+        let item_rc = ItemRc::new(vrc.clone(), index);
 
         let geom = item_rc.geometry();
-        let position = item_rc.map_to_window(geom.origin);
+        let position = item_rc.map_to_item_tree(geom.origin, &root_vrc);
+        let border_color =
+            i_slint_core::Color::from_argb_encoded(if element.borrow().layout.is_some() {
+                0xffff0000
+            } else {
+                0xff0000ff
+            });
 
         values.push(Value::Struct(
             [
@@ -286,6 +287,7 @@ fn fill_model(
                 ("height".into(), Value::Number(geom.height() as f64)),
                 ("x".into(), Value::Number(position.x as f64)),
                 ("y".into(), Value::Number(position.y as f64)),
+                ("border-color".into(), Value::Brush(border_color.into())),
             ]
             .into_iter()
             .collect(),
@@ -347,13 +349,13 @@ pub(crate) fn add_highlighting(doc: &Document) {
 
 /// Add the `for rect in $highlights: $Highlight := Rectangle { ... }`
 fn add_highlight_items(doc: &Document) {
-    let geom_props = ["width", "height", "x", "y"];
+    let mapped_props = ["width", "height", "x", "y", "border-color"];
     doc.root_component.root_element.borrow_mut().property_declarations.insert(
         HIGHLIGHT_PROP.into(),
         PropertyDeclaration {
             property_type: Type::Array(
                 Type::Struct {
-                    fields: geom_props
+                    fields: mapped_props
                         .iter()
                         .map(|x| (x.to_string(), Type::LogicalLength))
                         .collect(),
@@ -382,7 +384,7 @@ fn add_highlight_items(doc: &Document) {
     );
 
     let repeated = Rc::new_cyclic(|repeated| {
-        let mut bindings: BindingsMap = geom_props
+        let mut bindings: BindingsMap = mapped_props
             .iter()
             .map(|x| {
                 (
@@ -401,20 +403,6 @@ fn add_highlight_items(doc: &Document) {
         bindings.insert(
             "border-width".into(),
             RefCell::new(Expression::NumberLiteral(1., Unit::Px).into()),
-        );
-        bindings.insert(
-            "border-color".into(),
-            RefCell::new(
-                Expression::Cast {
-                    from: Expression::Cast {
-                        from: Expression::NumberLiteral(0xff0000ffu32 as f64, Unit::None).into(),
-                        to: Type::Color,
-                    }
-                    .into(),
-                    to: Type::Brush,
-                }
-                .into(),
-            ),
         );
         let base = Rc::new_cyclic(|comp| Component {
             id: "$Highlight".into(),

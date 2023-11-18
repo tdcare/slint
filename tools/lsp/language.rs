@@ -19,6 +19,7 @@ use crate::wasm_prelude::*;
 
 use i_slint_compiler::object_tree::ElementRc;
 use i_slint_compiler::parser::{syntax_nodes, NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken};
+use i_slint_compiler::pathutils::clean_path;
 use i_slint_compiler::CompilerConfiguration;
 use i_slint_compiler::{diagnostics::BuildDiagnostics, langtype::Type};
 use i_slint_compiler::{typeloader::TypeLoader, typeregister::TypeRegister};
@@ -46,26 +47,20 @@ const QUERY_PROPERTIES_COMMAND: &str = "slint/queryProperties";
 const REMOVE_BINDING_COMMAND: &str = "slint/removeBinding";
 const SHOW_PREVIEW_COMMAND: &str = "slint/showPreview";
 const SET_BINDING_COMMAND: &str = "slint/setBinding";
-const SET_DESIGN_MODE_COMMAND: &str = "slint/setDesignMode";
-const TOGGLE_DESIGN_MODE_COMMAND: &str = "slint/toggleDesignMode";
 
 pub fn uri_to_file(uri: &lsp_types::Url) -> Option<PathBuf> {
     let Ok(path) = uri.to_file_path() else { return None };
-    let path_canon = dunce::canonicalize(&path).unwrap_or_else(|_| path.to_owned());
-    Some(path_canon)
+    let cleaned_path = clean_path(&path);
+    Some(cleaned_path)
 }
 
 fn command_list() -> Vec<String> {
     vec![
         QUERY_PROPERTIES_COMMAND.into(),
         REMOVE_BINDING_COMMAND.into(),
-        #[cfg(any(feature = "preview", feature = "preview-lense"))]
+        #[cfg(any(feature = "preview-builtin", feature = "preview-external"))]
         SHOW_PREVIEW_COMMAND.into(),
-        #[cfg(any(feature = "preview", feature = "preview-lense"))]
-        SET_DESIGN_MODE_COMMAND.into(),
         SET_BINDING_COMMAND.into(),
-        #[cfg(any(feature = "preview", feature = "preview-lense"))]
-        TOGGLE_DESIGN_MODE_COMMAND.into(),
     ]
 }
 
@@ -80,6 +75,30 @@ fn create_show_preview_command(
         SHOW_PREVIEW_COMMAND.into(),
         Some(vec![file.as_str().into(), component_name.into()]),
     )
+}
+
+pub fn request_state(ctx: &std::rc::Rc<Context>) {
+    #[cfg(feature = "preview-external")]
+    {
+        let documents = &ctx.document_cache.borrow().documents;
+
+        for (p, d) in documents.all_file_documents() {
+            let Some(node) = &d.node else {
+                continue;
+            };
+            ctx.preview.set_contents(p, &node.text().to_string());
+        }
+        let style = documents.compiler_config.style.clone().unwrap_or_default();
+        ctx.preview.config_changed(
+            &style,
+            &documents.compiler_config.include_paths,
+            &documents.compiler_config.library_paths,
+        );
+
+        if let Some(c) = ctx.preview.current_component() {
+            ctx.preview.load_preview(c);
+        }
+    }
 }
 
 /// A cache of loaded documents
@@ -104,7 +123,7 @@ pub struct Context {
     pub document_cache: RefCell<DocumentCache>,
     pub server_notifier: crate::ServerNotifier,
     pub init_param: InitializeParams,
-    pub preview: Box<dyn PreviewApi>,
+    pub preview: Rc<dyn PreviewApi>,
 }
 
 #[derive(Default)]
@@ -261,18 +280,8 @@ pub fn register_request_handlers(rh: &mut RequestHandler) {
     });
     rh.register::<ExecuteCommand, _>(|params, ctx| async move {
         if params.command.as_str() == SHOW_PREVIEW_COMMAND {
-            #[cfg(feature = "preview")]
+            #[cfg(any(feature = "preview-builtin", feature = "preview-external"))]
             show_preview_command(&params.arguments, &ctx)?;
-            return Ok(None::<serde_json::Value>);
-        }
-        if params.command.as_str() == SET_DESIGN_MODE_COMMAND {
-            #[cfg(feature = "preview")]
-            set_design_mode(&params.arguments, &ctx)?;
-            return Ok(None::<serde_json::Value>);
-        }
-        if params.command.as_str() == TOGGLE_DESIGN_MODE_COMMAND {
-            #[cfg(feature = "preview")]
-            toggle_design_mode(&params.arguments, &ctx)?;
             return Ok(None::<serde_json::Value>);
         }
         if params.command.as_str() == QUERY_PROPERTIES_COMMAND {
@@ -393,14 +402,14 @@ pub fn register_request_handlers(rh: &mut RequestHandler) {
     });
 }
 
-#[cfg(feature = "preview")]
+#[cfg(any(feature = "preview-builtin", feature = "preview-external"))]
 pub fn show_preview_command(params: &[serde_json::Value], ctx: &Rc<Context>) -> Result<()> {
     let document_cache = &mut ctx.document_cache.borrow_mut();
     let config = &document_cache.documents.compiler_config;
 
     let e = || "InvalidParameter";
 
-    let url = if let serde_json::Value::String(s) = params.get(0).ok_or_else(e)? {
+    let url = if let serde_json::Value::String(s) = params.first().ok_or_else(e)? {
         Url::parse(s)?
     } else {
         return Err(e().into());
@@ -409,34 +418,13 @@ pub fn show_preview_command(params: &[serde_json::Value], ctx: &Rc<Context>) -> 
         params.get(1).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(|v| v.to_string());
     let path = uri_to_file(&url).unwrap_or_default();
 
-    ctx.preview.load_preview(
-        crate::common::PreviewComponent {
-            path,
-            component,
-            include_paths: config.include_paths.clone(),
-            style: config.style.clone().unwrap_or_default(),
-        },
-        crate::common::PostLoadBehavior::ShowAfterLoad,
-    );
-    Ok(())
-}
-
-#[cfg(feature = "preview")]
-pub fn set_design_mode(params: &[serde_json::Value], ctx: &Rc<Context>) -> Result<()> {
-    let e = || "InvalidParameter";
-    let enable = if let serde_json::Value::Bool(b) = params.get(0).ok_or_else(e)? {
-        b
-    } else {
-        return Err(e().into());
-    };
-
-    ctx.preview.set_design_mode(*enable);
-    Ok(())
-}
-
-#[cfg(feature = "preview")]
-pub fn toggle_design_mode(_params: &[serde_json::Value], ctx: &Rc<Context>) -> Result<()> {
-    ctx.preview.set_design_mode(!ctx.preview.design_mode());
+    ctx.preview.load_preview(crate::common::PreviewComponent {
+        path,
+        component,
+        include_paths: config.include_paths.clone(),
+        library_paths: config.library_paths.clone(),
+        style: config.style.clone().unwrap_or_default(),
+    });
     Ok(())
 }
 
@@ -447,7 +435,7 @@ pub fn query_properties_command(
     let document_cache = &mut ctx.document_cache.borrow_mut();
 
     let text_document_uri = serde_json::from_value::<lsp_types::TextDocumentIdentifier>(
-        params.get(0).ok_or("No text document provided")?.clone(),
+        params.first().ok_or("No text document provided")?.clone(),
     )?
     .uri;
     let position = serde_json::from_value::<lsp_types::Position>(
@@ -481,7 +469,7 @@ pub async fn set_binding_command(
     ctx: &Rc<Context>,
 ) -> Result<serde_json::Value> {
     let text_document = serde_json::from_value::<lsp_types::OptionalVersionedTextDocumentIdentifier>(
-        params.get(0).ok_or("No text document provided")?.clone(),
+        params.first().ok_or("No text document provided")?.clone(),
     )?;
     let element_range = serde_json::from_value::<lsp_types::Range>(
         params.get(1).ok_or("No element range provided")?.clone(),
@@ -572,7 +560,7 @@ pub async fn remove_binding_command(
     ctx: &Rc<Context>,
 ) -> Result<serde_json::Value> {
     let text_document = serde_json::from_value::<lsp_types::OptionalVersionedTextDocumentIdentifier>(
-        params.get(0).ok_or("No text document provided")?.clone(),
+        params.first().ok_or("No text document provided")?.clone(),
     )?;
     let element_range = serde_json::from_value::<lsp_types::Range>(
         params.get(1).ok_or("No element range provided")?.clone(),
@@ -715,7 +703,7 @@ fn get_document_and_offset<'a>(
     text_document_uri: &'a Url,
     pos: &'a Position,
 ) -> Option<(&'a i_slint_compiler::object_tree::Document, u32)> {
-    let path = uri_to_file(&text_document_uri)?;
+    let path = uri_to_file(text_document_uri)?;
     let doc = document_cache.documents.get_document(&path)?;
     let o = doc.node.as_ref()?.source_file.offset(pos.line as usize + 1, pos.character as usize + 1)
         as u32;
@@ -816,7 +804,7 @@ fn get_code_actions(
                 .and_then(syntax_nodes::Component::new)
         });
 
-    #[cfg(feature = "preview-lense")]
+    #[cfg(any(feature = "preview-builtin", feature = "preview-external"))]
     {
         if let Some(component) = &component {
             if let Some(component_name) =
@@ -883,12 +871,12 @@ fn get_code_actions(
         // whitespace in between for substituting the parent element with its
         // sub-elements, dropping its own properties, callbacks etc.
         fn is_sub_element(kind: SyntaxKind) -> bool {
-            match kind {
-                SyntaxKind::SubElement => true,
-                SyntaxKind::RepeatedElement => true,
-                SyntaxKind::ConditionalElement => true,
-                _ => return false,
-            }
+            matches!(
+                kind,
+                SyntaxKind::SubElement
+                    | SyntaxKind::RepeatedElement
+                    | SyntaxKind::ConditionalElement
+            )
         }
         let sub_elements = node
             .parent()
@@ -941,7 +929,47 @@ fn get_code_actions(
                 title: "Remove element".into(),
                 kind: Some(lsp_types::CodeActionKind::REFACTOR),
                 edit: Some(WorkspaceEdit {
-                    changes: Some(std::iter::once((uri, edits)).collect()),
+                    changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }));
+        }
+
+        // We have already checked that the node is a qualified name of an element.
+        // Check whether the element is a direct sub-element of another element
+        // meaning that it can be repeated or made conditional.
+        if node // QualifiedName
+            .parent() // Element
+            .unwrap()
+            .parent()
+            .filter(|n| n.kind() == SyntaxKind::SubElement)
+            .and_then(|p| p.parent())
+            .is_some_and(|n| n.kind() == SyntaxKind::Element)
+        {
+            let edits = vec![TextEdit::new(
+                lsp_types::Range::new(r.start, r.start),
+                "for ${1:name}[index] in ${0:model} : ".to_string(),
+            )];
+            result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                title: "Repeat element".into(),
+                kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }));
+
+            let edits = vec![TextEdit::new(
+                lsp_types::Range::new(r.start, r.start),
+                "if ${0:condition} : ".to_string(),
+            )];
+            result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                title: "Make conditional".into(),
+                kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(std::iter::once((uri.clone(), edits)).collect()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1083,7 +1111,7 @@ fn get_code_lenses(
     document_cache: &mut DocumentCache,
     text_document: &lsp_types::TextDocumentIdentifier,
 ) -> Option<Vec<CodeLens>> {
-    if cfg!(feature = "preview-lense") {
+    if cfg!(any(feature = "preview-builtin", feature = "preview-external")) {
         let filepath = uri_to_file(&text_document.uri)?;
         let doc = document_cache.documents.get_document(&filepath)?;
 
@@ -1199,10 +1227,18 @@ pub async fn load_configuration(ctx: &Context) -> Result<()> {
     let document_cache = &mut ctx.document_cache.borrow_mut();
     for v in r {
         if let Some(o) = v.as_object() {
-            if let Some(ip) = o.get("includePath").and_then(|v| v.as_array()) {
+            if let Some(ip) = o.get("includePaths").and_then(|v| v.as_array()) {
                 if !ip.is_empty() {
                     document_cache.documents.compiler_config.include_paths =
                         ip.iter().filter_map(|x| x.as_str()).map(PathBuf::from).collect();
+                }
+            }
+            if let Some(lp) = o.get("libraryPaths").and_then(|v| v.as_object()) {
+                if !lp.is_empty() {
+                    document_cache.documents.compiler_config.library_paths = lp
+                        .iter()
+                        .filter_map(|(k, v)| v.as_str().map(|v| (k.to_string(), PathBuf::from(v))))
+                        .collect();
                 }
             }
             if let Some(style) =
@@ -1221,7 +1257,11 @@ pub async fn load_configuration(ctx: &Context) -> Result<()> {
 
     let cc = &document_cache.documents.compiler_config;
     let empty_string = String::new();
-    ctx.preview.config_changed(&cc.style.as_ref().unwrap_or(&empty_string), &cc.include_paths);
+    ctx.preview.config_changed(
+        cc.style.as_ref().unwrap_or(&empty_string),
+        &cc.include_paths,
+        &cc.library_paths,
+    );
 
     Ok(())
 }
@@ -1382,7 +1422,7 @@ mod tests {
         if let DocumentSymbolResponse::Nested(result) = result {
             assert_eq!(result.len(), 1);
 
-            let first = result.get(0).unwrap();
+            let first = result.first().unwrap();
             assert_eq!(&first.name, "MainWindow");
         } else {
             unreachable!();
@@ -1417,7 +1457,7 @@ component Demo {
         if let DocumentSymbolResponse::Nested(result) = result {
             assert_eq!(result.len(), 1);
 
-            let first = result.get(0).unwrap();
+            let first = result.first().unwrap();
             assert_eq!(&first.name, "Demo");
         } else {
             unreachable!();
@@ -1508,30 +1548,74 @@ export component TestWindow inherits Window {
                     token,
                     &capabilities
                 )),
-                Some(vec![CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
-                    title: "Wrap in element".into(),
-                    kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(
-                            std::iter::once((
-                                url.clone(),
-                                vec![TextEdit::new(
-                                    text_element,
-                                    r#"${0:element} {
+                Some(vec![
+                    CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                        title: "Wrap in element".into(),
+                        kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(
+                                std::iter::once((
+                                    url.clone(),
+                                    vec![TextEdit::new(
+                                        text_element,
+                                        r#"${0:element} {
             Text {
                 text: "Hello World!";
                 font-size: 20px;
             }
 }"#
-                                    .into()
-                                )]
-                            ))
-                            .collect()
-                        ),
+                                        .into()
+                                    )]
+                                ))
+                                .collect()
+                            ),
+                            ..Default::default()
+                        }),
                         ..Default::default()
                     }),
-                    ..Default::default()
-                }),])
+                    CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                        title: "Repeat element".into(),
+                        kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(
+                                std::iter::once((
+                                    url.clone(),
+                                    vec![TextEdit::new(
+                                        lsp_types::Range::new(
+                                            text_element.start,
+                                            text_element.start
+                                        ),
+                                        r#"for ${1:name}[index] in ${0:model} : "#.into()
+                                    )]
+                                ))
+                                .collect()
+                            ),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                        title: "Make conditional".into(),
+                        kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(
+                                std::iter::once((
+                                    url.clone(),
+                                    vec![TextEdit::new(
+                                        lsp_types::Range::new(
+                                            text_element.start,
+                                            text_element.start
+                                        ),
+                                        r#"if ${0:condition} : "#.into()
+                                    )]
+                                ))
+                                .collect()
+                            ),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                ])
             );
         }
 

@@ -6,17 +6,17 @@
 mod common;
 mod language;
 pub mod lsp_ext;
-#[cfg(feature = "preview")]
+#[cfg(feature = "preview-engine")]
 mod preview;
 pub mod util;
 
-use common::PreviewApi;
-use common::Result;
+use common::{PreviewApi, Result};
 use i_slint_compiler::CompilerConfiguration;
 use js_sys::Function;
 pub use language::{Context, DocumentCache, RequestHandler};
 use serde::Serialize;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -44,40 +44,90 @@ pub mod wasm_prelude {
 }
 
 struct Previewer {
-    highlight_in_preview: Function,
+    server_notifier: ServerNotifier,
+    to_show: RefCell<Option<common::PreviewComponent>>,
 }
 
 impl PreviewApi for Previewer {
-    fn set_design_mode(&self, _enable: bool) {
-        // do nothing!
+    fn set_use_external_previewer(&self, _use_external: bool) {
+        // The WASM LSP always needs to use the WASM preview!
     }
 
-    fn design_mode(&self) -> bool {
-        // do nothing!
-        false
+    fn set_contents(&self, path: &std::path::Path, contents: &str) {
+        #[cfg(feature = "preview-external")]
+        let _ = self.server_notifier.send_notification(
+            "slint/lsp_to_preview".to_string(),
+            crate::common::LspToPreviewMessage::SetContents {
+                path: path.to_string_lossy().to_string(),
+                contents: contents.to_string(),
+            },
+        );
     }
 
-    fn set_contents(&self, _path: &std::path::Path, _contents: &str) {
-        // do nothing!
+    fn load_preview(&self, component: common::PreviewComponent) {
+        if component.path.as_os_str().is_empty() {
+            return;
+        }
+
+        self.to_show.replace(Some(component.clone()));
+
+        #[cfg(feature = "preview-external")]
+        let _ = self.server_notifier.send_notification(
+            "slint/lsp_to_preview".to_string(),
+            crate::common::LspToPreviewMessage::ShowPreview {
+                path: component.path.to_string_lossy().to_string(),
+                component: component.component,
+                style: component.style.to_string(),
+                include_paths: component
+                    .include_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect(),
+                library_paths: component
+                    .library_paths
+                    .iter()
+                    .map(|(n, p)| (n.clone(), p.to_string_lossy().to_string()))
+                    .collect(),
+            },
+        );
     }
 
-    fn load_preview(
+    fn config_changed(
         &self,
-        _component: common::PreviewComponent,
-        _behavior: common::PostLoadBehavior,
+        style: &str,
+        include_paths: &[PathBuf],
+        library_paths: &HashMap<String, PathBuf>,
     ) {
-        // do nothing!
-    }
-
-    fn config_changed(&self, _style: &str, _include_paths: &[PathBuf]) {
-        // do nothing!
+        #[cfg(feature = "preview-external")]
+        let _ = self.server_notifier.send_notification(
+            "slint/lsp_to_preview".to_string(),
+            crate::common::LspToPreviewMessage::SetConfiguration {
+                style: style.to_string(),
+                include_paths: include_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect(),
+                library_paths: library_paths
+                    .iter()
+                    .map(|(n, p)| (n.clone(), p.to_string_lossy().to_string()))
+                    .collect(),
+            },
+        );
     }
 
     fn highlight(&self, path: Option<std::path::PathBuf>, offset: u32) -> Result<()> {
-        self.highlight_in_preview
-            .call2(&JsValue::UNDEFINED, &to_value(&path.unwrap_or_default())?, &offset.into())
-            .map_err(|x| format!("{x:?}"))?;
-        Ok(())
+        #[cfg(feature = "preview-external")]
+        self.server_notifier.send_notification(
+            "slint/lsp_to_preview".to_string(),
+            crate::common::LspToPreviewMessage::HighlightFromEditor {
+                path: path.map(|p| p.to_string_lossy().to_string()),
+                offset,
+            },
+        )
+    }
+
+    fn current_component(&self) -> Option<crate::common::PreviewComponent> {
+        self.to_show.borrow().clone()
     }
 }
 
@@ -86,6 +136,7 @@ pub struct ServerNotifier {
     send_notification: Function,
     send_request: Function,
 }
+
 impl ServerNotifier {
     pub fn send_notification(&self, method: String, params: impl Serialize) -> Result<()> {
         self.send_notification
@@ -190,6 +241,11 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "HighlightInPreviewFunction")]
     pub type HighlightInPreviewFunction;
+
+    // Make console.log available:
+    #[allow(unused)]
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
 }
 
 #[wasm_bindgen]
@@ -205,34 +261,41 @@ pub fn create(
     send_notification: Function,
     send_request: SendRequestFunction,
     load_file: ImportCallbackFunction,
-    highlight_in_preview: HighlightInPreviewFunction,
 ) -> JsResult<SlintServer> {
     console_error_panic_hook::set_once();
+
+    let send_request = Function::from(send_request.clone());
+    let server_notifier = ServerNotifier { send_notification, send_request };
+    let preview = Rc::new(Previewer {
+        server_notifier: server_notifier.clone(),
+        to_show: Default::default(),
+    });
 
     let init_param = serde_wasm_bindgen::from_value(init_param)?;
 
     let mut compiler_config =
         CompilerConfiguration::new(i_slint_compiler::generator::OutputFormat::Interpreter);
+
+    let preview_notifier = preview.clone();
     compiler_config.open_import_fallback = Some(Rc::new(move |path| {
         let load_file = Function::from(load_file.clone());
-        Box::pin(async move { Some(self::load_file(path, &load_file).await) })
+        let preview_notifier = preview_notifier.clone();
+        Box::pin(async move {
+            let contents = self::load_file(path.clone(), &load_file).await;
+            if let Ok(contents) = &contents {
+                preview_notifier.set_contents(&PathBuf::from(path), contents);
+            }
+            Some(contents)
+        })
     }));
-
     let document_cache = RefCell::new(DocumentCache::new(compiler_config));
-    let send_request = Function::from(send_request.clone());
-    let highlight_in_preview = Function::from(highlight_in_preview.clone());
     let reentry_guard = Rc::new(RefCell::new(ReentryGuard::default()));
 
     let mut rh = RequestHandler::default();
     language::register_request_handlers(&mut rh);
 
     Ok(SlintServer {
-        ctx: Rc::new(Context {
-            document_cache,
-            init_param,
-            server_notifier: ServerNotifier { send_notification, send_request },
-            preview: Box::new(Previewer { highlight_in_preview }),
-        }),
+        ctx: Rc::new(Context { document_cache, init_param, server_notifier, preview }),
         reentry_guard,
         rh: Rc::new(rh),
     })
@@ -240,6 +303,52 @@ pub fn create(
 
 #[wasm_bindgen]
 impl SlintServer {
+    #[cfg(all(feature = "preview-engine", feature = "preview-external"))]
+    #[wasm_bindgen]
+    pub async fn process_preview_to_lsp_message(
+        &self,
+        value: JsValue,
+    ) -> std::result::Result<(), JsValue> {
+        use crate::common::PreviewToLspMessage as M;
+
+        let guard = self.reentry_guard.clone();
+        let _lock = ReentryGuard::lock(guard).await;
+
+        let Ok(message) = serde_wasm_bindgen::from_value::<M>(value) else {
+            return Err(JsValue::from("Failed to convert value to PreviewToLspMessage"));
+        };
+
+        match message {
+            M::Status { message, health } => {
+                crate::preview::send_status_notification(
+                    &self.ctx.server_notifier,
+                    &message,
+                    health,
+                );
+            }
+            M::Diagnostics { diagnostics, uri } => {
+                crate::preview::notify_lsp_diagnostics(&self.ctx.server_notifier, uri, diagnostics);
+            }
+            M::ShowDocument { file, start_line, start_column, end_line, end_column } => {
+                send_show_document_to_editor(
+                    self.ctx.server_notifier.clone(),
+                    file,
+                    start_line,
+                    start_column,
+                    end_line,
+                    end_column,
+                )
+            }
+            M::PreviewTypeChanged { is_external: _ } => {
+                // Nothing to do!
+            }
+            M::RequestState { .. } => {
+                crate::language::request_state(&self.ctx);
+            }
+        }
+        Ok(())
+    }
+
     #[wasm_bindgen]
     pub fn server_initialize_result(&self, cap: JsValue) -> JsResult<JsValue> {
         Ok(to_value(&language::server_initialize_result(&serde_wasm_bindgen::from_value(cap)?))?)
@@ -264,16 +373,6 @@ impl SlintServer {
             Ok(JsValue::UNDEFINED)
         })
     }
-
-    /*  #[wasm_bindgen]
-    pub fn show_preview(&self, params: JsValue) -> JsResult<()> {
-        language::show_preview_command(
-            &serde_wasm_bindgen::from_value(params)?,
-            &ServerNotifier,
-            &mut self.0.borrow_mut(),
-        )
-        .map_err(|e| JsError::new(&e.to_string()));
-    }*/
 
     #[wasm_bindgen]
     pub fn handle_request(&self, _id: JsValue, method: String, params: JsValue) -> js_sys::Promise {
@@ -310,4 +409,29 @@ fn to_value<T: serde::Serialize + ?Sized>(
     value: &T,
 ) -> std::result::Result<wasm_bindgen::JsValue, serde_wasm_bindgen::Error> {
     value.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+}
+
+pub fn send_show_document_to_editor(
+    sender: ServerNotifier,
+    file: String,
+    start_line: u32,
+    start_column: u32,
+    end_line: u32,
+    end_column: u32,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(params) = crate::preview::show_document_request_from_element_callback(
+            &file,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        ) else {
+            return;
+        };
+        let Ok(fut) = sender.send_request::<lsp_types::request::ShowDocument>(params) else {
+            return;
+        };
+        fut.await.unwrap();
+    });
 }

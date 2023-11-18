@@ -73,7 +73,9 @@ pub(crate) fn completion_at(
                         }
                         Some(CompletionItemKind::CLASS) => {
                             available_types.insert(c.label.clone());
-                            c.insert_text = Some(format!("{} {{$1}}", c.label))
+                            if !is_followed_by_brace(&token) {
+                                c.insert_text = Some(format!("{} {{$1}}", c.label))
+                            }
                         }
                         _ => (),
                     }
@@ -458,9 +460,7 @@ fn resolve_expression_scope(lookup_context: &LookupCtx) -> Option<Vec<Completion
     let mut r = Vec::new();
     let global = i_slint_compiler::lookup::global_lookup();
     global.for_each_entry(lookup_context, &mut |str, expr| -> Option<()> {
-        if str != "SlintInternal" {
-            r.push(completion_item_from_expression(str, expr));
-        }
+        r.push(completion_item_from_expression(str, expr));
         None
     });
     Some(r)
@@ -531,7 +531,7 @@ fn complete_path_in_string(base: &Path, text: &str, offset: u32) -> Option<Vec<C
     }
     let mut text = text.strip_prefix('\"')?;
     text = &text[..(offset - 1) as usize];
-    let base = i_slint_compiler::typeloader::base_directory(base)?;
+    let base = i_slint_compiler::typeloader::base_directory(base);
     let path = if let Some(last_slash) = text.rfind('/') {
         base.join(Path::new(&text[..last_slash]))
     } else {
@@ -664,7 +664,11 @@ fn add_components_to_import(
             );
             result.push(CompletionItem {
                 label: format!("{} (import from \"{}\")", exported_name.name, file),
-                insert_text: Some(format!("{} {{ $1 }}", exported_name.name)),
+                insert_text: if is_followed_by_brace(token) {
+                    Some(exported_name.name.clone())
+                } else {
+                    Some(format!("{} {{$1}}", exported_name.name))
+                },
                 insert_text_format: Some(InsertTextFormat::SNIPPET),
                 filter_text: Some(exported_name.name.clone()),
                 kind: Some(CompletionItemKind::CLASS),
@@ -675,6 +679,17 @@ fn add_components_to_import(
         }
     }
     Some(())
+}
+
+fn is_followed_by_brace(token: &SyntaxToken) -> bool {
+    let mut next_token = token.next_token();
+    while let Some(ref t) = next_token {
+        if t.kind() != SyntaxKind::Whitespace {
+            break;
+        }
+        next_token = t.next_token();
+    }
+    next_token.is_some_and(|x| x.kind() == SyntaxKind::LBrace)
 }
 
 #[cfg(test)]
@@ -691,8 +706,15 @@ mod tests {
 
         let doc = dc.documents.get_document(&uri_to_file(&uri).unwrap()).unwrap();
         let token = crate::language::token_at_offset(doc.node.as_ref().unwrap(), offset)?;
+        let caps = CompletionClientCapabilities {
+            completion_item: Some(lsp_types::CompletionItemCapability {
+                snippet_support: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
 
-        completion_at(&mut dc, token, offset, None)
+        completion_at(&mut dc, token, offset, Some(&caps))
     }
 
     #[test]
@@ -734,10 +756,16 @@ mod tests {
             res.iter().find(|ci| ci.label == "true").unwrap();
             res.iter().find(|ci| ci.label == "self").unwrap();
             res.iter().find(|ci| ci.label == "root").unwrap();
+            res.iter().find(|ci| ci.label == "TextInputInterface").unwrap();
 
             assert!(!res.iter().any(|ci| ci.label == "text"));
             assert!(!res.iter().any(|ci| ci.label == "red"));
             assert!(!res.iter().any(|ci| ci.label == "nope"));
+
+            assert!(!res.iter().any(|ci| ci.label == "Rectangle"));
+            assert!(!res.iter().any(|ci| ci.label == "Clip"));
+            assert!(!res.iter().any(|ci| ci.label == "NativeStyleMetrics"));
+            assert!(!res.iter().any(|ci| ci.label == "SlintInternal"));
         }
     }
 
@@ -836,6 +864,7 @@ mod tests {
         "#;
         let res = get_completions(source).unwrap();
         res.iter().find(|ci| ci.label == "LineEdit").unwrap();
+        res.iter().find(|ci| ci.label == "StyleMetrics").unwrap();
 
         let source = r#"
             import { Foo, 🔺} from "std-widgets.slint"
@@ -876,11 +905,87 @@ mod tests {
             }
         "#;
         let res = get_completions(source).unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-quad").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-quad").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-quad").unwrap();
         res.iter().find(|ci| ci.label == "ease").unwrap();
         res.iter().find(|ci| ci.label == "ease-in").unwrap();
         res.iter().find(|ci| ci.label == "ease-out").unwrap();
         res.iter().find(|ci| ci.label == "ease-in-out").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-quart").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-quart").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-quart").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-quint").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-quint").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-quint").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-expo").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-expo").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-expo").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-sine").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-sine").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-sine").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-back").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-back").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-back").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-elastic").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-elastic").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-elastic").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-bounce").unwrap();
+        res.iter().find(|ci| ci.label == "ease-out-bounce").unwrap();
+        res.iter().find(|ci| ci.label == "ease-in-out-bounce").unwrap();
         res.iter().find(|ci| ci.label == "linear").unwrap();
         res.iter().find(|ci| ci.label == "cubic-bezier").unwrap();
+    }
+
+    #[test]
+    fn element_snippet_without_braces() {
+        let source = r#"
+            component Foo {
+                🔺
+            }
+        "#;
+        let res = get_completions(source)
+            .unwrap()
+            .into_iter()
+            .filter(|ci| {
+                matches!(
+                    ci,
+                    CompletionItem {
+                        insert_text_format: Some(InsertTextFormat::SNIPPET),
+                        detail: Some(detail),
+                        ..
+                    }
+                    if detail == "element"
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!res.is_empty());
+        assert!(res.iter().all(|ci| ci.insert_text.as_ref().is_some_and(|t| t.ends_with("{$1}"))));
+    }
+
+    #[test]
+    fn element_snippet_before_braces() {
+        let source = r#"
+            component Foo {
+                🔺 {}
+            }
+        "#;
+        let res = get_completions(source)
+            .unwrap()
+            .into_iter()
+            .filter(|ci| {
+                matches!(
+                    ci,
+                    CompletionItem {
+                        insert_text_format: Some(InsertTextFormat::SNIPPET),
+                        detail: Some(detail),
+                        ..
+                    }
+                    if detail == "element"
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(!res.is_empty());
+        assert!(res.iter().all(|ci| ci.insert_text.is_none()));
     }
 }

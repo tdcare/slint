@@ -24,7 +24,7 @@ struct RenderState {
 }
 
 pub struct SkiaItemRenderer<'a> {
-    pub canvas: &'a mut skia_safe::Canvas,
+    pub canvas: &'a skia_safe::Canvas,
     pub scale_factor: ScaleFactor,
     pub window: &'a i_slint_core::api::Window,
     state_stack: Vec<RenderState>,
@@ -36,7 +36,7 @@ pub struct SkiaItemRenderer<'a> {
 
 impl<'a> SkiaItemRenderer<'a> {
     pub fn new(
-        canvas: &'a mut skia_safe::Canvas,
+        canvas: &'a skia_safe::Canvas,
         window: &'a i_slint_core::api::Window,
         image_cache: &'a ItemCache<Option<skia_safe::Image>>,
         path_cache: &'a ItemCache<Option<(Vector2D<f32, PhysicalPx>, skia_safe::Path)>>,
@@ -218,7 +218,7 @@ impl<'a> SkiaItemRenderer<'a> {
             let children_rect = i_slint_core::properties::evaluate_no_tracking(|| {
                 item_rc.geometry().union(
                     &i_slint_core::item_rendering::item_children_bounding_rect(
-                        &item_rc.component(),
+                        &item_rc.item_tree(),
                         item_rc.index() as isize,
                         &current_clip,
                     ),
@@ -261,7 +261,7 @@ impl<'a> SkiaItemRenderer<'a> {
 
             i_slint_core::item_rendering::render_item_children(
                 &mut sub_renderer,
-                &item_rc.component(),
+                &item_rc.item_tree(),
                 item_rc.index() as isize,
             );
 
@@ -552,6 +552,7 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
                 cursor_position,
                 layout,
                 text_input.text_cursor_width() * self.scale_factor,
+                text_input.horizontal_alignment(),
             )
             .translate(layout_top_left.to_vector());
 
@@ -852,7 +853,7 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
 
             i_slint_core::item_rendering::render_item_children(
                 self,
-                &item_rc.component(),
+                &item_rc.item_tree(),
                 item_rc.index() as isize,
             );
 

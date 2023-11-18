@@ -4,8 +4,11 @@
 use core::convert::TryFrom;
 use i_slint_compiler::langtype::Type as LangType;
 use i_slint_core::component_factory::ComponentFactory;
+#[cfg(feature = "internal")]
+use i_slint_core::component_factory::FactoryContext;
 use i_slint_core::graphics::Image;
 use i_slint_core::model::{Model, ModelRc};
+#[cfg(feature = "internal")]
 use i_slint_core::window::WindowInner;
 use i_slint_core::{Brush, PathData, SharedVector};
 use std::borrow::Cow;
@@ -20,7 +23,9 @@ pub use i_slint_compiler::diagnostics::{Diagnostic, DiagnosticLevel};
 pub use i_slint_core::api::*;
 use i_slint_core::items::*;
 
-use crate::dynamic_component::{ErasedComponentBox, WindowOptions};
+use crate::dynamic_item_tree::ErasedItemTreeBox;
+#[cfg(any(feature = "internal", target_arch = "wasm32"))]
+use crate::dynamic_item_tree::WindowOptions;
 
 /// This enum represents the different public variants of the [`Value`] enum, without
 /// the contained values.
@@ -510,6 +515,18 @@ impl ComponentCompiler {
         Self::default()
     }
 
+    /// Allow access to the underlying `CompilerConfiguration`
+    ///
+    /// This is an internal function without and ABI or API stability guarantees.
+    #[doc(hidden)]
+    #[cfg(feature = "internal")]
+    pub fn compiler_configuration(
+        &mut self,
+        _: i_slint_core::InternalToken,
+    ) -> &mut i_slint_compiler::CompilerConfiguration {
+        &mut self.config
+    }
+
     /// Sets the include paths used for looking up `.slint` imports to the specified vector of paths.
     pub fn set_include_paths(&mut self, include_paths: Vec<std::path::PathBuf>) {
         self.config.include_paths = include_paths;
@@ -518,6 +535,16 @@ impl ComponentCompiler {
     /// Returns the include paths the component compiler is currently configured with.
     pub fn include_paths(&self) -> &Vec<std::path::PathBuf> {
         &self.config.include_paths
+    }
+
+    /// Sets the library paths used for looking up `@library` imports to the specified map of library names to paths.
+    pub fn set_library_paths(&mut self, library_paths: HashMap<String, PathBuf>) {
+        self.config.library_paths = library_paths;
+    }
+
+    /// Returns the library paths the component compiler is currently configured with.
+    pub fn library_paths(&self) -> &HashMap<String, PathBuf> {
+        &self.config.library_paths
     }
 
     /// Sets the style to be used for widgets.
@@ -602,7 +629,7 @@ impl ComponentCompiler {
 
         generativity::make_guard!(guard);
         let (c, diag) =
-            crate::dynamic_component::load(source, path.into(), self.config.clone(), guard).await;
+            crate::dynamic_item_tree::load(source, path.into(), self.config.clone(), guard).await;
         self.diagnostics = diag.into_iter().collect();
         c.ok().map(|inner| ComponentDefinition { inner: inner.into() })
     }
@@ -630,7 +657,7 @@ impl ComponentCompiler {
     ) -> Option<ComponentDefinition> {
         generativity::make_guard!(guard);
         let (c, diag) =
-            crate::dynamic_component::load(source_code, path, self.config.clone(), guard).await;
+            crate::dynamic_item_tree::load(source_code, path, self.config.clone(), guard).await;
         self.diagnostics = diag.into_iter().collect();
         c.ok().map(|inner| ComponentDefinition { inner: inner.into() })
     }
@@ -645,7 +672,7 @@ impl ComponentCompiler {
 /// creating the instances it is safe to drop the ComponentDefinition.
 #[derive(Clone)]
 pub struct ComponentDefinition {
-    inner: crate::dynamic_component::ErasedComponentDescription,
+    inner: crate::dynamic_item_tree::ErasedItemTreeDescription,
 }
 
 impl ComponentDefinition {
@@ -654,6 +681,19 @@ impl ComponentDefinition {
         generativity::make_guard!(guard);
         Ok(ComponentInstance {
             inner: self.inner.unerase(guard).clone().create(Default::default())?,
+        })
+    }
+
+    /// Creates a new instance of the component and returns a shared handle to it.
+    #[doc(hidden)]
+    #[cfg(feature = "internal")]
+    pub fn create_embedded(&self, ctx: FactoryContext) -> Result<ComponentInstance, PlatformError> {
+        generativity::make_guard!(guard);
+        Ok(ComponentInstance {
+            inner: self.inner.unerase(guard).clone().create(WindowOptions::Embed {
+                parent_item_tree: ctx.parent_item_tree,
+                parent_item_tree_index: ctx.parent_item_tree_index,
+            })?,
         })
     }
 
@@ -675,6 +715,7 @@ impl ComponentDefinition {
 
     /// Instantiate the component using an existing window.
     #[doc(hidden)]
+    #[cfg(feature = "internal")]
     pub fn create_with_existing_window(
         &self,
         window: &Window,
@@ -691,6 +732,7 @@ impl ComponentDefinition {
     ///
     /// This is internal because it exposes the `Type` from compilerlib.
     #[doc(hidden)]
+    #[cfg(feature = "internal")]
     pub fn properties_and_callbacks(
         &self,
     ) -> impl Iterator<Item = (String, i_slint_compiler::langtype::Type)> + '_ {
@@ -744,6 +786,7 @@ impl ComponentDefinition {
     ///
     /// This is internal because it exposes the `Type` from compilerlib.
     #[doc(hidden)]
+    #[cfg(feature = "internal")]
     pub fn global_properties_and_callbacks(
         &self,
         global_name: &str,
@@ -821,7 +864,7 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic]) {
 /// An instance can be put on screen with the [`ComponentInstance::run`] function.
 #[repr(C)]
 pub struct ComponentInstance {
-    inner: crate::dynamic_component::DynamicComponentVRc,
+    inner: crate::dynamic_item_tree::DynamicComponentVRc,
 }
 
 impl ComponentInstance {
@@ -1122,7 +1165,7 @@ impl ComponentInstance {
 }
 
 impl ComponentHandle for ComponentInstance {
-    type Inner = crate::dynamic_component::ErasedComponentBox;
+    type Inner = crate::dynamic_item_tree::ErasedItemTreeBox;
 
     fn as_weak(&self) -> Weak<Self>
     where
@@ -1136,7 +1179,7 @@ impl ComponentHandle for ComponentInstance {
     }
 
     fn from_inner(
-        inner: vtable::VRc<i_slint_core::component::ComponentVTable, Self::Inner>,
+        inner: vtable::VRc<i_slint_core::item_tree::ItemTreeVTable, Self::Inner>,
     ) -> Self {
         Self { inner }
     }
@@ -1168,7 +1211,7 @@ impl ComponentHandle for ComponentInstance {
 }
 
 impl From<ComponentInstance>
-    for vtable::VRc<i_slint_core::component::ComponentVTable, ErasedComponentBox>
+    for vtable::VRc<i_slint_core::item_tree::ItemTreeVTable, ErasedItemTreeBox>
 {
     fn from(value: ComponentInstance) -> Self {
         value.inner
@@ -1226,6 +1269,15 @@ pub enum InvokeError {
 /// and react to user input.
 pub fn run_event_loop() -> Result<(), PlatformError> {
     i_slint_backend_selector::with_platform(|b| b.run_event_loop())
+}
+
+#[cfg(all(feature = "internal", target_arch = "wasm32"))]
+/// Spawn the event loop.
+///
+/// Like [`run_event_loop()`], but returns immediately as the loop is running within
+/// the browser's runtime
+pub fn spawn_event_loop() -> Result<(), PlatformError> {
+    i_slint_backend_selector::with_platform(|_| i_slint_backend_winit::spawn_event_loop())
 }
 
 /// This module contains a few functions used by the tests

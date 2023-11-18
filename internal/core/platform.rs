@@ -21,6 +21,10 @@ use alloc::rc::Rc;
 use alloc::string::String;
 #[cfg(feature = "std")]
 use once_cell::sync::OnceCell;
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+use std::time;
+#[cfg(target_arch = "wasm32")]
+use web_time as time;
 
 /// This trait defines the interface between Slint and platform APIs typically provided by operating and windowing systems.
 pub trait Platform {
@@ -29,6 +33,32 @@ pub trait Platform {
 
     /// Spins an event loop and renders the visible windows.
     fn run_event_loop(&self) -> Result<(), PlatformError> {
+        Err(PlatformError::NoEventLoopProvider)
+    }
+
+    /// Spins an event loop for a specified period of time.
+    ///
+    /// This function is similar to `run_event_loop()` with two differences:
+    /// * The function is expected to return after the provided timeout, but
+    ///   allow for subsequent invocations to resume the previous loop. The
+    ///   function can return earlier if the loop was terminated otherwise,
+    ///   for example by `quit_event_loop()` or a last-window-closed mechanism.
+    /// * If the timeout is zero, the implementation should merely peek and
+    ///   process any pending events, but then return immediately.
+    ///
+    /// When the function returns `ControlFlow::Continue`, it is assumed that
+    /// the loop remains intact and that in the future the caller should call
+    /// `process_events()` again, to permit the user to continue to interact with
+    /// windows.
+    /// When the function returns `ControlFlow::Break`, it is assumed that the
+    /// event loop was terminated. Any subsequent calls to `process_events()`
+    /// will start the event loop afresh.
+    #[doc(hidden)]
+    fn process_events(
+        &self,
+        _timeout: core::time::Duration,
+        _: crate::InternalToken,
+    ) -> Result<core::ops::ControlFlow<()>, PlatformError> {
         Err(PlatformError::NoEventLoopProvider)
     }
 
@@ -61,8 +91,8 @@ pub trait Platform {
     fn duration_since_start(&self) -> core::time::Duration {
         #[cfg(feature = "std")]
         {
-            let the_beginning = *INITIAL_INSTANT.get_or_init(instant::Instant::now);
-            instant::Instant::now() - the_beginning
+            let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
+            time::Instant::now() - the_beginning
         }
         #[cfg(not(feature = "std"))]
         unimplemented!("The platform abstraction must implement `duration_since_start`")
@@ -131,13 +161,12 @@ pub trait EventLoopProxy: Send + Sync {
 }
 
 #[cfg(feature = "std")]
-static INITIAL_INSTANT: once_cell::sync::OnceCell<instant::Instant> =
-    once_cell::sync::OnceCell::new();
+static INITIAL_INSTANT: once_cell::sync::OnceCell<time::Instant> = once_cell::sync::OnceCell::new();
 
 #[cfg(feature = "std")]
-impl std::convert::From<crate::animations::Instant> for instant::Instant {
+impl std::convert::From<crate::animations::Instant> for time::Instant {
     fn from(our_instant: crate::animations::Instant) -> Self {
-        let the_beginning = *INITIAL_INSTANT.get_or_init(instant::Instant::now);
+        let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
         the_beginning + core::time::Duration::from_millis(our_instant.0)
     }
 }
@@ -180,7 +209,7 @@ pub fn set_platform(platform: Box<dyn Platform + 'static>) -> Result<(), SetPlat
 }
 
 /// Call this function to update and potentially activate any pending timers, as well
-/// as advance the state of any active animtaions.
+/// as advance the state of any active animations.
 ///
 /// This function should be called before rendering or processing input event, at the
 /// beginning of each event loop iteration.

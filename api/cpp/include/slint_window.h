@@ -42,7 +42,7 @@ inline void assert_main_thread()
 #endif
 }
 
-using ComponentRc = vtable::VRc<cbindgen_private::ComponentVTable>;
+using ItemTreeRc = vtable::VRc<cbindgen_private::ItemTreeVTable>;
 
 class WindowAdapterRc
 {
@@ -83,14 +83,14 @@ public:
     }
 
     template<typename Component, typename ItemArray>
-    void unregister_component(Component *c, ItemArray items) const
+    void unregister_item_tree(Component *c, ItemArray items) const
     {
-        cbindgen_private::slint_unregister_component(
-                vtable::VRef<cbindgen_private::ComponentVTable> { &Component::static_vtable, c },
+        cbindgen_private::slint_unregister_item_tree(
+                vtable::VRef<cbindgen_private::ItemTreeVTable> { &Component::static_vtable, c },
                 items, &inner);
     }
 
-    void set_focus_item(const ComponentRc &component_rc, uint32_t item_index)
+    void set_focus_item(const ItemTreeRc &component_rc, uint32_t item_index)
     {
         cbindgen_private::ItemRc item_rc { component_rc, item_index };
         cbindgen_private::slint_windowrc_set_focus_item(&inner, &item_rc);
@@ -175,12 +175,6 @@ public:
     void set_physical_size(const slint::PhysicalSize &size)
     {
         cbindgen_private::slint_windowrc_set_physical_size(&inner, &size);
-    }
-
-    void dispatch_key_event(const cbindgen_private::KeyInputEvent &event)
-    {
-        private_api::assert_main_thread();
-        cbindgen_private::slint_windowrc_dispatch_key_event(&inner, &event);
     }
 
     /// Send a pointer event to this window
@@ -333,9 +327,9 @@ public:
     /// The \a text is the unicode representation of the key.
     void dispatch_key_press_event(const SharedString &text)
     {
-        cbindgen_private::KeyInputEvent event { text, cbindgen_private::KeyEventType::KeyPressed, 0,
-                                                0 };
-        inner.dispatch_key_event(event);
+        private_api::assert_main_thread();
+        cbindgen_private::slint_windowrc_dispatch_key_event(
+                &inner.handle(), cbindgen_private::KeyEventType::KeyPressed, &text);
     }
 
     /// Dispatch a key release event to the scene.
@@ -345,9 +339,9 @@ public:
     /// The \a text is the unicode representation of the key.
     void dispatch_key_release_event(const SharedString &text)
     {
-        cbindgen_private::KeyInputEvent event { text, cbindgen_private::KeyEventType::KeyReleased,
-                                                0, 0 };
-        inner.dispatch_key_event(event);
+        private_api::assert_main_thread();
+        cbindgen_private::slint_windowrc_dispatch_key_event(
+                &inner.handle(), cbindgen_private::KeyEventType::KeyReleased, &text);
     }
 
     /// Dispatches a pointer or mouse press event to the scene.

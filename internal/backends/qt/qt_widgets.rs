@@ -81,6 +81,7 @@ macro_rules! fn_render {
                 };
                 let $size = qttypes::QSize { width: width as _, height: height as _ };
                 let $this = self;
+                let _workaround = unsafe { $crate::qt_widgets::PainterClipWorkaround::new(painter) };
                 painter.save();
                 let $painter = painter;
                 $($tt)*
@@ -156,6 +157,8 @@ cpp! {{
 
     using QPainterPtr = std::unique_ptr<QPainter>;
 
+    static bool g_lastWindowClosed = false; // Wohoo, global to track window closure when using processEvents().
+
     /// Make sure there is an instance of QApplication.
     /// The `from_qt_backend` argument specifies if we know that we are running
     /// the Qt backend, or if we are just drawing widgets
@@ -169,12 +172,16 @@ cpp! {{
             // so we should set this flag.
             QCoreApplication::setAttribute(Qt::AA_PluginApplication, true);
         }
+
+        static QByteArray executable = rust!(Slint_get_executable_name [] -> qttypes::QByteArray as "QByteArray" {
+            std::env::args().next().unwrap_or_default().as_bytes().into()
+        });
+
         static int argc  = 1;
-        static char argv[] = "Slint";
-        static char *argv2[] = { argv };
+        static char *argv[] = { executable.data() };
         // Leak the QApplication, otherwise it crashes on exit
         // (because the QGuiApplication destructor access some Q_GLOBAL_STATIC which are already gone)
-        new QApplication(argc, argv2);
+        new QApplication(argc, argv);
     }
 
     // HACK ALERT: This struct declaration is duplicated in api/cpp/bindgen.rs - keep in sync.
@@ -218,7 +225,7 @@ cpp! {{
         // For our hacks to work, we need to have some invisible parent widget.
         static QWidget globalParent;
         ptr->setParent(&globalParent);
-        // Let Qt thinks the widget is visible even if it isn't so update() from animation is forwared
+        // Let Qt thinks the widget is visible even if it isn't so update() from animation is forwarded
         ptr->setAttribute(Qt::WA_WState_Visible, true);
         // Hack so update() send a UpdateLater event
         ptr->setAttribute(Qt::WA_WState_InPaintEvent, true);
@@ -234,6 +241,46 @@ impl SlintTypeErasedWidgetPtr {
         let widget_ptr: *mut SlintTypeErasedWidgetPtr = this.as_ptr();
         cpp!(unsafe [widget_ptr as "std::unique_ptr<SlintTypeErasedWidget>*"] -> NonNull<()> as "void*" {
             return (*widget_ptr)->qwidget();
+        })
+    }
+}
+
+cpp! {{
+    // Some style function calls setClipRect or setClipRegion on the painter and replace the clips.
+    // eg CE_ItemViewItem, CE_Header, or CC_GroupBox in QCommonStyle (#3541).
+    // We do workaround that by setting the clip as a system clip so it cant be overwritten
+    struct PainterClipWorkaround {
+        QPainter *painter;
+        QRegion old_clip;
+        explicit PainterClipWorkaround(QPainter *painter) : painter(painter) {
+            auto engine = painter->paintEngine();
+            old_clip = engine->systemClip();
+            auto new_clip = painter->clipRegion() * painter->transform();
+            if (!old_clip.isNull())
+                new_clip &= old_clip;
+            engine->setSystemClip(new_clip);
+        }
+        ~PainterClipWorkaround() {
+            auto engine = painter->paintEngine();
+            engine->setSystemClip(old_clip);
+            // Qt is seriously bugged, setSystemClip will be scaled by the scale factor
+            auto actual_clip = engine->systemClip();
+            if (actual_clip != old_clip) {
+                QSizeF s2 = actual_clip.boundingRect().size();
+                QSizeF s1 = old_clip.boundingRect().size();
+                engine->setSystemClip(old_clip * QTransform::fromScale(s1.width() / s2.width(), s1.height() / s2.height()));
+            }
+        }
+        PainterClipWorkaround(const PainterClipWorkaround&) = delete;
+        PainterClipWorkaround& operator=(const PainterClipWorkaround&) = delete;
+    };
+}}
+cpp_class!(pub(crate) unsafe struct PainterClipWorkaround as "PainterClipWorkaround");
+impl PainterClipWorkaround {
+    /// Safety: the painter must outlive us
+    pub unsafe fn new(painter: &QPainterPtr) -> Self {
+        cpp!(unsafe [painter as "const QPainterPtr*"] -> PainterClipWorkaround as "PainterClipWorkaround" {
+            return PainterClipWorkaround(painter->get());
         })
     }
 }

@@ -60,7 +60,8 @@ export { ClippedImage as Image }
 export component ComponentContainer inherits Empty {
     in property <component-factory> component-factory;
 
-    //-default_size_binding:expands_to_parent_geometry
+    in-out property <length> width;
+    in-out property <length> height;
 }
 
 export component Rotate inherits Empty {
@@ -100,6 +101,7 @@ export component TouchArea {
     callback clicked;
     callback moved;
     callback pointer-event(PointerEvent);
+    callback scroll-event(PointerScrollEvent) -> EventResult;
     //-default_size_binding:expands_to_parent_geometry
 }
 
@@ -108,6 +110,7 @@ export component FocusScope {
     out property <bool> has-focus;
     callback key_pressed(KeyEvent) -> EventResult;
     callback key_released(KeyEvent) -> EventResult;
+    callback focus_changed_event();
     //-default_size_binding:expands_to_parent_geometry
     //-accepts_focus
 }
@@ -212,6 +215,8 @@ component Row {
 
 // Note: layouts are not NativeClass, but this is lowered in lower_layout
 export component GridLayout {
+    in property <length> spacing-horizontal;
+    in property <length> spacing-vertical;
     in property <length> spacing;
 
     // Additional accepted child

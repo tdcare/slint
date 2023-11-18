@@ -51,7 +51,7 @@ macro_rules! for_each_builtin_structs {
             }
 
             /// Represents a Pointer event sent by the windowing system.
-            /// This structure is generated and passed to the `pointer-event` callback of the `TouchArea` element.
+            /// This structure is passed to the `pointer-event` callback of the `TouchArea` element.
             struct PointerEvent {
                 @name = "slint::private_api::PointerEvent"
                 export {
@@ -59,6 +59,22 @@ macro_rules! for_each_builtin_structs {
                     button: PointerEventButton,
                     /// The kind of the event
                     kind: PointerEventKind,
+                    /// The keyboard modifiers pressed during the event
+                    modifiers: KeyboardModifiers,
+                }
+                private {
+                }
+            }
+
+            /// Represents a Pointer scroll (or wheel) event sent by the windowing system.
+            /// This structure is passed to the `scroll-event` callback of the `TouchArea` element.
+            struct PointerScrollEvent {
+                @name = "slint::private_api::PointerScrollEvent"
+                export {
+                    /// The amount of pixel in the horizontal direction
+                    delta_x: Coord,
+                    /// The amount of pixel in the vertical direction
+                    delta_y: Coord,
                     /// The keyboard modifiers pressed during the event
                     modifiers: KeyboardModifiers,
                 }
@@ -78,12 +94,17 @@ macro_rules! for_each_builtin_structs {
                 private {
                     /// Indicates whether the key was pressed or released
                     event_type: KeyEventType,
-                    /// If the event type is KeyEventType::UpdateComposition, then this field specifies
-                    /// the start of the selection as byte offsets within the preedit text.
-                    preedit_selection_start: usize,
-                    /// If the event type is KeyEventType::UpdateComposition, then this field specifies
-                    /// the end of the selection as byte offsets within the preedit text.
-                    preedit_selection_end: usize,
+                    /// If the event type is KeyEventType::UpdateComposition or KeyEventType::CommitComposition,
+                    /// then this field specifies what part of the current text to replace.
+                    /// Relative to the offset of the pre-edit text within the text input element's text.
+                    replacement_range: Option<core::ops::Range<i32>>,
+                    /// If the event type is KeyEventType::UpdateComposition, this is the new pre-edit text
+                    preedit_text: SharedString,
+                    /// The selection within the preedit_text
+                    preedit_selection: Option<core::ops::Range<i32>>,
+                    /// The new cursor position, when None, the cursor is put after the text that was just inserted
+                    cursor_position: Option<i32>,
+                    anchor_position: Option<i32>,
                 }
             }
 

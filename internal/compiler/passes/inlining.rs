@@ -100,9 +100,9 @@ fn inline_element(
     let mut mapping = HashMap::new();
     mapping.insert(element_key(inlined_component.root_element.clone()), elem.clone());
 
-    let mut new_children = vec![];
-    new_children
-        .reserve(elem_mut.children.len() + inlined_component.root_element.borrow().children.len());
+    let mut new_children = Vec::with_capacity(
+        elem_mut.children.len() + inlined_component.root_element.borrow().children.len(),
+    );
     new_children.extend(
         inlined_component.root_element.borrow().children.iter().map(|x| {
             duplicate_element_with_mapping(x, &mut mapping, root_component, priority_delta)
@@ -237,6 +237,7 @@ fn duplicate_element_with_mapping(
         repeated: elem.repeated.clone(),
         is_component_placeholder: elem.is_component_placeholder,
         node: elem.node.clone(),
+        layout: elem.layout.clone(),
         enclosing_component: Rc::downgrade(root_component),
         states: elem.states.clone(),
         transitions: elem
