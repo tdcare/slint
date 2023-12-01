@@ -14,11 +14,10 @@ version.workspace = true
 
 [lib]
 path = "lib.rs"
-[features]
-ohos=["i-slint-common/ohos"]
 
 [features]
 default = []
+ohos=["i-slint-common/ohos"]
 
 [dependencies]
 i-slint-core = { workspace = true, features = ["default", "box-shadow-cache", "shared-fontdb"] }

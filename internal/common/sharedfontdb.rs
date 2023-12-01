@@ -66,7 +66,7 @@ mod fontconfig;
 fn init_fontdb() -> FontDatabase {
     let mut font_db = fontdb::Database::new();
 
-    #[cfg(not(any(target_arch = "wasm32",target_os = "linux")))]
+    #[cfg(not(any(target_arch = "wasm32",feature = "ohos")))]
     let (default_font_family_ids, default_font_family_names) =
         std::env::var_os("SLINT_DEFAULT_FONT")
             .and_then(|maybe_font_path| {
@@ -104,7 +104,7 @@ fn init_fontdb() -> FontDatabase {
             })
             .unwrap_or_default();
 
-    #[cfg(any(target_arch = "wasm32",feature = "ohos"))]
+     #[cfg(any(target_arch = "wasm32",feature = "ohos"))]
     let (default_font_family_ids, default_font_family_names) =
         (Default::default(), Default::default());
 

@@ -49,7 +49,7 @@ default = ["std", "unicode"]
 ohos=["i-slint-common/ohos"]
 
 [dependencies]
-i-slint-common = { workspace = true, features = ["default"] }
+i-slint-common = { workspace = true, features = ["default","ohos"] }
 i-slint-core-macros = { workspace = true, features = ["default"] }
 
 const-field-offset = { version = "0.1", path = "../../helper_crates/const-field-offset" }

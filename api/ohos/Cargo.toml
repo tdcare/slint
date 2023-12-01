@@ -1,14 +1,17 @@
 [package]
 name = "slint-ohos"
-version = "1.3.0"
 authors = ["TDCare <tzw@tdcare.cn>"]
-edition = "2021"
-license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial"
-description = "Slint for OpenHarmony"
-repository = "https://github.com/tdcare/slint"
+documentation.workspace = true
+edition.workspace = true
 homepage = "https://slint.rs"
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+description = "Slint for OpenHarmony"
 categories = ["gui", "rendering::engine"]
 keywords = ["gui", "toolkit", "graphics", "design", "ui","OpenHarmony","OHOS"]
+
 
 
 #[[bin]]
@@ -33,9 +36,9 @@ slint = { path = "../rs/slint", default-features = false, features = [
     "ohos",
 ] }
 
-i-slint-core = { version = "=1.3.0", path="../../internal/core", default-features = false, features = ["std","ffi","software-renderer","ohos"] }
-i-slint-renderer-femtovg = { version = "=1.3.0", path = "../../internal/renderers/femtovg",features=["ohos"] }
-slint-interpreter = { version = "=1.3.0", path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
+i-slint-core = {  path="../../internal/core", default-features = false, features = ["std","ffi","software-renderer","ohos"] }
+i-slint-renderer-femtovg = {  path = "../../internal/renderers/femtovg",features=["ohos"] }
+slint-interpreter = {  path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
 
 glutin = {git="https://gitee.com/tdcare/glutin.git",branch="0.30.x",default-features = false,features=["egl"]}
 
@@ -52,6 +55,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 
 libc = "0.2"
 
+webrtc = "0.9.0"
+lazy_static = "1"
+tokio = { version = "1.32.0", features = ["full"] }
+
+
 [build-dependencies]
 napi-build = "2.0.1"
 slint-build = { path = "../rs/build" }
@@ -62,5 +70,3 @@ cfg_aliases = "0.1.1"
 [profile.release]
 lto = true
 
-[target.'cfg(target_os = "ohos")']
-rustflags = ["--crate-type cdylib"]
