@@ -16,7 +16,6 @@ use js_sys::Function;
 pub use language::{Context, DocumentCache, RequestHandler};
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::future::Future;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -78,40 +77,15 @@ impl PreviewApi for Previewer {
                 path: component.path.to_string_lossy().to_string(),
                 component: component.component,
                 style: component.style.to_string(),
-                include_paths: component
-                    .include_paths
-                    .iter()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect(),
-                library_paths: component
-                    .library_paths
-                    .iter()
-                    .map(|(n, p)| (n.clone(), p.to_string_lossy().to_string()))
-                    .collect(),
             },
         );
     }
 
-    fn config_changed(
-        &self,
-        style: &str,
-        include_paths: &[PathBuf],
-        library_paths: &HashMap<String, PathBuf>,
-    ) {
+    fn config_changed(&self, config: common::PreviewConfig) {
         #[cfg(feature = "preview-external")]
         let _ = self.server_notifier.send_notification(
             "slint/lsp_to_preview".to_string(),
-            crate::common::LspToPreviewMessage::SetConfiguration {
-                style: style.to_string(),
-                include_paths: include_paths
-                    .iter()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect(),
-                library_paths: library_paths
-                    .iter()
-                    .map(|(n, p)| (n.clone(), p.to_string_lossy().to_string()))
-                    .collect(),
-            },
+            crate::common::LspToPreviewMessage::SetConfiguration { config },
         );
     }
 

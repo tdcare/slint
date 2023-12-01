@@ -4,7 +4,7 @@
 //! This wasm library can be loaded from JS to load and display the content of .slint files
 #![cfg(target_arch = "wasm32")]
 
-use std::{cell::RefCell, collections::HashMap, future::Future, path::PathBuf, pin::Pin, rc::Rc};
+use std::{cell::RefCell, future::Future, path::PathBuf, pin::Pin, rc::Rc};
 
 use wasm_bindgen::prelude::*;
 
@@ -125,24 +125,12 @@ impl PreviewConnector {
                 super::set_contents(&PathBuf::from(&path), contents);
                 Ok(())
             }
-            M::SetConfiguration { style, include_paths, library_paths } => {
-                let ip: Vec<PathBuf> = include_paths.iter().map(PathBuf::from).collect();
-                let lp: HashMap<String, PathBuf> =
-                    library_paths.iter().map(|(n, p)| (n.clone(), PathBuf::from(p))).collect();
-                super::config_changed(&style, &ip, &lp);
+            M::SetConfiguration { config } => {
+                super::config_changed(config);
                 Ok(())
             }
-            M::ShowPreview { path, component, style, include_paths, library_paths } => {
-                let pc = PreviewComponent {
-                    path: PathBuf::from(path),
-                    component,
-                    style,
-                    include_paths: include_paths.iter().map(PathBuf::from).collect(),
-                    library_paths: library_paths
-                        .iter()
-                        .map(|(n, p)| (n.clone(), PathBuf::from(p)))
-                        .collect(),
-                };
+            M::ShowPreview { path, component, style } => {
+                let pc = PreviewComponent { path: PathBuf::from(path), component, style };
                 super::load_preview(pc);
                 Ok(())
             }
@@ -257,6 +245,15 @@ pub fn send_message_to_lsp(message: crate::common::PreviewToLspMessage) {
             let _ = callback.call1(&JsValue::UNDEFINED, &value);
         }
     })
+}
+
+pub fn set_show_preview_ui(show_preview_ui: bool) {
+    PREVIEW_STATE.with(move |preview_state| {
+        let preview_state = preview_state.borrow_mut();
+        if let Some(ui) = &preview_state.ui {
+            ui.set_show_preview_ui(show_preview_ui)
+        }
+    });
 }
 
 pub fn set_current_style(style: String) {

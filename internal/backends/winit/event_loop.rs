@@ -315,6 +315,9 @@ impl EventLoopState {
                 let text = i_slint_common::for_each_special_keys!(winit_key_to_char);
 
                 window.window().dispatch_event(match event.state {
+                    winit::event::ElementState::Pressed if event.repeat => {
+                        corelib::platform::WindowEvent::KeyPressRepeated { text }
+                    }
                     winit::event::ElementState::Pressed => {
                         corelib::platform::WindowEvent::KeyPressed { text }
                     }
@@ -519,12 +522,6 @@ impl EventLoopState {
                 });
 
                 corelib::platform::update_timers_and_animations();
-
-                // Workaround https://github.com/rust-windowing/winit/issues/3215 on Windows
-                // Note that this is not a prefect fix because input or other events might also start timers
-                if let Some(next_timer) = corelib::platform::duration_until_next_timer_update() {
-                    event_loop_target.set_control_flow(ControlFlow::wait_duration(next_timer));
-                }
             }
 
             Event::Resumed => ALL_WINDOWS.with(|ws| {
@@ -573,7 +570,7 @@ impl EventLoopState {
                     }
                 }
 
-                if event_loop_target.control_flow() != ControlFlow::Poll {
+                if event_loop_target.control_flow() == ControlFlow::Wait {
                     if let Some(next_timer) = corelib::platform::duration_until_next_timer_update()
                     {
                         event_loop_target.set_control_flow(ControlFlow::wait_duration(next_timer));

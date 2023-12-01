@@ -13,7 +13,7 @@ include(FetchContent)
 FetchContent_Declare(
     Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-    GIT_TAG v0.4.3
+    GIT_TAG v0.4.5
 )
 FetchContent_MakeAvailable(Corrosion)
 
@@ -407,7 +407,7 @@ if(SLINT_BUILD_RUNTIME)
 
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/lib/cmake/Slint/SlintConfigVersion.cmake
-        VERSION 1.3.0
+        VERSION 1.3.2
         COMPATIBILITY SameMinorVersion
     )
 
@@ -418,37 +418,6 @@ if(SLINT_BUILD_RUNTIME)
         DESTINATION lib/cmake/Slint
     )
 
-    option(SLINT_PACKAGE_BUNDLE_QT "Internal setting to install Qt binary in the packages" OFF)
-
-    if(SLINT_PACKAGE_BUNDLE_QT)
-        if(WIN32)
-            find_package(Qt6 6.0 COMPONENTS Core Gui Widgets Svg)
-            install(
-                FILES
-                $<TARGET_FILE:Qt6::Core>
-                $<TARGET_FILE:Qt6::Gui>
-                $<TARGET_FILE:Qt6::Widgets>
-                $<TARGET_FILE:Qt6::Svg>
-                TYPE LIB)
-
-            install(
-                FILES ${Qt6_DIR}/../../../plugins/platforms/qwindows.dll
-                DESTINATION plugins/platforms)
-            install(
-                FILES ${Qt6_DIR}/../../../plugins/styles/qwindowsvistastyle.dll
-                DESTINATION plugins/styles)
-            install(
-                FILES ${Qt6_DIR}/../../../plugins/imageformats/qsvg.dll
-                DESTINATION plugins/imageformats)
-
-            install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../licenses/ DESTINATION LICENSES)
-
-            set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
-            include(InstallRequiredSystemLibraries)
-            install(FILES ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} TYPE LIB)
-        endif()
-    endif(SLINT_PACKAGE_BUNDLE_QT)
-
 endif(SLINT_BUILD_RUNTIME)
 
 set(CPACK_PACKAGE_NAME "Slint-cpp")
@@ -456,7 +425,7 @@ set(CPACK_PACKAGE_VENDOR "Slint")
 set(CPACK_VERBATIM_VARIABLES true)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 3)
-set(CPACK_PACKAGE_VERSION_PATCH 0)
+set(CPACK_PACKAGE_VERSION_PATCH 2)
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://slint.dev")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/../../LICENSE.md")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_LIST_DIR}/README.md")

@@ -10,7 +10,7 @@ mod semantic_tokens;
 #[cfg(test)]
 mod test;
 
-use crate::common::{PreviewApi, Result};
+use crate::common::{PreviewApi, PreviewConfig, Result};
 use crate::language::properties::find_element_indent;
 use crate::util::{map_node, map_range, map_token, to_lsp_diag};
 
@@ -77,27 +77,20 @@ fn create_show_preview_command(
     )
 }
 
+#[cfg(feature = "preview-external")]
 pub fn request_state(ctx: &std::rc::Rc<Context>) {
-    #[cfg(feature = "preview-external")]
-    {
-        let documents = &ctx.document_cache.borrow().documents;
+    let cache = ctx.document_cache.borrow();
+    let documents = &cache.documents;
 
-        for (p, d) in documents.all_file_documents() {
-            let Some(node) = &d.node else {
-                continue;
-            };
-            ctx.preview.set_contents(p, &node.text().to_string());
-        }
-        let style = documents.compiler_config.style.clone().unwrap_or_default();
-        ctx.preview.config_changed(
-            &style,
-            &documents.compiler_config.include_paths,
-            &documents.compiler_config.library_paths,
-        );
-
-        if let Some(c) = ctx.preview.current_component() {
-            ctx.preview.load_preview(c);
-        }
+    for (p, d) in documents.all_file_documents() {
+        let Some(node) = &d.node else {
+            continue;
+        };
+        ctx.preview.set_contents(p, &node.text().to_string());
+    }
+    ctx.preview.config_changed(cache.preview_config.clone());
+    if let Some(c) = ctx.preview.current_component() {
+        ctx.preview.load_preview(c);
     }
 }
 
@@ -105,13 +98,14 @@ pub fn request_state(ctx: &std::rc::Rc<Context>) {
 pub struct DocumentCache {
     pub(crate) documents: TypeLoader,
     versions: HashMap<Url, i32>,
+    preview_config: PreviewConfig,
 }
 
 impl DocumentCache {
     pub fn new(config: CompilerConfiguration) -> Self {
         let documents =
             TypeLoader::new(TypeRegister::builtin(), config, &mut BuildDiagnostics::default());
-        Self { documents, versions: Default::default() }
+        Self { documents, versions: Default::default(), preview_config: Default::default() }
     }
 
     pub fn document_version(&self, target_uri: &lsp_types::Url) -> Option<i32> {
@@ -421,8 +415,6 @@ pub fn show_preview_command(params: &[serde_json::Value], ctx: &Rc<Context>) -> 
     ctx.preview.load_preview(crate::common::PreviewComponent {
         path,
         component,
-        include_paths: config.include_paths.clone(),
-        library_paths: config.library_paths.clone(),
         style: config.style.clone().unwrap_or_default(),
     });
     Ok(())
@@ -1037,6 +1029,10 @@ fn get_document_symbols(
             let element_node = root_element.node.as_ref()?;
             let component_node = syntax_nodes::Component::new(element_node.parent()?)?;
             let selection_range = map_node(&component_node.DeclaredIdentifier())?;
+            if c.id.is_empty() {
+                // Symbols with empty names are invalid
+                return None;
+            }
 
             Some(DocumentSymbol {
                 range: map_node(&component_node)?,
@@ -1063,7 +1059,7 @@ fn get_document_symbols(
         }),
         Type::Enumeration(enumeration) => enumeration.node.as_ref().and_then(|node| {
             Some(DocumentSymbol {
-                range: map_node(node.parent().as_ref()?)?,
+                range: map_node(node)?,
                 selection_range: map_node(node)?,
                 name: enumeration.name.clone(),
                 kind: lsp_types::SymbolKind::ENUM,
@@ -1094,15 +1090,7 @@ fn get_document_symbols(
         (!r.is_empty()).then_some(r)
     }
 
-    r.sort_by(|a, b| {
-        if a.range.start.line.cmp(&b.range.start.line) == std::cmp::Ordering::Less {
-            std::cmp::Ordering::Less
-        } else if a.range.start.line.cmp(&b.range.start.line) == std::cmp::Ordering::Equal {
-            a.range.start.character.cmp(&b.range.start.character)
-        } else {
-            std::cmp::Ordering::Greater
-        }
-    });
+    r.sort_by(|a, b| a.range.start.cmp(&b.range.start));
 
     Some(r.into())
 }
@@ -1225,6 +1213,7 @@ pub async fn load_configuration(ctx: &Context) -> Result<()> {
         .await?;
 
     let document_cache = &mut ctx.document_cache.borrow_mut();
+    let mut hide_ui = None;
     for v in r {
         if let Some(o) = v.as_object() {
             if let Some(ip) = o.get("includePaths").and_then(|v| v.as_array()) {
@@ -1248,6 +1237,7 @@ pub async fn load_configuration(ctx: &Context) -> Result<()> {
                     document_cache.documents.compiler_config.style = Some(style.into());
                 }
             }
+            hide_ui = o.get("preview").and_then(|v| v.as_object()?.get("hide_ui")?.as_bool());
         }
     }
 
@@ -1256,13 +1246,13 @@ pub async fn load_configuration(ctx: &Context) -> Result<()> {
     document_cache.documents.import_component("std-widgets.slint", "StyleMetrics", &mut diag).await;
 
     let cc = &document_cache.documents.compiler_config;
-    let empty_string = String::new();
-    ctx.preview.config_changed(
-        cc.style.as_ref().unwrap_or(&empty_string),
-        &cc.include_paths,
-        &cc.library_paths,
-    );
-
+    document_cache.preview_config = PreviewConfig {
+        hide_ui,
+        style: cc.style.clone().unwrap_or_default(),
+        include_paths: cc.include_paths.clone(),
+        library_paths: cc.library_paths.clone(),
+    };
+    ctx.preview.config_changed(document_cache.preview_config.clone());
     Ok(())
 }
 
@@ -1459,6 +1449,33 @@ component Demo {
 
             let first = result.first().unwrap();
             assert_eq!(&first.name, "Demo");
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[test]
+    fn test_document_symbols_no_empty_names() {
+        // issue #3979
+        let (mut dc, uri, _) = loaded_document_cache(
+            r#"import { Button, VerticalBox } from "std-widgets.slint";
+struct Foo {}
+enum Bar {}
+export component Yo { Rectangle {} }
+export component {}
+struct {}
+enum {}
+            "#
+            .into(),
+        );
+        let result =
+            get_document_symbols(&mut dc, &lsp_types::TextDocumentIdentifier { uri }).unwrap();
+
+        if let DocumentSymbolResponse::Nested(result) = result {
+            assert_eq!(result.len(), 3);
+            assert_eq!(result[0].name, "Foo");
+            assert_eq!(result[1].name, "Bar");
+            assert_eq!(result[2].name, "Yo");
         } else {
             unreachable!();
         }

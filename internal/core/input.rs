@@ -524,6 +524,8 @@ pub struct MouseInputState {
     /// The stack of item which contain the mouse cursor (or grab),
     /// along with the last result from the input function
     item_stack: Vec<(ItemWeak, InputEventFilterResult)>,
+    /// Offset to apply to the first item of the stack (used if there is a popup)
+    pub(crate) offset: LogicalPoint,
     /// true if the top item of the stack has the mouse grab
     grabbed: bool,
     delayed: Option<(crate::timers::Timer, MouseEvent)>,
@@ -532,7 +534,7 @@ pub struct MouseInputState {
 
 /// Try to handle the mouse grabber. Return None if the event has been handled, otherwise
 /// return the event that must be handled
-fn handle_mouse_grab(
+pub(crate) fn handle_mouse_grab(
     mouse_event: MouseEvent,
     window_adapter: &Rc<dyn WindowAdapter>,
     mouse_input_state: &mut MouseInputState,
@@ -544,6 +546,8 @@ fn handle_mouse_grab(
     let mut event = mouse_event;
     let mut intercept = false;
     let mut invalid = false;
+
+    event.translate(-mouse_input_state.offset.to_vector());
 
     mouse_input_state.item_stack.retain(|it| {
         if invalid {
@@ -598,7 +602,7 @@ fn handle_mouse_grab(
     None
 }
 
-fn send_exit_events(
+pub(crate) fn send_exit_events(
     old_input_state: &MouseInputState,
     new_input_state: &mut MouseInputState,
     mut pos: Option<LogicalPoint>,
@@ -640,17 +644,8 @@ pub fn process_mouse_input(
     component: ItemTreeRc,
     mouse_event: MouseEvent,
     window_adapter: &Rc<dyn WindowAdapter>,
-    mut mouse_input_state: MouseInputState,
+    mouse_input_state: MouseInputState,
 ) -> MouseInputState {
-    if matches!(mouse_event, MouseEvent::Released { .. }) {
-        mouse_input_state = process_delayed_event(window_adapter, mouse_input_state);
-    }
-
-    let Some(mouse_event) = handle_mouse_grab(mouse_event, window_adapter, &mut mouse_input_state)
-    else {
-        return mouse_input_state;
-    };
-
     let mut result = MouseInputState::default();
     let root = ItemRc::new(component.clone(), 0);
     let r = send_mouse_event_to_item(mouse_event, root, window_adapter, &mut result, false);

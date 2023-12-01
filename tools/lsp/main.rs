@@ -80,16 +80,6 @@ impl PreviewApi for Previewer {
                     path: component.path.to_string_lossy().to_string(),
                     component: component.component,
                     style: component.style.to_string(),
-                    include_paths: component
-                        .include_paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect(),
-                    library_paths: component
-                        .library_paths
-                        .iter()
-                        .map(|(n, p)| (n.clone(), p.to_string_lossy().to_string()))
-                        .collect(),
                 },
             );
         } else {
@@ -101,31 +91,16 @@ impl PreviewApi for Previewer {
         }
     }
 
-    fn config_changed(
-        &self,
-        _style: &str,
-        _include_paths: &[PathBuf],
-        _library_paths: &HashMap<String, PathBuf>,
-    ) {
+    fn config_changed(&self, _config: crate::common::PreviewConfig) {
         if *self.use_external_previewer.borrow() {
             #[cfg(feature = "preview-external")]
             let _ = self.server_notifier.send_notification(
                 "slint/lsp_to_preview".to_string(),
-                crate::common::LspToPreviewMessage::SetConfiguration {
-                    style: _style.to_string(),
-                    include_paths: _include_paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect(),
-                    library_paths: _library_paths
-                        .iter()
-                        .map(|(n, p)| (n.clone(), p.to_string_lossy().to_string()))
-                        .collect(),
-                },
+                crate::common::LspToPreviewMessage::SetConfiguration { config: _config },
             );
         } else {
             #[cfg(feature = "preview-builtin")]
-            preview::config_changed(_style, _include_paths, _library_paths);
+            preview::config_changed(_config);
         }
     }
 
@@ -156,7 +131,7 @@ impl PreviewApi for Previewer {
 
 #[derive(Clone, clap::Parser)]
 #[command(author, version, about, long_about = None)]
-struct Cli {
+pub struct Cli {
     #[arg(
         short = 'I',
         name = "Add include paths for the import statements",
@@ -176,6 +151,10 @@ struct Cli {
     /// Start the preview in full screen mode
     #[arg(long, action)]
     fullscreen: bool,
+
+    /// Hide the preview toolbar
+    #[arg(long, action)]
+    no_toolbar: bool,
 }
 
 enum OutgoingRequest {
@@ -267,9 +246,10 @@ fn main() {
 
     #[cfg(feature = "preview-engine")]
     {
+        let cli_args = args.clone();
         let lsp_thread = std::thread::Builder::new()
             .name("LanguageServer".into())
-            .spawn(|| {
+            .spawn(move || {
                 /// Make sure we quit the event loop even if we panic
                 struct QuitEventLoop;
                 impl Drop for QuitEventLoop {
@@ -279,7 +259,7 @@ fn main() {
                 }
                 let quit_ui_loop = QuitEventLoop;
 
-                let threads = match run_lsp_server() {
+                let threads = match run_lsp_server(args) {
                     Ok(threads) => threads,
                     Err(error) => {
                         eprintln!("Error running LSP server: {}", error);
@@ -292,11 +272,11 @@ fn main() {
             })
             .unwrap();
 
-        preview::start_ui_event_loop();
+        preview::start_ui_event_loop(cli_args);
         lsp_thread.join().unwrap();
     }
     #[cfg(not(feature = "preview-engine"))]
-    match run_lsp_server() {
+    match run_lsp_server(args) {
         Ok(threads) => threads.join().unwrap(),
         Err(error) => {
             eprintln!("Error running LSP server: {}", error);
@@ -304,7 +284,7 @@ fn main() {
     }
 }
 
-pub fn run_lsp_server() -> Result<IoThreads> {
+fn run_lsp_server(args: Cli) -> Result<IoThreads> {
     let (connection, io_threads) = Connection::stdio();
     let (id, params) = connection.initialize_start()?;
 
@@ -313,12 +293,12 @@ pub fn run_lsp_server() -> Result<IoThreads> {
         serde_json::to_value(language::server_initialize_result(&init_param.capabilities))?;
     connection.initialize_finish(id, initialize_result)?;
 
-    main_loop(connection, init_param)?;
+    main_loop(connection, init_param, args)?;
 
     Ok(io_threads)
 }
 
-fn main_loop(connection: Connection, init_param: InitializeParams) -> Result<()> {
+fn main_loop(connection: Connection, init_param: InitializeParams, cli_args: Cli) -> Result<()> {
     let mut rh = RequestHandler::default();
     register_request_handlers(&mut rh);
 
@@ -340,9 +320,8 @@ fn main_loop(connection: Connection, init_param: InitializeParams) -> Result<()>
     let mut compiler_config =
         CompilerConfiguration::new(i_slint_compiler::generator::OutputFormat::Interpreter);
 
-    let cli_args = Cli::parse();
     compiler_config.style =
-        Some(if cli_args.style.is_empty() { "fluent".into() } else { cli_args.style });
+        Some(if cli_args.style.is_empty() { "native".into() } else { cli_args.style });
     compiler_config.include_paths = cli_args.include_paths;
     let preview_notifier = preview.clone();
     compiler_config.open_import_fallback = Some(Rc::new(move |path| {
@@ -502,6 +481,7 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
     Ok(())
 }
 
+#[cfg(feature = "preview-engine")]
 pub async fn send_show_document_to_editor(
     sender: ServerNotifier,
     file: String,

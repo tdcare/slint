@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 import test from 'ava';
-const path = require('node:path');
 
-import { private_api } from '../index'
+import { private_api } from '../index.js'
 
 test('get/set global properties', (t) => {
 
@@ -109,7 +108,7 @@ test('invoke global callback', (t) => {
   t.not(instance, null);
 
   t.throws(() => {
-    instance!.setGlobalCallback("MyGlobal", "great", () => {})
+    instance!.setGlobalCallback("MyGlobal", "great", () => { })
   },
     {
       code: "GenericFailure",
@@ -132,7 +131,7 @@ test('invoke global callback', (t) => {
   });
 
   t.throws(() => {
-    instance!.setGlobalCallback("Global", "bye", () => {})
+    instance!.setGlobalCallback("Global", "bye", () => { })
   },
     {
       code: "GenericFailure",

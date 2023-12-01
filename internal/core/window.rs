@@ -352,6 +352,11 @@ pub struct WindowInner {
 
     /// itemRC will retrieve on wasms
     pub focus_item: RefCell<crate::item_tree::ItemWeak>,
+    /// Don't let ComponentContainers's instantiation change the focus.
+    /// This is a workaround for a recursion when instantiating ComponentContainer because the
+    /// init code for the component might have code that sets the focus, but we don't want that
+    /// for the ComponentContainer
+    pub(crate) prevent_focus_change: Cell<bool>,
     cursor_blinker: RefCell<pin_weak::rc::PinWeak<crate::input::TextCursorBlinker>>,
 
     pinned_fields: Pin<Box<WindowPinnedFields>>,
@@ -410,6 +415,7 @@ impl WindowInner {
             active_popup: Default::default(),
             close_requested: Default::default(),
             click_state: ClickState::default(),
+            prevent_focus_change: Default::default(),
         }
     }
 
@@ -468,47 +474,67 @@ impl WindowInner {
         // handle multiple press release
         event = self.click_state.check_repeat(event);
 
-        let close_popup_after_click = self.close_popup_after_click();
+        let window_adapter = self.window_adapter();
+        let mut mouse_input_state = self.mouse_input_state.take();
+        if matches!(event, MouseEvent::Released { .. }) {
+            mouse_input_state =
+                crate::input::process_delayed_event(&window_adapter, mouse_input_state);
+        }
 
-        let embedded_popup_component =
-            self.active_popup.borrow().as_ref().and_then(|popup| match popup.location {
-                PopupWindowLocation::TopLevel(_) => None,
-                PopupWindowLocation::ChildWindow(coordinates) => {
-                    Some((popup.component.clone(), coordinates))
+        let close_popup_after_click = matches!(event, MouseEvent::Released { .. })
+            && self.close_popup_after_click()
+            && self.active_popup.borrow().is_some();
+
+        mouse_input_state = if let Some(mut event) =
+            crate::input::handle_mouse_grab(event, &window_adapter, &mut mouse_input_state)
+        {
+            let (item_tree, offset) = if let Some(PopupWindow {
+                location: PopupWindowLocation::ChildWindow(coordinates),
+                component,
+                ..
+            }) = self.active_popup.borrow().as_ref()
+            {
+                let geom = ItemTreeRc::borrow_pin(component).as_ref().item_geometry(0);
+                if event
+                    .position()
+                    .map_or(false, |pos| !geom.contains(pos - coordinates.to_vector()))
+                {
+                    (None, LogicalPoint::default())
+                } else {
+                    (Some(component.clone()), *coordinates)
                 }
-            });
+            } else {
+                (self.component.borrow().upgrade(), LogicalPoint::default())
+            };
 
-        let Some(component) = embedded_popup_component.as_ref().map_or_else(
-            || self.component.borrow().upgrade(),
-            |(popup_component, coordinates)| {
-                event.translate(-coordinates.to_vector());
-
-                let geom = ItemTreeRc::borrow_pin(popup_component).as_ref().item_geometry(0);
-                if event.position().map_or(false, |pos| !geom.contains(pos)) {
-                    // close the popup if one press outside the popup
-                    if matches!(event, MouseEvent::Pressed { .. }) && close_popup_after_click {
-                        self.close_popup();
-                    }
-                    return None;
-                }
-
-                Some(popup_component.clone())
-            },
-        ) else {
-            return;
+            if let Some(item_tree) = item_tree {
+                event.translate(-offset.to_vector());
+                let mut new_input_state = crate::input::process_mouse_input(
+                    item_tree,
+                    event,
+                    &window_adapter,
+                    mouse_input_state,
+                );
+                new_input_state.offset = offset;
+                new_input_state
+            } else {
+                // When outside, send exit event
+                let mut new_input_state = MouseInputState::default();
+                crate::input::send_exit_events(
+                    &mouse_input_state,
+                    &mut new_input_state,
+                    event.position(),
+                    &window_adapter,
+                );
+                new_input_state
+            }
+        } else {
+            mouse_input_state
         };
 
-        self.mouse_input_state.set(crate::input::process_mouse_input(
-            component,
-            event,
-            &self.window_adapter(),
-            self.mouse_input_state.take(),
-        ));
+        self.mouse_input_state.set(mouse_input_state);
 
-        if embedded_popup_component.is_some()
-            && close_popup_after_click
-            && matches!(event, MouseEvent::Released { .. })
-        {
+        if close_popup_after_click {
             self.close_popup();
         }
     }
@@ -586,6 +612,9 @@ impl WindowInner {
     /// Sets the focus to the item pointed to by item_ptr. This will remove the focus from any
     /// currently focused item.
     pub fn set_focus_item(&self, focus_item: &ItemRc) {
+        if self.prevent_focus_change.get() {
+            return;
+        }
         let old = self.take_focus_item();
         let new = self.move_focus(focus_item.clone(), next_focus_item);
         let window_adapter = self.window_adapter();
@@ -1301,10 +1330,12 @@ pub mod ffi {
         handle: *const WindowAdapterRcOpaque,
         event_type: crate::input::KeyEventType,
         text: &SharedString,
+        repeat: bool,
     ) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
         window_adapter.window().0.process_key_input(crate::items::KeyEvent {
             text: text.clone(),
+            repeat,
             event_type,
             ..Default::default()
         });

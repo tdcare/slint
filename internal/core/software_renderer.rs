@@ -325,8 +325,8 @@ impl SoftwareRenderer {
     /// The buffer needs to be big enough to contain the window, so its size must be at least
     /// `pixel_stride * height`, or `pixel_stride * width` if the screen is rotated by 90°.
     ///
-    /// Returns the dirty region for this frame, excluding the extra_draw_region,
-    /// in the window frame of reference. It is not affected by the screen rotation.
+    /// Returns the physical dirty region for this frame, excluding the extra_draw_region,
+    /// in the window frame of reference. It affected by the screen rotation.
     pub fn render(&self, buffer: &mut [impl TargetPixel], pixel_stride: usize) -> PhysicalRegion {
         let Some(window) = self.maybe_window_adapter.borrow().as_ref().and_then(|w| w.upgrade())
         else {
@@ -419,7 +419,7 @@ impl SoftwareRenderer {
                     }
                 }
 
-                PhysicalRegion(to_draw)
+                PhysicalRegion(to_draw_tr)
             })
             .unwrap_or_default()
     }
@@ -428,7 +428,7 @@ impl SoftwareRenderer {
     ///
     /// The renderer uses a cache internally and will only render the part of the window
     /// which are dirty, depending on the dirty tracking policy set in [`SoftwareRenderer::new`]
-    /// This function returns the region that was rendered.
+    /// This function returns the physical region that was rendered considering the rotation.
     ///
     /// The [`LineBufferProvider::process_line()`] function will be called for each line and should
     ///  provide a buffer to draw into.
@@ -683,13 +683,13 @@ fn render_window_frame_by_line(
     let dirty_region = scene.dirty_region;
     let to_draw_tr = dirty_region.transformed(rotation);
 
-    debug_assert!(scene.current_line >= to_draw_tr.origin.y_length());
+    debug_assert!(scene.current_line >= dirty_region.origin.y_length());
 
     let mut background_color = TargetPixel::background();
     // FIXME gradient
     TargetPixel::blend(&mut background_color, background.color().into());
 
-    while scene.current_line < to_draw_tr.origin.y_length() + to_draw_tr.size.height_length() {
+    while scene.current_line < dirty_region.origin.y_length() + dirty_region.size.height_length() {
         line_buffer.process_line(
             scene.current_line.get() as usize,
             to_draw_tr.min_x() as usize..to_draw_tr.max_x() as usize,
@@ -768,11 +768,11 @@ fn render_window_frame_by_line(
             },
         );
 
-        if scene.current_line < to_draw_tr.origin.y_length() + to_draw_tr.size.height_length() {
+        if scene.current_line < dirty_region.origin.y_length() + dirty_region.size.height_length() {
             scene.next_line();
         }
     }
-    PhysicalRegion(dirty_region)
+    PhysicalRegion(to_draw_tr)
 }
 
 #[derive(Default)]

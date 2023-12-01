@@ -3,7 +3,67 @@
 # Changelog
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [1.3.2] - 2023-12-01
+
+### General
+
+ - Fixed `accepted` and `edited` callbacks in `LineEdit` not being invoked
+   with Fluent, Cupertino, and Material styles.
+ - Fixed coordinate of events within PopupWindow. (#4036)
+ - Fixed ComboBox not selecting entries. (#4033)
+ - Fixed singleshot timers started via `start(...)` to not stay in running state.
+ - Fluent style: Fixed color of disabled `LineEdit`.
+
+### Slint Language
+
+ - Added `KeyEvent.repeat` to detect repeated key press events.
+
+### LSP
+
+ - Added support for resizing the UI under preview without resizing the window,
+   by providing resize handles and scrollbars.
+ - Close previous PopupWindow before refreshing the preview. (#4035)
+
+### C++
+
+ - Fixed compilation on Windows when cross-compiling (for example when using esp-idf).
+
+## [1.3.1] - 2023-11-28
+
+### General
+
+ - Bump various dependencies.
+ - Fixed `has-hover` and `mouse-cursor` when opening a `PopupWindow`. (#3934)
+ - Fluent style: fixed scrollbar size. (#3939 / #3932)
+ - Skia Vulkan renderer: Fixed crash when resizing windows on X11.
+ - Fixed cursor of LineEdit with right alignment (#4016)
+
+### Slint Language
+
+ - Added `clamp` function that takes a `value`, `minimum` and `maxium` and will return
+   `maximum` if `value > maximum`, `minimum` if `value < minimum` or `value` otherwise.
+ - Throw Slint error when returning no value when one is expected instead of generating invalid code. (#3962)
+ - Fixed compiler panic when a component is called `Window`. (#3916)
+
+### Rust API
+
+ - Implement `std::error::Error` for `LoadImageError`.
+
+### JavaScript API
+
+ - Added `loadSource` function (#3971)
+ - Added `requestRedraw` to Window (#3940)
+
+### C++ API
+
+ - Fixed undefined behavior in `SharedString::end()`
+
+### LSP
+
+ - Fix "recursion detected" panic in the preview with `forward-focus`. (#3950)
+ - Don't expose empty name in the outline, this caused error in vscode. (#3979)
+ - Fix enum ranges in the outline.
+ - Added `--fullscreen` command line option.
 
 ## [1.3.0] - 2023-11-10
 
@@ -1047,3 +1107,5 @@ as well as the [Rust migration guide for the `sixtyfps` crate](api/rs/slint/migr
 [1.2.1]: https://github.com/slint-ui/slint/releases/tag/v1.2.1
 [1.2.2]: https://github.com/slint-ui/slint/releases/tag/v1.2.2
 [1.3.0]: https://github.com/slint-ui/slint/releases/tag/v1.3.0
+[1.3.1]: https://github.com/slint-ui/slint/releases/tag/v1.3.1
+[1.3.2]: https://github.com/slint-ui/slint/releases/tag/v1.3.2

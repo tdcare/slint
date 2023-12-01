@@ -2,7 +2,7 @@
     "name": "slint",
     "displayName": "Slint",
     "description": "Slint Language extension",
-    "version": "1.3.0",
+    "version": "1.3.2",
     "publisher": "Slint",
     "icon": "extension-logo.png",
     "license": "GPL-3.0",
@@ -94,12 +94,18 @@
                     },
                     "description": "The command line arguments passed to the Slint LSP server"
                 },
+                "slint.preview.hide_ui": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Hide the toolbar of the preview"
+                },
                 "slint.preview.style": {
                     "type": "string",
                     "description": "The default style to be used for the preview (eg: 'fluent', 'material', or 'native')"
                 },
                 "slint.preview.providedByEditor": {
                     "type": "boolean",
+                    "default": false,
                     "description": "Instead of letting the Language Server display the preview in a native window, show the preview in an editor tab using web-assembly.  This has no effect for the web extension where the preview is always provided by the editor."
                 },
                 "slint.includePaths": {

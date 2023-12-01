@@ -38,6 +38,7 @@ pub struct ComponentContainer {
     pub width: Property<LogicalLength>,
     pub height: Property<LogicalLength>,
     pub component_factory: Property<ComponentFactory>,
+    pub has_component: Property<bool>,
 
     pub cached_rendering_data: CachedRenderingData,
 
@@ -59,9 +60,15 @@ impl ComponentContainer {
             .evaluate_if_dirty(|| self.component_factory());
 
         let Some(factory) = factory else {
-            // nothing changed!
             return;
         };
+
+        let mut window = None;
+        if let Some(parent) = self.my_component.get().and_then(|x| x.upgrade()) {
+            vtable::VRc::borrow_pin(&parent).as_ref().window_adapter(false, &mut window);
+        }
+        let prevent_focus_change =
+            window.as_ref().map_or(false, |w| w.window().0.prevent_focus_change.replace(true));
 
         let factory_context = FactoryContext {
             parent_item_tree: self.my_component.get().unwrap().clone(),
@@ -69,6 +76,11 @@ impl ComponentContainer {
         };
 
         let product = factory.build(factory_context);
+
+        if let Some(w) = window {
+            w.window().0.prevent_focus_change.set(prevent_focus_change);
+        }
+
         if let Some(item_tree) = product.clone() {
             let item_tree = vtable::VRc::borrow_pin(&item_tree);
             let root_item = item_tree.as_ref().get_item_ref(0);
@@ -101,6 +113,9 @@ impl ComponentContainer {
                 }));
             }
         }
+
+        self.has_component.set(product.is_some());
+
         self.item_tree.replace(product);
     }
 
