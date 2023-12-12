@@ -76,3 +76,32 @@ rustflags = [
     "--cfg",
     'target_has_atomic="ptr"',
 ]
+
+
+profile = "compiler"
+change-id = 115898
+
+[build]
+sanitizers = true
+profiler = true
+
+[target.aarch64-unknown-linux-ohos]
+cc = "/root/slint/scripts/aarch64-unknown-linux-ohos-clang.sh"
+cxx = "/root/slint/scripts/aarch64-unknown-linux-ohos-clang++.sh"
+ar = "/root/ohos-sdk/linux/native/llvm/bin/llvm-ar"
+ranlib = "/root/ohos-sdk/linux/native/llvm/bin/llvm-ranlib"
+linker  = "/root/slint/scripts/aarch64-unknown-linux-ohos-clang.sh"
+
+[target.armv7-unknown-linux-ohos]
+cc = "/root/slint/scripts/armv7-unknown-linux-ohos-clang.sh"
+cxx = "/root/slint/scripts/armv7-unknown-linux-ohos-clang++.sh"
+ar = "/root/ohos-sdk/linux/native/llvm/bin/llvm-ar"
+ranlib = "/root/ohos-sdk/linux/native/llvm/bin/llvm-ranlib"
+linker  = "/root/slint/scripts/armv7-unknown-linux-ohos-clang.sh"
+
+[target.x86_64-unknown-linux-ohos]
+cc = "/root/slint/scripts/x86_64-unknown-linux-ohos-clang.sh"
+cxx = "/root/slint/scripts/x86_64-unknown-linux-ohos-clang++.sh"
+ar = "/root/ohos-sdk/linux/native/llvm/bin/llvm-ar"
+ranlib = "/root/ohos-sdk/linux/native/llvm/bin/llvm-ranlib"
+linker  = "/root/slint/scripts/x86_64-unknown-linux-ohos-clang.sh"
