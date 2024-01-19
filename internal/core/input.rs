@@ -457,7 +457,7 @@ pub enum FocusEvent {
     WindowLostFocus,
 }
 
-/// This state is used to count the clicks in the `click_interval` from the `PLATFORM_INSTANCE`.
+/// This state is used to count the clicks separated by [`crate::platform::Platform::click_interval`]
 #[derive(Default)]
 pub struct ClickState {
     click_count_time_stamp: Cell<Option<crate::animations::Instant>>,
@@ -483,8 +483,8 @@ impl ClickState {
 
                 if let Some(click_count_time_stamp) = self.click_count_time_stamp.get() {
                     if instant_now - click_count_time_stamp
-                        < crate::platform::PLATFORM_INSTANCE
-                            .with(|p| p.get().map(|p| p.click_interval()))
+                        < crate::GLOBAL_CONTEXT
+                            .with(|p| p.get().map(|p| p.platform.click_interval()))
                             .unwrap_or_default()
                         && button == self.click_button.get()
                         && (position - self.click_position.get()).square_length() < 100 as _
@@ -592,14 +592,14 @@ pub(crate) fn handle_mouse_grab(
     if input_result != InputEventResult::GrabMouse {
         mouse_input_state.grabbed = false;
         // Return a move event so that the new position can be registered properly
-        return Some(
+        Some(
             mouse_event
                 .position()
                 .map_or(MouseEvent::Exit, |position| MouseEvent::Moved { position }),
-        );
+        )
+    } else {
+        None
     }
-
-    None
 }
 
 pub(crate) fn send_exit_events(

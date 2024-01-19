@@ -3,6 +3,47 @@
 # Changelog
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### General
+
+- LinuxKMS backend: Added support rendering output rotation via the `SLINT_KMS_ROTATION` environment variable.
+- Winit backend: Fixed `key-released` in `FocusScope` not being invoked when releasing the space bar key.
+- Fix `PopupWindow` close behavior: Close on release when the mouse is on the popup, and close on press when
+  it's outside - to match standard behavior.
+- Fixed focus behavior on click in a TextInput
+- Fixed ListView not updating when model changes (#3125)
+- Fixed TextInput on Plasma/Wayland receiveng many empty events causing selection to be cleared (#4148)
+- Added API to programmatically show a window in fullscreen mode (C++/Rust: `Window::set_fullscreen(bool)`, Node.js: `window.fullscreen`)
+- Added API to keep the event loop alive when the last window is closed (#1499). (Rust: `slint::run_event_loop_until_quit()`; C++: argument to `slint::run_event_loop()`)
+
+### Slint Language
+
+ - Fixed wrong text input in cupertino SpinBox
+ - Fixed SpinBox not being enabled by default
+ - Added focus state to `StandardListView`
+ - Added a `double-clicked` callback in `TouchArea`, which is triggered when a `TouchArea`
+   is clicked twice in rapid succession.
+ - The `pointer-event` callback in `TouchArea` is now triggered on mouse move
+   as well.
+ - Errors are thrown when trying to modify properties that must be known at compile time.
+ - Added `colorize-icon` property to `Button`.
+ - Added `set-selection-offsets(int, int)` to `TextInput`, `LineEdit`, and `TextEdit`.
+ - Fixed property wrongly considered as const if it is modified through an alias (#4241)
+ - Added `Palette` global singleton
+ - Added `Cosmic` style.
+
+### C++
+
+ - Added `ComponentInstance::definition()` getter to retrieve the `ComponentDefinition` for an instance.
+ - Added `slint::VectorModel::clear()` and `slint::VectorModel::set_vector()` to conveniently clear or replace the underlying data.
+
+### LSP
+
+ - Added selection mode to select elements in the preview
+ - Implement code action to add missing import
+ - Fix error when going to the definition of builtin items (#4126)
+
 ## [1.3.2] - 2023-12-01
 
 ### General
@@ -89,6 +130,7 @@ All notable changes to this project are documented in this file.
  - Added `focus-changed-event` callback to `FocusScope`.
  - Added many new easing curves.
  - Added `Spinner`.
+ - Added `Palette` global.
 
 ### JavaScript
 

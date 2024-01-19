@@ -446,6 +446,11 @@ impl Window {
         crate::window::WindowAdapter::set_size(&*self.0.window_adapter(), size);
     }
 
+    /// Set or unset the window to display fullscreen.
+    pub fn set_fullscreen(&self, fullscreen: bool) {
+        self.0.set_fullscreen(fullscreen);
+    }
+
     /// Dispatch a window event to the scene.
     ///
     /// Use this when you're implementing your own backend and want to forward user input events.
@@ -706,8 +711,15 @@ mod weak_handle {
         /// some other instance still holds a strong reference and the current thread
         /// is the thread that created this component.
         /// Otherwise, this function panics.
+        #[track_caller]
         pub fn unwrap(&self) -> T {
-            self.upgrade().unwrap()
+            #[cfg(feature = "std")]
+            if std::thread::current().id() != self.thread {
+                panic!(
+                    "Trying to upgrade a Weak from a different thread than the one it belongs to"
+                );
+            }
+            T::from_inner(self.inner.upgrade().expect("The Weak doesn't hold a valid component"))
         }
 
         /// A helper function to allow creation on `component_factory::Component` from

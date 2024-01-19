@@ -111,6 +111,11 @@ pub extern "C" fn slint_window_properties_get_background(
     *out = wp.background();
 }
 
+#[no_mangle]
+pub extern "C" fn slint_window_properties_get_fullscreen(wp: &WindowProperties) -> bool {
+    wp.fullscreen()
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 /// a Repr(C) variant of slint::platform::LayoutConstraints
@@ -387,17 +392,17 @@ mod software_renderer {
 
     #[cfg(feature = "experimental")]
     #[no_mangle]
-    pub unsafe extern "C" fn slint_software_renderer_set_window_rotation(
+    pub unsafe extern "C" fn slint_software_renderer_set_rendering_rotation(
         r: SoftwareRendererOpaque,
         rotation: i32,
     ) {
-        use i_slint_core::software_renderer::WindowRotation;
+        use i_slint_core::software_renderer::RenderingRotation;
         let renderer = &*(r as *const SoftwareRenderer);
-        renderer.set_window_rotation(match rotation {
-            90 => WindowRotation::Rotate90,
-            180 => WindowRotation::Rotate180,
-            270 => WindowRotation::Rotate270,
-            _ => WindowRotation::NoRotation,
+        renderer.set_rendering_rotation(match rotation {
+            90 => RenderingRotation::Rotate90,
+            180 => RenderingRotation::Rotate180,
+            270 => RenderingRotation::Rotate270,
+            _ => RenderingRotation::NoRotation,
         });
     }
 

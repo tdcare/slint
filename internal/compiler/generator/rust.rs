@@ -213,6 +213,7 @@ pub fn generate(doc: &Document) -> TokenStream {
             #(#resource_symbols)*
             const _THE_SAME_VERSION_MUST_BE_USED_FOR_THE_COMPILER_AND_THE_RUNTIME : slint::#version_check = slint::#version_check;
         }
+        #[allow(unused_imports)]
         pub use #compo_module::{#compo_id #(,#structs_and_enums_ids)* #(,#globals_ids)* #(,#named_exports)*};
         #[allow(unused_imports)]
         pub use slint::{ComponentHandle as _, Global as _, ModelExt as _};
@@ -742,9 +743,10 @@ fn generate_sub_component(
         repeated_element_components.push(rep_inner_component_id);
     }
 
-    for container in component.component_containers.iter() {
+    // Use ids following the real repeaters to piggyback on their forwarding through sub-components!
+    for (idx, container) in component.component_containers.iter().enumerate() {
+        let idx = (component.repeated.len() + idx) as u32;
         let items_index = container.component_container_items_index;
-        let repeater_index = container.component_container_item_tree_index.as_repeater_index();
 
         let embed_item = access_member(
             &llr::PropertyReference::InNativeItem {
@@ -762,19 +764,19 @@ fn generate_sub_component(
         };
 
         repeated_visit_branch.push(quote!(
-            #repeater_index => {
+            #idx => {
                 #ensure_updated
                 #embed_item.visit_children_item(-1, order, visitor)
             }
         ));
         repeated_subtree_ranges.push(quote!(
-            #repeater_index => {
+            #idx => {
                 #ensure_updated
-               #embed_item.subtree_range()
+                #embed_item.subtree_range()
             }
         ));
         repeated_subtree_components.push(quote!(
-            #repeater_index => {
+            #idx => {
                 #ensure_updated
                 if subtree_index == 0 {
                     *result = #embed_item.subtree_component()
@@ -1349,7 +1351,7 @@ fn generate_item_tree(
     sub_tree.tree.visit_in_array(&mut |node, children_offset, parent_index| {
         let parent_index = parent_index as u32;
         let (path, component) = follow_sub_component_path(&sub_tree.root, &node.sub_component_path);
-        if node.repeated {
+        if node.repeated || node.component_container {
             assert_eq!(node.children.len(), 0);
             let mut repeater_index = node.item_index;
             let mut sub_component = &sub_tree.root;
@@ -1416,7 +1418,7 @@ fn generate_item_tree(
                 static ITEM_ARRAY : sp::OnceBox<
                     [vtable::VOffset<#inner_component_id, ItemVTable, vtable::AllowPin>; #item_array_len]
                 > = sp::OnceBox::new();
-                &*ITEM_ARRAY.get_or_init(|| Box::new([#(#item_array),*]))
+                &*ITEM_ARRAY.get_or_init(|| sp::Box::new([#(#item_array),*]))
             }
 
             #window_adapter_functions
@@ -2364,6 +2366,21 @@ fn compile_builtin_function_call(
             quote!(
                 sp::WindowInner::from_pub(#window_adapter_tokens.window()).close_popup()
             )
+        }
+        BuiltinFunction::SetSelectionOffsets => {
+            if let [llr::Expression::PropertyReference(pr), from, to] = arguments {
+                let item = access_member(pr, ctx);
+                let item_rc = access_item_rc(pr, ctx);
+                let window_adapter_tokens = access_window_adapter_field(ctx);
+                let start = compile_expression(from, ctx);
+                let end = compile_expression(to, ctx);
+
+                quote!(
+                    #item.set_selection_offsets(#window_adapter_tokens, #item_rc, #start as i32, #end as i32)
+                )
+            } else {
+                panic!("internal error: invalid args to set-selection-offsets {:?}", arguments)
+            }
         }
         BuiltinFunction::ItemMemberFunction(name) => {
             if let [Expression::PropertyReference(pr)] = arguments {

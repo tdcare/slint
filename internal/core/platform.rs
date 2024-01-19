@@ -13,7 +13,7 @@ pub use crate::renderer::Renderer;
 #[cfg(feature = "software-renderer")]
 pub use crate::software_renderer;
 #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-use crate::unsafe_single_threaded::{thread_local, OnceCell};
+use crate::unsafe_single_threaded::OnceCell;
 pub use crate::window::{LayoutConstraints, WindowAdapter, WindowProperties};
 use crate::SharedString;
 use alloc::boxed::Box;
@@ -62,13 +62,14 @@ pub trait Platform {
         Err(PlatformError::NoEventLoopProvider)
     }
 
-    /// Specify if the event loop should quit quen the last window is closed.
-    /// The default behavior is `true`.
-    /// When this is set to `false`, the event loop must keep running until
-    /// [`slint::quit_event_loop()`](crate::api::quit_event_loop()) is called
     #[doc(hidden)]
-    fn set_event_loop_quit_on_last_window_closed(&self, _quit_on_last_window_closed: bool) {
-        unimplemented!("The backend does not implement event loop quit behaviors")
+    #[deprecated(
+        note = "i-slint-core takes care of closing behavior. Application should call run_event_loop_until_quit"
+    )]
+    /// This is being phased out, see #1499.
+    fn set_event_loop_quit_on_last_window_closed(&self, quit_on_last_window_closed: bool) {
+        assert!(!quit_on_last_window_closed);
+        crate::GLOBAL_CONTEXT.with(|ctx| (*ctx.get().unwrap().window_count.borrow_mut()) += 1);
     }
 
     /// Return an [`EventLoopProxy`] that can be used to send event to the event loop
@@ -102,6 +103,7 @@ pub trait Platform {
     ///
     /// A double click event is a series of two pointer clicks.
     fn click_interval(&self) -> core::time::Duration {
+        // 500ms is the default delay according to https://en.wikipedia.org/wiki/Double-click#Speed_and_timing
         core::time::Duration::from_millis(500)
     }
 
@@ -171,11 +173,6 @@ impl std::convert::From<crate::animations::Instant> for time::Instant {
     }
 }
 
-thread_local! {
-    /// Internal: Singleton of the platform abstraction.
-    pub(crate) static PLATFORM_INSTANCE : once_cell::unsync::OnceCell<Box<dyn Platform>>
-        = once_cell::unsync::OnceCell::new()
-}
 static EVENTLOOP_PROXY: OnceCell<Box<dyn EventLoopProxy + 'static>> = OnceCell::new();
 
 pub(crate) fn event_loop_proxy() -> Option<&'static dyn EventLoopProxy> {
@@ -196,14 +193,17 @@ pub enum SetPlatformError {
 ///
 /// If the platform abstraction was already set this will return `Err`.
 pub fn set_platform(platform: Box<dyn Platform + 'static>) -> Result<(), SetPlatformError> {
-    PLATFORM_INSTANCE.with(|instance| {
+    crate::GLOBAL_CONTEXT.with(|instance| {
         if instance.get().is_some() {
             return Err(SetPlatformError::AlreadySet);
         }
         if let Some(proxy) = platform.new_event_loop_proxy() {
             EVENTLOOP_PROXY.set(proxy).map_err(|_| SetPlatformError::AlreadySet)?
         }
-        instance.set(platform).map_err(|_| SetPlatformError::AlreadySet).unwrap();
+        instance
+            .set(crate::SlintContext { platform, window_count: 0.into() })
+            .map_err(|_| SetPlatformError::AlreadySet)
+            .unwrap();
         Ok(())
     })
 }
@@ -229,8 +229,8 @@ pub fn update_timers_and_animations() {
 /// returns false.
 pub fn duration_until_next_timer_update() -> Option<core::time::Duration> {
     crate::timers::TimerList::next_timeout().map(|timeout| {
-        let duration_since_start = crate::platform::PLATFORM_INSTANCE
-            .with(|p| p.get().map(|p| p.duration_since_start()))
+        let duration_since_start = crate::GLOBAL_CONTEXT
+            .with(|p| p.get().map(|p| p.platform.duration_since_start()))
             .unwrap_or_default();
         core::time::Duration::from_millis(
             timeout.0.saturating_sub(duration_since_start.as_millis() as u64),

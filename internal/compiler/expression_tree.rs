@@ -40,6 +40,7 @@ pub enum BuiltinFunction {
     SetFocusItem,
     ShowPopupWindow,
     ClosePopupWindow,
+    SetSelectionOffsets,
     /// A function that belongs to an item (such as TextInput's select-all function).
     ItemMemberFunction(String),
     /// the "42".to_float()
@@ -134,6 +135,10 @@ impl BuiltinFunction {
                     args: vec![Type::ElementReference],
                 }
             }
+            BuiltinFunction::SetSelectionOffsets => Type::Function {
+                return_type: Box::new(Type::Void),
+                args: vec![Type::ElementReference, Type::Int32, Type::Int32],
+            },
             BuiltinFunction::ItemMemberFunction(..) => Type::Function {
                 return_type: Box::new(Type::Void),
                 args: vec![Type::ElementReference],
@@ -248,6 +253,7 @@ impl BuiltinFunction {
             | BuiltinFunction::ATan => true,
             BuiltinFunction::SetFocusItem => false,
             BuiltinFunction::ShowPopupWindow | BuiltinFunction::ClosePopupWindow => false,
+            BuiltinFunction::SetSelectionOffsets => false,
             BuiltinFunction::ItemMemberFunction(..) => false,
             BuiltinFunction::StringToFloat | BuiltinFunction::StringIsFloat => true,
             BuiltinFunction::ColorBrighter
@@ -301,6 +307,7 @@ impl BuiltinFunction {
             | BuiltinFunction::ATan => true,
             BuiltinFunction::SetFocusItem => false,
             BuiltinFunction::ShowPopupWindow | BuiltinFunction::ClosePopupWindow => false,
+            BuiltinFunction::SetSelectionOffsets => false,
             BuiltinFunction::ItemMemberFunction(..) => false,
             BuiltinFunction::StringToFloat | BuiltinFunction::StringIsFloat => true,
             BuiltinFunction::ColorBrighter
@@ -1282,7 +1289,14 @@ impl Expression {
                 nr.mark_as_set();
                 let mut lookup = nr.element().borrow().lookup_property(nr.name());
                 lookup.is_local_to_component &= ctx.is_local_element(&nr.element());
-                if lookup.is_valid_for_assignment() {
+                if lookup.property_visibility == PropertyVisibility::Constexpr {
+                    ctx.diag.push_error(
+                        "The property must be known at compile time and cannot be changed at runtime"
+                            .into(),
+                        node,
+                    );
+                    false
+                } else if lookup.is_valid_for_assignment() {
                     if !nr
                         .element()
                         .borrow()

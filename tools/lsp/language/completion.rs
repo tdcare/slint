@@ -3,7 +3,9 @@
 
 // cSpell: ignore rfind
 
+use super::component_catalog::all_exported_components;
 use super::DocumentCache;
+use crate::common::ComponentInformation;
 use crate::util::{lookup_current_element_type, map_position, with_lookup_ctx};
 
 #[cfg(target_arch = "wasm32")]
@@ -429,7 +431,7 @@ fn resolve_element_scope(
     if !matches!(element_type, ElementType::Global) {
         result.extend(
             i_slint_compiler::typeregister::reserved_properties()
-                .filter_map(|(k, t)| {
+                .filter_map(|(k, t, _)| {
                     if matches!(t, Type::Function { .. }) {
                         return None;
                     }
@@ -564,6 +566,47 @@ fn add_components_to_import(
     document_cache: &mut DocumentCache,
     mut available_types: HashSet<String>,
     result: &mut Vec<CompletionItem>,
+) {
+    build_import_statements_edits(
+        token,
+        document_cache,
+        &mut |exported_name| {
+            if available_types.contains(exported_name) {
+                false
+            } else {
+                available_types.insert(exported_name.to_string());
+                true
+            }
+        },
+        &mut |exported_name, file, the_import| {
+            result.push(CompletionItem {
+                label: format!("{} (import from \"{}\")", exported_name, file),
+                insert_text: if is_followed_by_brace(token) {
+                    Some(exported_name.to_string())
+                } else {
+                    Some(format!("{} {{$1}}", exported_name))
+                },
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                filter_text: Some(exported_name.to_string()),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(format!("(import from \"{}\")", file)),
+                additional_text_edits: Some(vec![the_import]),
+                ..Default::default()
+            });
+        },
+    );
+}
+
+/// Try to generate `import { XXX } from "foo.slint";` for every component
+///
+/// This is used for auto-completion and also for fixup diagnostics
+///
+/// Call `add_edit` with the component name and file name and TextEdit for every component for which the `filter` callback returns true
+pub fn build_import_statements_edits(
+    token: &SyntaxToken,
+    document_cache: &mut DocumentCache,
+    filter: &mut dyn FnMut(&str) -> bool,
+    add_edit: &mut dyn FnMut(&str, &str, TextEdit),
 ) -> Option<()> {
     // Find out types that can be imported
     let current_file = token.source_file.path().to_owned();
@@ -573,7 +616,8 @@ fn add_components_to_import(
     let mut last = 0u32;
     for import in current_doc.ImportSpecifier() {
         if let Some((loc, file)) = import.ImportIdentifierList().and_then(|list| {
-            let id = list.ImportIdentifier().last()?;
+            let node = list.ImportIdentifier().last()?;
+            let id = crate::util::last_non_ws_token(&node).or_else(|| node.first_token())?;
             Some((
                 map_position(id.source_file()?, id.text_range().end()),
                 import.child_token(SyntaxKind::StringLiteral)?,
@@ -623,61 +667,35 @@ fn add_components_to_import(
         Position::new(map_position(&token.source_file, last.into()).line + 1, 0)
     };
 
-    for file in document_cache.documents.all_files() {
-        let Some(doc) = document_cache.documents.get_document(file) else { continue };
-        let file = if file.starts_with("builtin:/") {
-            match file.file_name() {
-                Some(file) if file == "std-widgets.slint" => "std-widgets.slint".into(),
-                _ => continue,
-            }
-        } else {
-            match lsp_types::Url::make_relative(
-                &current_uri,
-                &lsp_types::Url::from_file_path(file)
-                    .unwrap_or_else(|()| panic!("Cannot parse URL for file '{file:?}'")),
-            ) {
-                Some(file) => file,
-                None => continue,
-            }
+    let exports = {
+        let mut tmp = Vec::new();
+        all_exported_components(
+            document_cache,
+            &mut move |ci: &ComponentInformation| {
+                !filter(&ci.name) || ci.is_global || !ci.is_exported
+            },
+            &mut tmp,
+        );
+        tmp
+    };
+
+    for ci in &exports {
+        let Some(file) = ci.import_file_name(&current_uri) else {
+            continue;
         };
 
-        for (exported_name, ty) in &*doc.exports {
-            if available_types.contains(&exported_name.name) {
-                continue;
-            }
-            if let Some(c) = ty.as_ref().left() {
-                if c.is_global() {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-            available_types.insert(exported_name.name.clone());
-            let the_import = import_locations.get(&file).map_or_else(
-                || {
-                    TextEdit::new(
-                        Range::new(new_import_position, new_import_position),
-                        format!("import {{ {} }} from \"{}\";\n", exported_name.name, file),
-                    )
-                },
-                |pos| TextEdit::new(Range::new(*pos, *pos), format!(", {}", exported_name.name)),
-            );
-            result.push(CompletionItem {
-                label: format!("{} (import from \"{}\")", exported_name.name, file),
-                insert_text: if is_followed_by_brace(token) {
-                    Some(exported_name.name.clone())
-                } else {
-                    Some(format!("{} {{$1}}", exported_name.name))
-                },
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                filter_text: Some(exported_name.name.clone()),
-                kind: Some(CompletionItemKind::CLASS),
-                detail: Some(format!("(import from \"{}\")", file)),
-                additional_text_edits: Some(vec![the_import]),
-                ..Default::default()
-            });
-        }
+        let the_import = import_locations.get(&file).map_or_else(
+            || {
+                TextEdit::new(
+                    Range::new(new_import_position, new_import_position),
+                    format!("import {{ {} }} from \"{}\";\n", ci.name, file),
+                )
+            },
+            |pos| TextEdit::new(Range::new(*pos, *pos), format!(", {}", ci.name)),
+        );
+        add_edit(&ci.name, &file, the_import);
     }
+
     Some(())
 }
 
@@ -987,5 +1005,30 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!res.is_empty());
         assert!(res.iter().all(|ci| ci.insert_text.is_none()));
+    }
+
+    #[test]
+    fn import_completed_component() {
+        let source = r#"
+            import { VerticalBox                 } from "std-widgets.slint";
+
+            export component Test {
+                VerticalBox {
+                    🔺
+                }
+            }
+
+        "#;
+        let res = get_completions(source).unwrap();
+        let about = res.iter().find(|ci| ci.label.starts_with("AboutSlint")).unwrap();
+
+        let additional_edits = about.additional_text_edits.as_ref().unwrap();
+        let edit = additional_edits.first().unwrap();
+
+        assert_eq!(edit.range.start.line, 1);
+        assert_eq!(edit.range.start.character, 32);
+        assert_eq!(edit.range.end.line, 1);
+        assert_eq!(edit.range.end.character, 32);
+        assert_eq!(edit.new_text, ", AboutSlint");
     }
 }

@@ -4,15 +4,16 @@
 // cSpell: ignore descr rfind unindented
 
 mod completion;
+mod component_catalog;
 mod goto;
 mod properties;
 mod semantic_tokens;
 #[cfg(test)]
 mod test;
 
-use crate::common::{PreviewApi, PreviewConfig, Result};
+use crate::common::{ComponentInformation, PreviewApi, PreviewConfig, Result, VersionedUrl};
 use crate::language::properties::find_element_indent;
-use crate::util::{map_node, map_range, map_token, to_lsp_diag};
+use crate::util::{lookup_current_element_type, map_node, map_range, map_token, to_lsp_diag};
 
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_prelude::*;
@@ -21,7 +22,10 @@ use i_slint_compiler::object_tree::ElementRc;
 use i_slint_compiler::parser::{syntax_nodes, NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken};
 use i_slint_compiler::pathutils::clean_path;
 use i_slint_compiler::CompilerConfiguration;
-use i_slint_compiler::{diagnostics::BuildDiagnostics, langtype::Type};
+use i_slint_compiler::{
+    diagnostics::{BuildDiagnostics, SourceFileVersion},
+    langtype::Type,
+};
 use i_slint_compiler::{typeloader::TypeLoader, typeregister::TypeRegister};
 use lsp_types::request::{
     CodeActionRequest, CodeLensRequest, ColorPresentationRequest, Completion, DocumentColor,
@@ -49,7 +53,7 @@ const SHOW_PREVIEW_COMMAND: &str = "slint/showPreview";
 const SET_BINDING_COMMAND: &str = "slint/setBinding";
 
 pub fn uri_to_file(uri: &lsp_types::Url) -> Option<PathBuf> {
-    let Ok(path) = uri.to_file_path() else { return None };
+    let path = uri.to_file_path().ok()?;
     let cleaned_path = clean_path(&path);
     Some(cleaned_path)
 }
@@ -79,14 +83,26 @@ fn create_show_preview_command(
 
 #[cfg(feature = "preview-external")]
 pub fn request_state(ctx: &std::rc::Rc<Context>) {
+    use i_slint_compiler::diagnostics::Spanned;
+
     let cache = ctx.document_cache.borrow();
     let documents = &cache.documents;
 
     for (p, d) in documents.all_file_documents() {
-        let Some(node) = &d.node else {
-            continue;
-        };
-        ctx.preview.set_contents(p, &node.text().to_string());
+        if let Some(node) = &d.node {
+            if p.starts_with("builtin:/") {
+                continue; // The preview knows these, too.
+            }
+            let Ok(url) = Url::from_file_path(p) else {
+                i_slint_core::debug_log!(
+                    "Could not sent contents of file {p:?}: NOT AN URL (request state!)"
+                );
+
+                continue;
+            };
+            let url = VersionedUrl { url, version: node.source_file().and_then(|sf| sf.version()) };
+            ctx.preview.set_contents(&url, &node.text().to_string());
+        }
     }
     ctx.preview.config_changed(cache.preview_config.clone());
     if let Some(c) = ctx.preview.current_component() {
@@ -97,7 +113,6 @@ pub fn request_state(ctx: &std::rc::Rc<Context>) {
 /// A cache of loaded documents
 pub struct DocumentCache {
     pub(crate) documents: TypeLoader,
-    versions: HashMap<Url, i32>,
     preview_config: PreviewConfig,
 }
 
@@ -105,11 +120,13 @@ impl DocumentCache {
     pub fn new(config: CompilerConfiguration) -> Self {
         let documents =
             TypeLoader::new(TypeRegister::builtin(), config, &mut BuildDiagnostics::default());
-        Self { documents, versions: Default::default(), preview_config: Default::default() }
+        Self { documents, preview_config: Default::default() }
     }
 
-    pub fn document_version(&self, target_uri: &lsp_types::Url) -> Option<i32> {
-        self.versions.get(target_uri).cloned()
+    pub fn document_version(&self, target_uri: &lsp_types::Url) -> SourceFileVersion {
+        self.documents
+            .get_document(&uri_to_file(target_uri).unwrap_or_default())
+            .and_then(|doc| doc.node.as_ref()?.source_file.version())
     }
 }
 
@@ -340,7 +357,7 @@ pub fn register_request_handlers(rh: &mut RequestHandler) {
                 && p.parent().map_or(false, |n| n.kind() == SyntaxKind::Element)
             {
                 if let Some(range) = map_node(&p) {
-                    ctx.preview.highlight(uri_to_file(&uri), _off)?;
+                    ctx.preview.highlight(Some(uri), _off)?;
                     return Ok(Some(vec![lsp_types::DocumentHighlight { range, kind: None }]));
                 }
             }
@@ -410,13 +427,17 @@ pub fn show_preview_command(params: &[serde_json::Value], ctx: &Rc<Context>) -> 
     };
     let component =
         params.get(1).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(|v| v.to_string());
-    let path = uri_to_file(&url).unwrap_or_default();
 
     ctx.preview.load_preview(crate::common::PreviewComponent {
-        path,
+        url,
         component,
         style: config.style.clone().unwrap_or_default(),
     });
+
+    // Update known Components
+    let (url, components) = collect_known_components(document_cache, ctx);
+    ctx.preview.report_known_components(url, components);
+
     Ok(())
 }
 
@@ -435,7 +456,7 @@ pub fn query_properties_command(
     )?;
 
     let source_version = if let Some(v) = document_cache.document_version(&text_document_uri) {
-        v
+        Some(v)
     } else {
         return Ok(serde_json::to_value(properties::QueryPropertyResponse::no_element_response(
             text_document_uri.to_string(),
@@ -450,7 +471,7 @@ pub fn query_properties_command(
     } else {
         Ok(serde_json::to_value(properties::QueryPropertyResponse::no_element_response(
             text_document_uri.to_string(),
-            source_version,
+            source_version.unwrap_or(i32::MIN),
         ))
         .expect("Failed to serialize none-element property query result!"))
     }
@@ -630,26 +651,24 @@ pub async fn remove_binding_command(
 pub(crate) async fn reload_document_impl(
     ctx: Option<&Rc<Context>>,
     mut content: String,
-    uri: lsp_types::Url,
-    version: i32,
+    url: lsp_types::Url,
+    version: Option<i32>,
     document_cache: &mut DocumentCache,
 ) -> HashMap<Url, Vec<lsp_types::Diagnostic>> {
-    let Some(path) = uri_to_file(&uri) else { return Default::default() };
+    let Some(path) = uri_to_file(&url) else { return Default::default() };
     if path.extension().map_or(false, |e| e == "rs") {
         content = match i_slint_compiler::lexer::extract_rust_macro(content) {
             Some(content) => content,
             // A rust file without a rust macro, just ignore it
-            None => return [(uri, vec![])].into_iter().collect(),
+            None => return [(url, vec![])].into_iter().collect(),
         };
     }
 
-    document_cache.versions.insert(uri.clone(), version);
-
     if let Some(ctx) = ctx {
-        ctx.preview.set_contents(&path, &content);
+        ctx.preview.set_contents(&VersionedUrl { url, version }, &content);
     }
     let mut diag = BuildDiagnostics::default();
-    document_cache.documents.load_file(&path, &path, content, false, &mut diag).await;
+    document_cache.documents.load_file(&path, version, &path, content, false, &mut diag).await;
 
     // Always provide diagnostics for all files. Empty diagnostics clear any previous ones.
     let mut lsp_diags: HashMap<Url, Vec<lsp_types::Diagnostic>> = core::iter::once(&path)
@@ -672,14 +691,42 @@ pub(crate) async fn reload_document_impl(
     lsp_diags
 }
 
+fn collect_known_components(
+    document_cache: &mut DocumentCache,
+    ctx: &Rc<Context>,
+) -> (Option<VersionedUrl>, Vec<ComponentInformation>) {
+    let mut components = Vec::new();
+    component_catalog::builtin_components(document_cache, &mut components);
+    component_catalog::all_exported_components(
+        document_cache,
+        &mut |ci| ci.is_global,
+        &mut components,
+    );
+
+    components.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let url = ctx.preview.current_component().map(|pc| {
+        let url = pc.url.clone();
+        let file = PathBuf::from(url.to_string());
+        let version = document_cache.document_version(&url);
+
+        component_catalog::file_local_components(document_cache, &file, &mut components);
+
+        VersionedUrl { url, version }
+    });
+
+    (url, components)
+}
+
 pub async fn reload_document(
     ctx: &Rc<Context>,
     content: String,
-    uri: lsp_types::Url,
-    version: i32,
+    url: lsp_types::Url,
+    version: Option<i32>,
     document_cache: &mut DocumentCache,
 ) -> Result<()> {
-    let lsp_diags = reload_document_impl(Some(ctx), content, uri, version, document_cache).await;
+    let lsp_diags =
+        reload_document_impl(Some(ctx), content, url.clone(), version, document_cache).await;
 
     for (uri, diagnostics) in lsp_diags {
         ctx.server_notifier.send_notification(
@@ -687,6 +734,11 @@ pub async fn reload_document(
             PublishDiagnosticsParams { uri, diagnostics, version: None },
         )?;
     }
+
+    // Tell Preview about the Components:
+    let (url, components) = collect_known_components(document_cache, ctx);
+    ctx.preview.report_known_components(url, components);
+
     Ok(())
 }
 
@@ -828,123 +880,61 @@ fn get_code_actions(
     } else if token.kind() == SyntaxKind::Identifier
         && node.kind() == SyntaxKind::QualifiedName
         && node.parent().map(|n| n.kind()) == Some(SyntaxKind::Element)
-        && has_experimental_client_capability(client_capabilities, "snippetTextEdit")
     {
-        let r = map_range(&token.source_file, node.parent().unwrap().text_range());
-        let element = element_at_position(document_cache, &uri, &r.start);
-        let element_indent = element.as_ref().and_then(find_element_indent);
-        let indented_lines = node
-            .parent()
-            .unwrap()
-            .text()
-            .to_string()
-            .lines()
-            .map(|line| if line.is_empty() { line.to_string() } else { format!("    {}", line) })
-            .collect::<Vec<String>>();
-        let edits = vec![TextEdit::new(
-            lsp_types::Range::new(r.start, r.end),
-            format!(
-                "${{0:element}} {{\n{}{}\n}}",
-                element_indent.unwrap_or("".into()),
-                indented_lines.join("\n")
-            ),
-        )];
-        result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
-            title: "Wrap in element".into(),
-            kind: Some(lsp_types::CodeActionKind::REFACTOR),
-            edit: Some(WorkspaceEdit {
-                changes: Some(std::iter::once((uri.clone(), edits)).collect()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }));
-
-        // Collect all normal, repeated, and conditional sub-elements and any
-        // whitespace in between for substituting the parent element with its
-        // sub-elements, dropping its own properties, callbacks etc.
-        fn is_sub_element(kind: SyntaxKind) -> bool {
-            matches!(
-                kind,
-                SyntaxKind::SubElement
-                    | SyntaxKind::RepeatedElement
-                    | SyntaxKind::ConditionalElement
-            )
+        let is_lookup_error = {
+            let global_tr = document_cache.documents.global_type_registry.borrow();
+            let tr = document_cache
+                .documents
+                .get_document(token.source_file.path())
+                .map(|doc| &doc.local_registry)
+                .unwrap_or(&global_tr);
+            lookup_current_element_type(node.clone(), tr).is_none()
+        };
+        if is_lookup_error {
+            // Couldn't lookup the element, there is probably an error. Suggest an edit
+            let text = token.text();
+            completion::build_import_statements_edits(
+                &token,
+                document_cache,
+                &mut |name| name == text,
+                &mut |_name, file, edit| {
+                    result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                        title: format!("Add import from \"{file}\""),
+                        kind: Some(lsp_types::CodeActionKind::QUICKFIX),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(std::iter::once((uri.clone(), vec![edit])).collect()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }))
+                },
+            );
         }
-        let sub_elements = node
-            .parent()
-            .unwrap()
-            .children_with_tokens()
-            .skip_while(|n| !is_sub_element(n.kind()))
-            .filter(|n| match n {
-                NodeOrToken::Node(_) => is_sub_element(n.kind()),
-                NodeOrToken::Token(t) => {
-                    t.kind() == SyntaxKind::Whitespace
-                        && t.next_sibling_or_token().map_or(false, |n| is_sub_element(n.kind()))
-                }
-            })
-            .collect::<Vec<_>>();
 
-        if match component {
-            // A top-level component element can only be removed if it contains
-            // exactly one sub-element (without any condition or assignment)
-            // that can substitute the component element.
-            Some(_) => {
-                sub_elements.len() == 1
-                    && sub_elements
-                        .first()
-                        .and_then(|n| n.as_node().unwrap().first_child_or_token().map(|n| n.kind()))
-                        == Some(SyntaxKind::Element)
-            }
-            // Any other element can be removed in favor of one or more sub-elements.
-            None => sub_elements.iter().any(|n| n.kind() == SyntaxKind::SubElement),
-        } {
-            let unindented_lines = sub_elements
-                .iter()
-                .map(|n| match n {
-                    NodeOrToken::Node(n) => n
-                        .text()
-                        .to_string()
-                        .lines()
-                        .map(|line| line.strip_prefix("    ").unwrap_or(line).to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                    NodeOrToken::Token(t) => {
-                        t.text().strip_suffix("    ").unwrap_or(t.text()).to_string()
-                    }
-                })
+        if has_experimental_client_capability(client_capabilities, "snippetTextEdit") {
+            let r = map_range(&token.source_file, node.parent().unwrap().text_range());
+            let element = element_at_position(document_cache, &uri, &r.start);
+            let element_indent = element.as_ref().and_then(find_element_indent);
+            let indented_lines = node
+                .parent()
+                .unwrap()
+                .text()
+                .to_string()
+                .lines()
+                .map(
+                    |line| if line.is_empty() { line.to_string() } else { format!("    {}", line) },
+                )
                 .collect::<Vec<String>>();
             let edits = vec![TextEdit::new(
                 lsp_types::Range::new(r.start, r.end),
-                unindented_lines.concat(),
+                format!(
+                    "${{0:element}} {{\n{}{}\n}}",
+                    element_indent.unwrap_or("".into()),
+                    indented_lines.join("\n")
+                ),
             )];
             result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
-                title: "Remove element".into(),
-                kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(std::iter::once((uri.clone(), edits)).collect()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }));
-        }
-
-        // We have already checked that the node is a qualified name of an element.
-        // Check whether the element is a direct sub-element of another element
-        // meaning that it can be repeated or made conditional.
-        if node // QualifiedName
-            .parent() // Element
-            .unwrap()
-            .parent()
-            .filter(|n| n.kind() == SyntaxKind::SubElement)
-            .and_then(|p| p.parent())
-            .is_some_and(|n| n.kind() == SyntaxKind::Element)
-        {
-            let edits = vec![TextEdit::new(
-                lsp_types::Range::new(r.start, r.start),
-                "for ${1:name}[index] in ${0:model} : ".to_string(),
-            )];
-            result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
-                title: "Repeat element".into(),
+                title: "Wrap in element".into(),
                 kind: Some(lsp_types::CodeActionKind::REFACTOR),
                 edit: Some(WorkspaceEdit {
                     changes: Some(std::iter::once((uri.clone(), edits)).collect()),
@@ -953,19 +943,113 @@ fn get_code_actions(
                 ..Default::default()
             }));
 
-            let edits = vec![TextEdit::new(
-                lsp_types::Range::new(r.start, r.start),
-                "if ${0:condition} : ".to_string(),
-            )];
-            result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
-                title: "Make conditional".into(),
-                kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+            // Collect all normal, repeated, and conditional sub-elements and any
+            // whitespace in between for substituting the parent element with its
+            // sub-elements, dropping its own properties, callbacks etc.
+            fn is_sub_element(kind: SyntaxKind) -> bool {
+                matches!(
+                    kind,
+                    SyntaxKind::SubElement
+                        | SyntaxKind::RepeatedElement
+                        | SyntaxKind::ConditionalElement
+                )
+            }
+            let sub_elements = node
+                .parent()
+                .unwrap()
+                .children_with_tokens()
+                .skip_while(|n| !is_sub_element(n.kind()))
+                .filter(|n| match n {
+                    NodeOrToken::Node(_) => is_sub_element(n.kind()),
+                    NodeOrToken::Token(t) => {
+                        t.kind() == SyntaxKind::Whitespace
+                            && t.next_sibling_or_token().map_or(false, |n| is_sub_element(n.kind()))
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if match component {
+                // A top-level component element can only be removed if it contains
+                // exactly one sub-element (without any condition or assignment)
+                // that can substitute the component element.
+                Some(_) => {
+                    sub_elements.len() == 1
+                        && sub_elements.first().and_then(|n| {
+                            n.as_node().unwrap().first_child_or_token().map(|n| n.kind())
+                        }) == Some(SyntaxKind::Element)
+                }
+                // Any other element can be removed in favor of one or more sub-elements.
+                None => sub_elements.iter().any(|n| n.kind() == SyntaxKind::SubElement),
+            } {
+                let unindented_lines = sub_elements
+                    .iter()
+                    .map(|n| match n {
+                        NodeOrToken::Node(n) => n
+                            .text()
+                            .to_string()
+                            .lines()
+                            .map(|line| line.strip_prefix("    ").unwrap_or(line).to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        NodeOrToken::Token(t) => {
+                            t.text().strip_suffix("    ").unwrap_or(t.text()).to_string()
+                        }
+                    })
+                    .collect::<Vec<String>>();
+                let edits = vec![TextEdit::new(
+                    lsp_types::Range::new(r.start, r.end),
+                    unindented_lines.concat(),
+                )];
+                result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                    title: "Remove element".into(),
+                    kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            }));
+                }));
+            }
+
+            // We have already checked that the node is a qualified name of an element.
+            // Check whether the element is a direct sub-element of another element
+            // meaning that it can be repeated or made conditional.
+            if node // QualifiedName
+                .parent() // Element
+                .unwrap()
+                .parent()
+                .filter(|n| n.kind() == SyntaxKind::SubElement)
+                .and_then(|p| p.parent())
+                .is_some_and(|n| n.kind() == SyntaxKind::Element)
+            {
+                let edits = vec![TextEdit::new(
+                    lsp_types::Range::new(r.start, r.start),
+                    "for ${1:name}[index] in ${0:model} : ".to_string(),
+                )];
+                result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                    title: "Repeat element".into(),
+                    kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+
+                let edits = vec![TextEdit::new(
+                    lsp_types::Range::new(r.start, r.start),
+                    "if ${0:condition} : ".to_string(),
+                )];
+                result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                    title: "Make conditional".into(),
+                    kind: Some(lsp_types::CodeActionKind::REFACTOR),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+            }
         }
     }
 
@@ -1285,21 +1369,21 @@ mod tests {
 
     #[test]
     fn test_text_document_color_no_color_set() {
-        let (mut dc, url, _) = loaded_document_cache(
+        let (mut dc, uri, _) = loaded_document_cache(
             r#"
             component Main inherits Rectangle { }
             "#
             .into(),
         );
 
-        let result = get_document_color(&mut dc, &lsp_types::TextDocumentIdentifier { uri: url })
+        let result = get_document_color(&mut dc, &lsp_types::TextDocumentIdentifier { uri })
             .expect("Color Vec was returned");
         assert!(result.is_empty());
     }
 
     #[test]
     fn test_text_document_color_rgba_color() {
-        let (mut dc, url, _) = loaded_document_cache(
+        let (mut dc, uri, _) = loaded_document_cache(
             r#"
             component Main inherits Rectangle {
                 background: #1200FF80;
@@ -1308,7 +1392,7 @@ mod tests {
             .into(),
         );
 
-        let result = get_document_color(&mut dc, &lsp_types::TextDocumentIdentifier { uri: url })
+        let result = get_document_color(&mut dc, &lsp_types::TextDocumentIdentifier { uri })
             .expect("Color Vec was returned");
 
         assert_eq!(result.len(), 1);
@@ -1484,7 +1568,7 @@ enum {}
     #[test]
     fn test_code_actions() {
         let (mut dc, url, _) = loaded_document_cache(
-            r#"import { Button, VerticalBox , LineEdit, HorizontalBox} from "std-widgets.slint";
+            r#"import { Button, VerticalBox, HorizontalBox} from "std-widgets.slint";
 
 export component TestWindow inherits Window {
     VerticalBox {
@@ -1705,6 +1789,35 @@ export component TestWindow inherits Window {
                     ..Default::default()
                 })
             ])
+        );
+
+        let line_edit = Position::new(11, 20);
+        let import_pos = lsp_types::Position::new(0, 43);
+        capabilities.experimental = None;
+        assert_eq!(
+            token_descr(&mut dc, &url, &line_edit).and_then(|(token, _)| get_code_actions(
+                &mut dc,
+                token,
+                &capabilities
+            )),
+            Some(vec![CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
+                title: "Add import from \"std-widgets.slint\"".into(),
+                kind: Some(lsp_types::CodeActionKind::QUICKFIX),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(
+                        std::iter::once((
+                            url.clone(),
+                            vec![TextEdit::new(
+                                lsp_types::Range::new(import_pos, import_pos),
+                                ", LineEdit".into()
+                            )]
+                        ))
+                        .collect()
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })])
         );
     }
 }

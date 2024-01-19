@@ -2,21 +2,25 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use anyhow::Context;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::iter::Extend;
 use std::path::{Path, PathBuf};
 
 // cSpell: ignore compat constexpr corelib deps sharedvector pathdata
 
 fn enums(path: &Path) -> anyhow::Result<()> {
-    let mut enums_priv = std::fs::File::create(path.join("slint_enums_internal.h"))
-        .context("Error creating slint_enums_internal.h file")?;
+    let mut enums_priv = BufWriter::new(
+        std::fs::File::create(path.join("slint_enums_internal.h"))
+            .context("Error creating slint_enums_internal.h file")?,
+    );
     writeln!(enums_priv, "#pragma once")?;
     writeln!(enums_priv, "// This file is auto-generated from {}", file!())?;
     writeln!(enums_priv, "#include \"slint_enums.h\"")?;
     writeln!(enums_priv, "namespace slint::cbindgen_private {{")?;
-    let mut enums_pub = std::fs::File::create(path.join("slint_enums.h"))
-        .context("Error creating slint_enums.h file")?;
+    let mut enums_pub = BufWriter::new(
+        std::fs::File::create(path.join("slint_enums.h"))
+            .context("Error creating slint_enums.h file")?,
+    );
     writeln!(enums_pub, "#pragma once")?;
     writeln!(enums_pub, "// This file is auto-generated from {}", file!())?;
     writeln!(enums_pub, "namespace slint {{")?;
@@ -81,14 +85,18 @@ namespace slint::platform::key_codes {{
 }
 
 fn builtin_structs(path: &Path) -> anyhow::Result<()> {
-    let mut structs_pub = std::fs::File::create(path.join("slint_builtin_structs.h"))
-        .context("Error creating slint_builtin_structs.h file")?;
+    let mut structs_pub = BufWriter::new(
+        std::fs::File::create(path.join("slint_builtin_structs.h"))
+            .context("Error creating slint_builtin_structs.h file")?,
+    );
     writeln!(structs_pub, "#pragma once")?;
     writeln!(structs_pub, "// This file is auto-generated from {}", file!())?;
     writeln!(structs_pub, "namespace slint {{")?;
 
-    let mut structs_priv = std::fs::File::create(path.join("slint_builtin_structs_internal.h"))
-        .context("Error creating slint_builtin_structs_internal.h file")?;
+    let mut structs_priv = BufWriter::new(
+        std::fs::File::create(path.join("slint_builtin_structs_internal.h"))
+            .context("Error creating slint_builtin_structs_internal.h file")?,
+    );
     writeln!(structs_priv, "#pragma once")?;
     writeln!(structs_priv, "// This file is auto-generated from {}", file!())?;
     writeln!(structs_priv, "#include \"slint_builtin_structs.h\"")?;
@@ -296,7 +304,6 @@ fn gen_corelib(
 
     // included in generated_public.h
     let public_exported_types = [
-        "TimerMode",
         "RenderingState",
         "SetRenderingNotifierError",
         "GraphicsAPI",
@@ -320,6 +327,8 @@ fn gen_corelib(
         "slint_new_path_events",
         "Property",
         "Slice",
+        "Timer",
+        "TimerMode",
         "PropertyHandleOpaque",
         "Callback",
         "slint_property_listener_scope_evaluate",
@@ -344,6 +353,12 @@ fn gen_corelib(
         "slint_image_load_from_embedded_data",
         "slint_image_from_embedded_textures",
         "slint_image_compare_equal",
+        "slint_timer_start",
+        "slint_timer_singleshot",
+        "slint_timer_destroy",
+        "slint_timer_stop",
+        "slint_timer_restart",
+        "slint_timer_running",
         "Coord",
         "LogicalRect",
         "LogicalPoint",
@@ -402,6 +417,37 @@ fn gen_corelib(
         .generate()
         .context("Unable to generate bindings for slint_properties_internal.h")?
         .write_to_file(include_dir.join("slint_properties_internal.h"));
+
+    // slint_timer_internal.h:
+    let timer_config = {
+        let mut tmp = config.clone();
+        tmp.export.include = vec![
+            "TimerMode",
+            "slint_timer_start",
+            "slint_timer_singleshot",
+            "slint_timer_destroy",
+            "slint_timer_stop",
+            "slint_timer_restart",
+            "slint_timer_running",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        tmp.export.exclude = config
+            .export
+            .exclude
+            .iter()
+            .filter(|exclusion| !tmp.export.include.iter().any(|inclusion| inclusion == *exclusion))
+            .cloned()
+            .collect();
+        tmp
+    };
+    cbindgen::Builder::new()
+        .with_config(timer_config)
+        .with_src(crate_dir.join("timers.rs"))
+        .generate()
+        .context("Unable to generate bindings for slint_timer_internal.h")?
+        .write_to_file(include_dir.join("slint_timer_internal.h"));
 
     for (rust_types, extra_excluded_types, internal_header, prelude) in [
         (
@@ -558,7 +604,6 @@ fn gen_corelib(
 
     cbindgen::Builder::new()
         .with_config(public_config)
-        .with_src(crate_dir.join("timers.rs"))
         .with_src(crate_dir.join("graphics.rs"))
         .with_src(crate_dir.join("window.rs"))
         .with_src(crate_dir.join("api.rs"))
@@ -639,6 +684,7 @@ fn gen_corelib(
         .with_include("slint_generated_public.h")
         .with_include("slint_enums_internal.h")
         .with_include("slint_point.h")
+        .with_include("slint_timer.h")
         .with_include("slint_builtin_structs_internal.h")
         .with_after_include(
             r"
@@ -692,6 +738,7 @@ fn gen_backend_qt(
         "NativeTabWidget",
         "NativeTab",
         "NativeStyleMetrics",
+        "NativePalette",
     ];
 
     config.export.include = items.iter().map(|x| x.to_string()).collect();
@@ -701,6 +748,11 @@ fn gen_backend_qt(
         "NativeStyleMetrics".to_owned(),
         "    inline explicit NativeStyleMetrics(void* = nullptr); inline ~NativeStyleMetrics();"
             .to_owned(),
+    );
+
+    config.export.body.insert(
+        "NativePalette".to_owned(),
+        "    inline explicit NativePalette(void* = nullptr); inline ~NativePalette();".to_owned(),
     );
 
     let mut crate_dir = root_dir.to_owned();

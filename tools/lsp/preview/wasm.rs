@@ -4,14 +4,17 @@
 //! This wasm library can be loaded from JS to load and display the content of .slint files
 #![cfg(target_arch = "wasm32")]
 
-use std::{cell::RefCell, future::Future, path::PathBuf, pin::Pin, rc::Rc};
+use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc, rc::Weak};
 
 use wasm_bindgen::prelude::*;
 
+use i_slint_compiler::object_tree::{ElementRc, ElementWeak};
+use i_slint_core::lengths::LogicalRect;
+use lsp_types::Url;
 use slint::VecModel;
-use slint_interpreter::ComponentHandle;
+use slint_interpreter::{highlight::ComponentPositions, ComponentHandle, ComponentInstance};
 
-use crate::{common::PreviewComponent, lsp_ext::Health};
+use crate::{common::ComponentInformation, lsp_ext::Health};
 
 #[wasm_bindgen(typescript_custom_section)]
 const CALLBACK_FUNCTION_SECTION: &'static str = r#"
@@ -44,8 +47,41 @@ struct PreviewState {
     handle: Rc<RefCell<Option<slint_interpreter::ComponentInstance>>>,
     lsp_notifier: Option<SignalLspFunction>,
     resource_url_mapper: Option<ResourceUrlMapperFunction>,
+    selected_element: Option<ElementWeak>,
 }
 thread_local! {static PREVIEW_STATE: std::cell::RefCell<PreviewState> = Default::default();}
+
+pub fn selected_element() -> Option<ElementRc> {
+    PREVIEW_STATE.with(move |preview_state| {
+        let preview_state = preview_state.borrow();
+        let Some(weak) = &preview_state.selected_element else {
+            return None;
+        };
+        Weak::upgrade(&weak)
+    })
+}
+
+pub fn component_instance() -> Option<ComponentInstance> {
+    PREVIEW_STATE.with(move |preview_state| {
+        preview_state.borrow().handle.borrow().as_ref().map(|ci| ci.clone_strong())
+    })
+}
+
+pub fn set_selected_element(
+    element_position: Option<(&ElementRc, LogicalRect)>,
+    positions: ComponentPositions,
+) {
+    PREVIEW_STATE.with(move |preview_state| {
+        let mut preview_state = preview_state.borrow_mut();
+        if let Some((e, _)) = element_position.as_ref() {
+            preview_state.selected_element = Some(Rc::downgrade(e));
+        } else {
+            preview_state.selected_element = None;
+        }
+
+        super::set_selections(preview_state.ui.as_ref(), element_position, positions);
+    })
+}
 
 #[wasm_bindgen]
 pub struct PreviewConnector {}
@@ -77,7 +113,6 @@ impl PreviewConnector {
                     } else {
                         match super::ui::create_ui(style) {
                             Ok(ui) => {
-                                ui.on_show_document(|url, line, column| ask_editor_to_show_document(url.as_str().to_string(), line as u32, column as u32, line as u32, column as u32));
                                 preview_state.borrow_mut().ui = Some(ui);
                                 resolve.take().call1(&JsValue::UNDEFINED,
                                     &JsValue::from(Self { })).unwrap_throw()
@@ -121,21 +156,24 @@ impl PreviewConnector {
         let message: M = serde_wasm_bindgen::from_value(value)
             .map_err(|e| -> JsValue { format!("{e:?}").into() })?;
         match message {
-            M::SetContents { path, contents } => {
-                super::set_contents(&PathBuf::from(&path), contents);
+            M::SetContents { url, contents } => {
+                super::set_contents(&url, contents);
                 Ok(())
             }
             M::SetConfiguration { config } => {
                 super::config_changed(config);
                 Ok(())
             }
-            M::ShowPreview { path, component, style } => {
-                let pc = PreviewComponent { path: PathBuf::from(path), component, style };
+            M::ShowPreview(pc) => {
                 super::load_preview(pc);
                 Ok(())
             }
-            M::HighlightFromEditor { path, offset } => {
-                super::highlight(&path.map(PathBuf::from), offset);
+            M::HighlightFromEditor { url, offset } => {
+                super::highlight(url, offset);
+                Ok(())
+            }
+            M::KnownComponents { url, components } => {
+                super::known_components(&url, components);
                 Ok(())
             }
         }
@@ -205,19 +243,6 @@ pub fn run_in_ui_thread<F: Future<Output = ()> + 'static>(
     i_slint_core::future::spawn_local(create_future()).unwrap();
 }
 
-pub fn configure_design_mode(enabled: bool) {
-    slint::invoke_from_event_loop(move || {
-        PREVIEW_STATE.with(|preview_state| {
-            let preview_state = preview_state.borrow();
-            let handle = preview_state.handle.borrow();
-            if let Some(handle) = &*handle {
-                super::configure_handle_for_design_mode(&handle, enabled);
-            }
-        })
-    })
-    .unwrap();
-}
-
 pub fn resource_url_mapper(
 ) -> Option<Rc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>>>>>> {
     let callback = PREVIEW_STATE.with(|preview_state| {
@@ -243,6 +268,15 @@ pub fn send_message_to_lsp(message: crate::common::PreviewToLspMessage) {
             let callback = js_sys::Function::from((*callback).clone());
             let value = serde_wasm_bindgen::to_value(&message).unwrap();
             let _ = callback.call1(&JsValue::UNDEFINED, &value);
+        }
+    })
+}
+
+pub fn set_known_components(known_components: Vec<ComponentInformation>) {
+    PREVIEW_STATE.with(|preview_state| {
+        let preview_state = preview_state.borrow();
+        if let Some(ui) = &preview_state.ui {
+            crate::preview::ui::ui_set_known_components(ui, &known_components)
         }
     })
 }
@@ -322,48 +356,43 @@ pub fn notify_diagnostics(diagnostics: &[slint_interpreter::Diagnostic]) -> Opti
     Some(())
 }
 
-pub fn ask_editor_to_show_document(
-    file: String,
-    start_line: u32,
-    start_column: u32,
-    end_line: u32,
-    end_column: u32,
-) {
-    send_message_to_lsp(crate::common::PreviewToLspMessage::ShowDocument {
-        file,
-        start_line,
-        start_column,
-        end_line,
-        end_column,
-    })
+pub fn ask_editor_to_show_document(file: String, selection: lsp_types::Range) {
+    send_message_to_lsp(crate::common::PreviewToLspMessage::ShowDocument { file, selection })
 }
 
-pub fn update_preview_area(compiled: slint_interpreter::ComponentDefinition, design_mode: bool) {
+pub fn update_preview_area(compiled: Option<slint_interpreter::ComponentDefinition>) {
     PREVIEW_STATE.with(|preview_state| {
-        let preview_state = preview_state.borrow_mut();
+        if let Some(compiled) = compiled {
+            let preview_state = preview_state.borrow_mut();
 
-        let shared_handle = preview_state.handle.clone();
+            let shared_handle = preview_state.handle.clone();
 
-        super::set_preview_factory(
-            preview_state.ui.as_ref().unwrap(),
-            compiled,
-            Box::new(move |instance| {
-                shared_handle.replace(Some(instance));
-            }),
-            design_mode,
-        );
+            let ui = preview_state.ui.as_ref().unwrap();
+            super::set_preview_factory(
+                ui,
+                compiled,
+                Box::new(move |instance| {
+                    shared_handle.replace(Some(instance));
+                }),
+            );
+            super::reset_selections(ui);
+        }
     })
 }
 
-pub fn update_highlight(path: PathBuf, offset: u32) {
+pub fn update_highlight(url: Option<Url>, offset: u32) {
     slint::invoke_from_event_loop(move || {
-        PREVIEW_STATE.with(|preview_state| {
+        let handle = PREVIEW_STATE.with(|preview_state| {
             let preview_state = preview_state.borrow();
-            let handle = preview_state.handle.borrow();
-            if let Some(handle) = &*handle {
-                handle.highlight(path.to_path_buf(), offset);
-            }
-        })
+            let result = preview_state.handle.borrow().as_ref().map(|h| h.clone_strong());
+            result
+        });
+
+        if let Some(handle) = handle {
+            let path = url.as_ref().map(|u| u.to_string().into()).unwrap_or_default();
+            let element_positions = handle.component_positions(path, offset);
+            set_selected_element(None, element_positions);
+        }
     })
     .unwrap();
 }

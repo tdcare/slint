@@ -1,8 +1,9 @@
 <!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: MIT -->
-# Generated code
+# Generated Code
 
-The Slint compiler called by the build system will generate a header file for the root `.slint`
-file. This header file will contain a `class` with the same name as the root
+The Slint compiler [called by the build system](cmake_reference.md#slint_target_sources)
+will generate a header file for the root `.slint` file.
+This header file will contain a `class` with the same name as the root
 component.
 
 This class will have the following public member functions:
@@ -45,7 +46,7 @@ by a `std::vector<T>`.
 Let's assume we've this code in our `.slint` file:
 
 ```slint,no-preview
-component SampleComponent inherits Window {
+export component SampleComponent inherits Window {
     in-out property<int> counter;
     in-out property<string> user_name;
     callback hello;

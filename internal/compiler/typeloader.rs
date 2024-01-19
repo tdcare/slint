@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::diagnostics::{BuildDiagnostics, Spanned};
+use crate::diagnostics::{BuildDiagnostics, SourceFileVersion, Spanned};
 use crate::object_tree::{self, Document, ExportedName, Exports};
 use crate::parser::{syntax_nodes, NodeOrToken, SyntaxKind, SyntaxToken};
 use crate::typeregister::TypeRegister;
@@ -140,6 +140,7 @@ impl TypeLoader {
         )
         .await
     }
+
     fn load_dependencies_recursively_impl<'a: 'b, 'b>(
         state: &'a RefCell<BorrowedTypeLoader<'a>>,
         doc: &'b syntax_nodes::Document,
@@ -379,6 +380,7 @@ impl TypeLoader {
                 Self::load_file_impl(
                     state,
                     &path_canon,
+                    None,
                     &path_canon,
                     source,
                     builtin.is_some(),
@@ -431,6 +433,7 @@ impl TypeLoader {
     pub async fn load_file(
         &mut self,
         path: &Path,
+        version: SourceFileVersion,
         source_path: &Path,
         source_code: String,
         is_builtin: bool,
@@ -440,6 +443,7 @@ impl TypeLoader {
         Self::load_file_impl(
             &state,
             path,
+            version,
             source_path,
             source_code,
             is_builtin,
@@ -451,13 +455,15 @@ impl TypeLoader {
     async fn load_file_impl<'a>(
         state: &'a RefCell<BorrowedTypeLoader<'a>>,
         path: &Path,
+        version: SourceFileVersion,
         source_path: &Path,
         source_code: String,
         is_builtin: bool,
         import_stack: &HashSet<PathBuf>,
     ) {
         let dependency_doc: syntax_nodes::Document =
-            crate::parser::parse(source_code, Some(source_path), state.borrow_mut().diag).into();
+            crate::parser::parse(source_code, Some(source_path), version, state.borrow_mut().diag)
+                .into();
 
         let dependency_registry =
             Rc::new(RefCell::new(TypeRegister::new(&state.borrow().tl.global_type_registry)));
@@ -704,22 +710,19 @@ fn get_native_style(all_loaded_files: &mut Vec<PathBuf>) -> String {
 pub fn base_directory(referencing_file: &Path) -> PathBuf {
     if referencing_file.extension().map_or(false, |e| e == "rs") {
         // For .rs file, this is a rust macro, and rust macro locates the file relative to the CARGO_MANIFEST_DIR which is the directory that has a Cargo.toml file.
-        let mut candidate = crate::pathutils::dirname(referencing_file);
-        let mut previous_candidate = referencing_file.to_path_buf();
+        let mut candidate = referencing_file;
         loop {
-            if candidate == previous_candidate {
-                return crate::pathutils::dirname(referencing_file);
-            }
-            previous_candidate = candidate;
-            candidate = crate::pathutils::dirname(&previous_candidate);
+            candidate =
+                if let Some(c) = candidate.parent() { c } else { break referencing_file.parent() };
 
             if candidate.join("Cargo.toml").exists() {
-                return candidate.to_path_buf();
+                break Some(candidate);
             }
         }
     } else {
-        crate::pathutils::dirname(referencing_file)
+        referencing_file.parent()
     }
+    .map_or_else(Default::default, |p| p.to_path_buf())
 }
 
 #[test]
@@ -802,7 +805,9 @@ fn test_dependency_loading_from_rust() {
     ));
 
     assert!(!test_diags.has_error());
+    assert!(test_diags.is_empty()); // also no warnings
     assert!(!build_diagnostics.has_error());
+    assert!(build_diagnostics.is_empty()); // also no warnings
     assert!(foreign_imports.is_empty());
 }
 
@@ -833,6 +838,7 @@ X := XX {}
 "#
         .into(),
         Some(std::path::Path::new("HELLO")),
+        None,
         &mut test_diags,
     );
 
@@ -866,6 +872,7 @@ component Foo { XX {} }
 "#
         .into(),
         Some(std::path::Path::new("HELLO")),
+        None,
         &mut test_diags,
     );
 
@@ -1004,6 +1011,7 @@ import { LibraryHelperType } from "@libdir/library_helper_type.slint";
 "#
         .into(),
         Some(std::path::Path::new("HELLO")),
+        None,
         &mut test_diags,
     );
 
@@ -1048,6 +1056,7 @@ import { E } from "@unknown/lib.slint";
 "#
         .into(),
         Some(std::path::Path::new("HELLO")),
+        None,
         &mut test_diags,
     );
 

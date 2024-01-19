@@ -10,13 +10,14 @@ export component Button {
     in property <bool> primary;
     in property <bool> enabled <=> i-touch-area.enabled;
     in property <bool> checkable;
+    in property <bool> colorize-icon;
     out property <bool> has-focus: i-focus-scope.has-focus;
     out property <bool> pressed: self.enabled && i-touch-area.pressed;
     in-out property <bool> checked;
 
     callback clicked;
 
-    private property <brush> text-color: primary || checked ? FluentPalette.on-accent : FluentPalette.on-surface;
+    private property <brush> text-color: primary || checked ? FluentPalette.accent-foreground : FluentPalette.control-foreground;
 
     min-width: max(32px, i-layout.min-width);
     min-height: max(32px, i-layout.min-height);
@@ -30,26 +31,26 @@ export component Button {
         disabled when !root.enabled : {
             i-background.background: root.primary || root.checked ? FluentPalette.accent-disabled : FluentPalette.control-disabled;
             i-border.border-color: root.primary || root.checked ? transparent : FluentPalette.border;
-            root.text-color: root.primary || root.checked ? FluentPalette.text-on-accent-disabled : FluentPalette.text-disabled;
+            root.text-color: root.primary || root.checked ? FluentPalette.text-accent-foreground-disabled : FluentPalette.text-disabled;
         }
         pressed when root.pressed : {
-            i-background.background: root.primary || root.checked ? FluentPalette.accent-tertiary : FluentPalette.control-tertiary;
+            i-background.background: root.primary || root.checked ? FluentPalette.tertiary-accent-background : FluentPalette.control-tertiary;
             i-border.border-color: FluentPalette.border;
-            root.text-color: root.primary || root.checked ? FluentPalette.text-on-accent-secondary : FluentPalette.text-secondary;
+            root.text-color: root.primary || root.checked ? FluentPalette.text-accent-foreground-secondary : FluentPalette.text-secondary;
         }
         hover when i-touch-area.has-hover : {
-            i-background.background: root.primary || root.checked ? FluentPalette.accent-secondary : FluentPalette.control-secondary;
+            i-background.background: root.primary || root.checked ? FluentPalette.secondary-accent-background : FluentPalette.control-secondary;
         }
         checked when root.checked : {
-            i-background.background: FluentPalette.accent;
+            i-background.background: FluentPalette.accent-background;
             i-border.border-color: FluentPalette.accent-control-border;
-            root.text-color: FluentPalette.on-accent;
+            root.text-color: FluentPalette.accent-foreground;
         }
     ]
 
     i-background := Rectangle {
         border-radius: 4px;
-        background: root.primary ? FluentPalette.accent : FluentPalette.surface;
+        background: root.primary ? FluentPalette.accent-background : FluentPalette.control-background;
 
         animate background, border-color { duration: 150ms; }
 
@@ -71,6 +72,7 @@ export component Button {
                 y: (parent.height - self.height) / 2;
                 source <=> root.icon;
                 width: 20px;
+                colorize: root.colorize-icon ? root.text-color : transparent;
             }
 
             if (root.text != ""): Text {

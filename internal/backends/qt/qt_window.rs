@@ -145,7 +145,7 @@ cpp! {{
             if (auto p = dynamic_cast<const SlintWidget*>(parent())) {
                 void *parent_window = p->rust_window;
                 bool close_popup = rust!(Slint_mouseReleaseEventPopup [parent_window: &QtWindow as "void*"] -> bool as "bool" {
-                    parent_window.close_popup_after_click()
+                    parent_window.close_popup_on_click()
                 });
                 if (close_popup) {
                     parent_of_popup_to_close = parent_window;
@@ -438,14 +438,16 @@ fn into_qbrush(
             })
         }
         i_slint_core::Brush::LinearGradient(g) => {
-            let (start, end) = i_slint_core::graphics::line_for_angle(g.angle());
+            let (start, end) = i_slint_core::graphics::line_for_angle(
+                g.angle(),
+                [width as f32, height as f32].into(),
+            );
             let p1 = qttypes::QPointF { x: start.x as _, y: start.y as _ };
             let p2 = qttypes::QPointF { x: end.x as _, y: end.y as _ };
             cpp_class!(unsafe struct QLinearGradient as "QLinearGradient");
             let mut qlg = cpp! {
                 unsafe [p1 as "QPointF", p2 as "QPointF"] -> QLinearGradient as "QLinearGradient" {
                     QLinearGradient qlg(p1, p2);
-                    qlg.setCoordinateMode(QGradient::ObjectMode);
                     return qlg;
                 }
             };
@@ -1375,7 +1377,18 @@ impl QtItemRenderer<'_> {
     }
 }
 
-cpp_class!(pub(crate) unsafe struct QWidgetPtr as "std::unique_ptr<QWidget>");
+cpp! {{
+    struct QWidgetDeleteLater
+    {
+        void operator()(QWidget *widget_ptr)
+        {
+            widget_ptr->hide();
+            widget_ptr->deleteLater();
+        }
+    };
+}}
+
+cpp_class!(pub(crate) unsafe struct QWidgetPtr as "std::unique_ptr<QWidget, QWidgetDeleteLater>");
 
 pub struct QtWindow {
     widget_ptr: QWidgetPtr,
@@ -1395,9 +1408,9 @@ impl QtWindow {
     pub fn new() -> Rc<Self> {
         let rc = Rc::new_cyclic(|self_weak| {
             let window_ptr = self_weak.clone().into_raw();
-            let widget_ptr = cpp! {unsafe [window_ptr as "void*"] -> QWidgetPtr as "std::unique_ptr<QWidget>" {
+            let widget_ptr = cpp! {unsafe [window_ptr as "void*"] -> QWidgetPtr as "std::unique_ptr<QWidget, QWidgetDeleteLater>" {
                 ensure_initialized(true);
-                auto widget = std::make_unique<SlintWidget>();
+                auto widget = std::unique_ptr<SlintWidget, QWidgetDeleteLater>(new SlintWidget, QWidgetDeleteLater());
 
                 auto accessibility = new Slint_accessible_window(widget.get(), window_ptr);
                 QAccessible::registerAccessibleInterface(accessibility);
@@ -1502,8 +1515,8 @@ impl QtWindow {
         WindowInner::from_pub(&self.window).close_popup();
     }
 
-    fn close_popup_after_click(&self) -> bool {
-        WindowInner::from_pub(&self.window).close_popup_after_click()
+    fn close_popup_on_click(&self) -> bool {
+        WindowInner::from_pub(&self.window).close_popup_on_click()
     }
 }
 
@@ -1519,11 +1532,7 @@ impl WindowAdapter for QtWindow {
     fn set_visible(&self, visible: bool) -> Result<(), PlatformError> {
         if visible {
             let widget_ptr = self.widget_ptr();
-            let fullscreen = std::env::var("SLINT_FULLSCREEN").is_ok();
-            cpp! {unsafe [widget_ptr as "QWidget*", fullscreen as "bool"] {
-                if (fullscreen) {
-                    widget_ptr->setWindowState(Qt::WindowFullScreen);
-                }
+            cpp! {unsafe [widget_ptr as "QWidget*"] {
                 widget_ptr->show();
             }};
             let qt_platform_name = cpp! {unsafe [] -> qttypes::QString as "QString" {
@@ -1647,12 +1656,27 @@ impl WindowAdapter for QtWindow {
             }
         };
 
-        cpp! {unsafe [widget_ptr as "QWidget*",  title as "QString", size as "QSize", background as "QBrush", no_frame as "bool", always_on_top as "bool"] {
+        let fullscreen: bool = properties.fullscreen();
+
+        cpp! {unsafe [widget_ptr as "QWidget*",  title as "QString", size as "QSize", background as "QBrush", no_frame as "bool", always_on_top as "bool",
+                      fullscreen as "bool"] {
             if (size != widget_ptr->size()) {
                 widget_ptr->resize(size.expandedTo({1, 1}));
             }
             widget_ptr->setWindowFlag(Qt::FramelessWindowHint, no_frame);
             widget_ptr->setWindowFlag(Qt::WindowStaysOnTopHint, always_on_top);
+
+            {
+                // Depending on the request, we either set or clear the fullscreen bits.
+                // See also: https://doc.qt.io/qt-6/qt.html#WindowState-enum
+                const auto state = widget_ptr->windowState();
+                if (fullscreen) {
+                    widget_ptr->setWindowState(state | Qt::WindowFullScreen);
+                } else {
+                    widget_ptr->setWindowState(state & ~Qt::WindowFullScreen);
+                }
+            }
+
             widget_ptr->setWindowTitle(title);
             auto pal = widget_ptr->palette();
 

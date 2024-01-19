@@ -75,7 +75,8 @@ pub type NativeWidgets =
 #[rustfmt::skip]
 pub type NativeGlobals =
     (qt_widgets::NativeStyleMetrics,
-        ());
+    (qt_widgets::NativePalette,
+        ()));
 
 #[cfg(no_qt)]
 mod native_style_metrics_stub {
@@ -95,6 +96,17 @@ mod native_style_metrics_stub {
     impl const_field_offset::PinnedDrop for NativeStyleMetrics {
         fn drop(self: Pin<&mut Self>) {}
     }
+
+    /// cbindgen:ignore
+    #[repr(C)]
+    #[derive(FieldOffsets, SlintElement)]
+    #[pin]
+    #[pin_drop]
+    pub struct NativePalette {}
+
+    impl const_field_offset::PinnedDrop for NativePalette {
+        fn drop(self: Pin<&mut Self>) {}
+    }
 }
 
 pub mod native_widgets {
@@ -103,6 +115,9 @@ pub mod native_widgets {
 
     #[cfg(no_qt)]
     pub use super::native_style_metrics_stub::NativeStyleMetrics;
+
+    #[cfg(no_qt)]
+    pub use super::native_style_metrics_stub::NativePalette;
 }
 
 #[cfg(no_qt)]
@@ -139,18 +154,6 @@ impl i_slint_core::platform::Platform for Backend {
         {
             Ok(qt_window::QtWindow::new())
         }
-    }
-
-    fn set_event_loop_quit_on_last_window_closed(&self, _quit_on_last_window_closed: bool) {
-        #[cfg(not(no_qt))]
-        {
-            // Schedule any timers with Qt that were set up before this event loop start.
-            use cpp::cpp;
-            cpp! {unsafe [_quit_on_last_window_closed as "bool"] {
-                ensure_initialized(true);
-                qApp->setQuitOnLastWindowClosed(_quit_on_last_window_closed);
-            } }
-        };
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
@@ -266,6 +269,8 @@ impl i_slint_core::platform::Platform for Backend {
         let text: qttypes::QString = _text.into();
         cpp! {unsafe [text as "QString", is_selection as "bool"] {
             ensure_initialized();
+            if (is_selection && !QGuiApplication::clipboard()->supportsSelection())
+                return;
             QGuiApplication::clipboard()->setText(text, is_selection ? QClipboard::Selection : QClipboard::Clipboard);
         } }
     }
@@ -280,6 +285,8 @@ impl i_slint_core::platform::Platform for Backend {
         };
         let has_text = cpp! {unsafe [is_selection as "bool"] -> bool as "bool" {
             ensure_initialized();
+            if (is_selection && !QGuiApplication::clipboard()->supportsSelection())
+                return false;
             return QGuiApplication::clipboard()->mimeData(is_selection ? QClipboard::Selection : QClipboard::Clipboard)->hasText();
         } };
         if has_text {

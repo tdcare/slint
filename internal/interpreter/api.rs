@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use core::convert::TryFrom;
+use i_slint_compiler::diagnostics::SourceFileVersion;
 use i_slint_compiler::langtype::Type as LangType;
 use i_slint_core::component_factory::ComponentFactory;
 #[cfg(feature = "internal")]
@@ -629,7 +630,8 @@ impl ComponentCompiler {
 
         generativity::make_guard!(guard);
         let (c, diag) =
-            crate::dynamic_item_tree::load(source, path.into(), self.config.clone(), guard).await;
+            crate::dynamic_item_tree::load(source, path.into(), None, self.config.clone(), guard)
+                .await;
         self.diagnostics = diag.into_iter().collect();
         c.ok().map(|inner| ComponentDefinition { inner: inner.into() })
     }
@@ -655,9 +657,47 @@ impl ComponentCompiler {
         source_code: String,
         path: PathBuf,
     ) -> Option<ComponentDefinition> {
+        self.build_from_versioned_source_impl(source_code, path, None).await
+    }
+
+    /// Compile some .slint code into a ComponentDefinition
+    ///
+    /// The `path` argument will be used for diagnostics and to compute relative
+    /// paths while importing, and the version of the `SourceFileInner` will be
+    /// set to `version`
+    ///
+    /// Any diagnostics produced during the compilation, such as warnings or errors, are collected
+    /// in this ComponentCompiler and can be retrieved after the call using the [`Self::diagnostics()`]
+    /// function. The [`print_diagnostics`] function can be used to display the diagnostics
+    /// to the users.
+    ///
+    /// Diagnostics from previous calls are cleared when calling this function.
+    ///
+    /// This function is `async` but in practice, this is only asynchronous if
+    /// [`Self::set_file_loader`] is set and its future is actually asynchronous.
+    /// If that is not used, then it is fine to use a very simple executor, such as the one
+    /// provided by the `spin_on` crate
+    #[doc(hidden)]
+    #[cfg(feature = "internal")]
+    pub async fn build_from_versioned_source(
+        &mut self,
+        source_code: String,
+        path: PathBuf,
+        version: SourceFileVersion,
+    ) -> Option<ComponentDefinition> {
+        self.build_from_versioned_source_impl(source_code, path, version).await
+    }
+
+    async fn build_from_versioned_source_impl(
+        &mut self,
+        source_code: String,
+        path: PathBuf,
+        version: SourceFileVersion,
+    ) -> Option<ComponentDefinition> {
         generativity::make_guard!(guard);
         let (c, diag) =
-            crate::dynamic_item_tree::load(source_code, path, self.config.clone(), guard).await;
+            crate::dynamic_item_tree::load(source_code, path, version, self.config.clone(), guard)
+                .await;
         self.diagnostics = diag.into_iter().collect();
         c.ok().map(|inner| ComponentDefinition { inner: inner.into() })
     }
@@ -742,7 +782,7 @@ impl ComponentDefinition {
         self.inner.unerase(guard).properties()
     }
 
-    /// Returns an interator over all publicly declared properties. Each iterator item is a tuple of property name
+    /// Returns an iterator over all publicly declared properties. Each iterator item is a tuple of property name
     /// and property type for each of them.
     pub fn properties(&self) -> impl Iterator<Item = (String, ValueType)> + '_ {
         // We create here a 'static guard, because unfortunately the returned type would be restricted to the guard lifetime
@@ -838,6 +878,14 @@ impl ComponentDefinition {
         // which is not required, but this is safe because there is only one instance of the unerased type
         let guard = unsafe { generativity::Guard::new(generativity::Id::new()) };
         self.inner.unerase(guard).id()
+    }
+
+    /// This gives access to the tree of Elements.
+    #[cfg(feature = "internal")]
+    #[doc(hidden)]
+    pub fn root_component(&self) -> Rc<i_slint_compiler::object_tree::Component> {
+        let guard = unsafe { generativity::Guard::new(generativity::Id::new()) };
+        self.inner.unerase(guard).original.clone()
     }
 }
 
@@ -1136,31 +1184,27 @@ impl ComponentInstance {
         }
     }
 
-    /// Highlight the elements which are pointed by a given source location.
+    /// Find all positions of the components which are pointed by a given source location.
     ///
     /// WARNING: this is not part of the public API
     #[cfg(feature = "highlight")]
-    pub fn highlight(&self, path: PathBuf, offset: u32) {
-        crate::highlight::highlight(&self.inner, path, offset);
+    pub fn component_positions(
+        &self,
+        path: PathBuf,
+        offset: u32,
+    ) -> crate::highlight::ComponentPositions {
+        crate::highlight::component_positions(&self.inner, path, offset)
     }
 
-    /// Request information on clicked object
+    /// Find the position of the `element`.
     ///
     /// WARNING: this is not part of the public API
     #[cfg(feature = "highlight")]
-    pub fn set_design_mode(&self, active: bool) {
-        crate::highlight::set_design_mode(&self.inner, active);
-    }
-
-    /// Register callback to handle current item information
-    ///
-    /// The callback will be called with the file name, the start line and column
-    /// followed by the end line and column.
-    ///
-    /// WARNING: this is not part of the public API
-    #[cfg(feature = "highlight")]
-    pub fn on_element_selected(&self, callback: Box<dyn Fn(&str, u32, u32, u32, u32)>) {
-        crate::highlight::on_element_selected(&self.inner, callback);
+    pub fn element_position(
+        &self,
+        element: &i_slint_compiler::object_tree::ElementRc,
+    ) -> Option<i_slint_core::lengths::LogicalRect> {
+        crate::highlight::element_position(&self.inner, element)
     }
 }
 
@@ -1289,7 +1333,14 @@ pub mod testing {
     /// Wrapper around [`i_slint_core::tests::slint_send_mouse_click`]
     pub fn send_mouse_click(comp: &super::ComponentInstance, x: f32, y: f32) {
         i_slint_core::tests::slint_send_mouse_click(
-            &vtable::VRc::into_dyn(comp.inner.clone()),
+            x,
+            y,
+            &WindowInner::from_pub(comp.window()).window_adapter(),
+        );
+    }
+    /// Wrapper around [`i_slint_core::tests::slint_send_mouse_double_click`]
+    pub fn send_mouse_double_click(comp: &super::ComponentInstance, x: f32, y: f32) {
+        i_slint_core::tests::slint_send_mouse_double_click(
             x,
             y,
             &WindowInner::from_pub(comp.window()).window_adapter(),

@@ -343,9 +343,8 @@ impl Item for TextInput {
                     self.as_ref().anchor_position_byte_offset.set(clicked_offset);
                 }
 
-                if !self.has_focus() {
-                    WindowInner::from_pub(window_adapter.window()).set_focus_item(self_rc);
-                }
+                #[cfg(not(target_os = "android"))]
+                self.ensure_focus_and_ime(window_adapter, self_rc);
 
                 match click_count % 3 {
                     0 => self.set_cursor_position(clicked_offset, true, window_adapter, self_rc),
@@ -356,18 +355,21 @@ impl Item for TextInput {
 
                 return InputEventResult::GrabMouse;
             }
-            MouseEvent::Pressed { position, button: PointerEventButton::Middle, .. } => {
-                let clicked_offset = self.byte_offset_for_position(position, window_adapter) as i32;
-                self.as_ref().anchor_position_byte_offset.set(clicked_offset);
-                if !self.has_focus() {
-                    WindowInner::from_pub(window_adapter.window()).set_focus_item(self_rc);
-                }
-                self.set_cursor_position(clicked_offset, true, window_adapter, self_rc);
-                self.paste_clipboard(window_adapter, self_rc, Clipboard::SelectionClipboard);
+            MouseEvent::Pressed { .. } => {
+                #[cfg(not(target_os = "android"))]
+                self.ensure_focus_and_ime(window_adapter, self_rc);
             }
             MouseEvent::Released { button: PointerEventButton::Left, .. } => {
                 self.as_ref().pressed.set(0);
                 self.copy_clipboard(Clipboard::SelectionClipboard);
+                #[cfg(target_os = "android")]
+                self.ensure_focus_and_ime(window_adapter, self_rc);
+            }
+            MouseEvent::Released { position, button: PointerEventButton::Middle, .. } => {
+                let clicked_offset = self.byte_offset_for_position(position, window_adapter) as i32;
+                self.as_ref().anchor_position_byte_offset.set(clicked_offset);
+                self.set_cursor_position(clicked_offset, true, window_adapter, self_rc);
+                self.paste_clipboard(window_adapter, self_rc, Clipboard::SelectionClipboard);
             }
             MouseEvent::Exit => {
                 if let Some(x) = window_adapter.internal(crate::InternalToken) {
@@ -1011,6 +1013,9 @@ impl TextInput {
         window_adapter: &Rc<dyn WindowAdapter>,
         self_rc: &ItemRc,
     ) {
+        if text_to_insert.is_empty() {
+            return;
+        }
         self.delete_selection(window_adapter, self_rc);
         let mut text: String = self.text().into();
         let cursor_pos = self.selection_anchor_and_cursor().1;
@@ -1029,6 +1034,21 @@ impl TextInput {
     pub fn cut(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
         self.copy(window_adapter, self_rc);
         self.delete_selection(window_adapter, self_rc);
+    }
+
+    pub fn set_selection_offsets(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+        start: i32,
+        end: i32,
+    ) {
+        let text = self.text();
+        let safe_start = safe_byte_offset(start, &text);
+        let safe_end = safe_byte_offset(end, &text);
+
+        self.as_ref().anchor_position_byte_offset.set(safe_start as i32);
+        self.set_cursor_position(safe_end as i32, true, window_adapter, self_rc);
     }
 
     pub fn select_all(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
@@ -1090,9 +1110,9 @@ impl TextInput {
             return;
         }
         let text = self.text();
-        crate::platform::PLATFORM_INSTANCE.with(|p| {
-            if let Some(backend) = p.get() {
-                backend.set_clipboard_text(&text[anchor..cursor], clipboard);
+        crate::GLOBAL_CONTEXT.with(|p| {
+            if let Some(ctx) = p.get() {
+                ctx.platform.set_clipboard_text(&text[anchor..cursor], clipboard);
             }
         });
     }
@@ -1107,8 +1127,8 @@ impl TextInput {
         self_rc: &ItemRc,
         clipboard: Clipboard,
     ) {
-        if let Some(text) = crate::platform::PLATFORM_INSTANCE
-            .with(|p| p.get().and_then(|p| p.clipboard_text(clipboard)))
+        if let Some(text) = crate::GLOBAL_CONTEXT
+            .with(|p| p.get().and_then(|p| p.platform.clipboard_text(clipboard)))
         {
             self.preedit_text.set(Default::default());
             self.insert(&text, window_adapter, self_rc);
@@ -1219,6 +1239,24 @@ impl TextInput {
             ScaleFactor::new(window_adapter.window().scale_factor()),
         )
     }
+
+    /// When pressing the mouse (or releasing the finger, on android) we should take the focus if we don't have it already.
+    /// Setting the focus will show the virtual keyboard, otherwise we should make sure that the keyboard is shown if it was hidden by the user
+    fn ensure_focus_and_ime(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        if !self.has_focus() {
+            WindowInner::from_pub(window_adapter.window()).set_focus_item(self_rc);
+        } else if !self.read_only() {
+            if let Some(w) = window_adapter.internal(crate::InternalToken) {
+                w.input_method_request(InputMethodRequest::Enable(
+                    self.ime_properties(window_adapter, self_rc),
+                ));
+            }
+        }
+    }
 }
 
 fn next_paragraph_boundary(text: &str, last_cursor_pos: usize) -> usize {
@@ -1260,6 +1298,26 @@ fn next_word_boundary(text: &str, last_cursor_pos: usize) -> usize {
     text.unicode_word_indices()
         .find(|(offset, slice)| *offset + slice.len() >= last_cursor_pos)
         .map_or(text.len(), |(offset, slice)| offset + slice.len())
+}
+
+#[cfg(feature = "ffi")]
+#[no_mangle]
+pub unsafe extern "C" fn slint_textinput_set_selection_offsets(
+    text_input: *const TextInput,
+    window_adapter: *const crate::window::ffi::WindowAdapterRcOpaque,
+    self_component: &vtable::VRc<crate::item_tree::ItemTreeVTable>,
+    self_index: u32,
+    start: i32,
+    end: i32,
+) {
+    let window_adapter = &*(window_adapter as *const Rc<dyn WindowAdapter>);
+    let self_rc = ItemRc::new(self_component.clone(), self_index);
+    Pin::new_unchecked(&*text_input).as_ref().set_selection_offsets(
+        window_adapter,
+        &self_rc,
+        start,
+        end,
+    );
 }
 
 #[cfg(feature = "ffi")]

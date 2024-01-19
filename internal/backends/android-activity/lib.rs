@@ -6,11 +6,10 @@
 #![cfg_attr(not(target_os = "android"), allow(rustdoc::broken_intra_doc_links))]
 #![cfg(target_os = "android")]
 
-pub use android_activity;
 use android_activity::input::{
     InputEvent, KeyAction, Keycode, MotionAction, MotionEvent, TextInputState, TextSpan,
 };
-pub use android_activity::AndroidApp;
+pub use android_activity::{self, AndroidApp};
 use android_activity::{InputStatus, MainEvent, PollEvent};
 use core::ops::ControlFlow;
 use i_slint_core::api::{EventLoopError, PhysicalPosition, PhysicalSize, PlatformError, Window};
@@ -30,7 +29,7 @@ pub struct AndroidPlatform {
 impl AndroidPlatform {
     /// Instantiate a new Android backend given the [`android_activity::AndroidApp`]
     ///
-    /// Pass the returned value to [`slint::platform::set_platform()`][i_slint_core::platform::set_platform]
+    /// Pass the returned value to [`slint::platform::set_platform()`](`i_slint_core::platform::set_platform()`)
     ///
     /// # Example
     /// ```
@@ -64,7 +63,7 @@ impl AndroidPlatform {
     /// This is the same as [`AndroidPlatform::new()`], but it allow you to get notified
     /// of events.
     ///
-    /// Pass the returned value to [`slint::platform::set_platform()`][i_slint_core::platform::set_platform]
+    /// Pass the returned value to [`slint::platform::set_platform()`](`i_slint_core::platform::set_platform()`)
     ///
     /// # Example
     /// ```
@@ -199,12 +198,18 @@ impl i_slint_core::window::WindowAdapterInternal for AndroidWindowAdapter {
     fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
         let props = match request {
             i_slint_core::window::InputMethodRequest::Enable(props) => {
+                #[cfg(not(feature = "native-activity"))]
                 self.app.show_soft_input(true);
+                #[cfg(feature = "native-activity")]
+                show_or_hide_soft_input(&self.app, true).unwrap();
                 props
             }
             i_slint_core::window::InputMethodRequest::Update(props) => props,
             i_slint_core::window::InputMethodRequest::Disable => {
+                #[cfg(not(feature = "native-activity"))]
                 self.app.hide_soft_input(true);
+                #[cfg(feature = "native-activity")]
+                show_or_hide_soft_input(&self.app, false).unwrap();
                 return;
             }
             _ => return,
@@ -493,7 +498,7 @@ fn map_key_code(code: android_activity::input::Keycode) -> Option<SharedString> 
         Keycode::Explorer => None,
         Keycode::Envelope => None,
         Keycode::Enter => Some(Key::Return.into()),
-        Keycode::Del => Some(Key::Delete.into()),
+        Keycode::Del => Some(Key::Backspace.into()),
         Keycode::Grave => Some("`".into()),
         Keycode::Minus => Some("-".into()),
         Keycode::Equals => Some("=".into()),
@@ -538,7 +543,7 @@ fn map_key_code(code: android_activity::input::Keycode) -> Option<SharedString> 
         Keycode::ButtonSelect => None,
         Keycode::ButtonMode => None,
         Keycode::Escape => Some(Key::Escape.into()),
-        Keycode::ForwardDel => Some(Key::Backspace.into()),
+        Keycode::ForwardDel => Some(Key::Delete.into()),
         Keycode::CtrlLeft => Some(Key::Control.into()),
         Keycode::CtrlRight => Some(Key::ControlR.into()),
         Keycode::CapsLock => None,
@@ -717,4 +722,56 @@ fn map_key_code(code: android_activity::input::Keycode) -> Option<SharedString> 
         Keycode::ProfileSwitch => None,
         _ => None,
     }
+}
+
+#[cfg(feature = "native-activity")]
+/// Unfortunately, the way that the android-activity crate uses to show or hide the virtual keyboard doesn't
+/// work with native-activity. So do it manually with JNI
+fn show_or_hide_soft_input(app: &AndroidApp, show: bool) -> Result<(), jni::errors::Error> {
+    use jni::objects::{JObject, JValue};
+
+    // Safety: as documented in android-activity to obtain a jni::JavaVM
+    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut _) }?;
+    let mut env = vm.attach_current_thread()?;
+
+    // https://stackoverflow.com/questions/5864790/how-to-show-the-soft-keyboard-on-native-activity
+
+    let native_activity = unsafe { JObject::from_raw(app.activity_as_ptr() as *mut _) };
+
+    let class_context = env.find_class("android/content/Context")?;
+    let input_method_service =
+        env.get_static_field(class_context, "INPUT_METHOD_SERVICE", "Ljava/lang/String;")?.l()?;
+
+    let input_method_manager = env
+        .call_method(
+            &native_activity,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&input_method_service)],
+        )?
+        .l()?;
+
+    let window =
+        env.call_method(native_activity, "getWindow", "()Landroid/view/Window;", &[])?.l()?;
+    let decor_view = env.call_method(window, "getDecorView", "()Landroid/view/View;", &[])?.l()?;
+
+    if show {
+        env.call_method(
+            input_method_manager,
+            "showSoftInput",
+            "(Landroid/view/View;I)Z",
+            &[JValue::Object(&decor_view), 0.into()],
+        )?;
+    } else {
+        let binder =
+            env.call_method(decor_view, "getWindowToken", "()Landroid/os/IBinder;", &[])?.l()?;
+        env.call_method(
+            input_method_manager,
+            "hideSoftInputFromWindow",
+            "(Landroid/os/IBinder;I)Z",
+            &[JValue::Object(&binder), 0.into()],
+        )?;
+    };
+
+    Ok(())
 }

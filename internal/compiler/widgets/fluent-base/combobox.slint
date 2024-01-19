@@ -49,7 +49,7 @@ export component ComboBox {
 
     i-background := Rectangle {
         border-radius: 3px;
-        background: FluentPalette.surface;
+        background: FluentPalette.control-background;
         border-width: 1px;
         border-color: FluentPalette.control-border;
 
@@ -65,7 +65,7 @@ export component ComboBox {
                 vertical-alignment: center;
                 font-size: FluentFontSettings.body.font-size;
                 font-weight: FluentFontSettings.body.font-weight;
-                color: FluentPalette.on-surface;
+                color: FluentPalette.control-foreground;
                 text: root.current-value;
             }
 
@@ -97,11 +97,15 @@ export component ComboBox {
                 padding: 4px;
 
                 for value[index] in root.model : ListItem {
-                    text: value;
-                    selected: index == root.current-index;
+                    item: { text: value };
+                    is-selected: index == root.current-index;
+                    has-hover: i-touch-area.has-hover;
+                    pressed: i-touch-area.pressed;
 
-                    clicked => {
-                        i-base.select(index);
+                    i-touch-area := TouchArea {
+                        clicked => {
+                            i-base.select(index);
+                        }
                     }
                 }
             }

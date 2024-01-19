@@ -441,6 +441,8 @@ pub enum PropertyVisibility {
     Input,
     Output,
     InOut,
+    /// for builtin properties that must be known at compile time and cannot be changed at runtime
+    Constexpr,
     /// For functions, not properties
     Public,
     Protected,
@@ -453,6 +455,7 @@ impl Display for PropertyVisibility {
             PropertyVisibility::Input => f.write_str("input"),
             PropertyVisibility::Output => f.write_str("output"),
             PropertyVisibility::InOut => f.write_str("input output"),
+            PropertyVisibility::Constexpr => f.write_str("constexpr"),
             PropertyVisibility::Public => f.write_str("public"),
             PropertyVisibility::Protected => f.write_str("protected"),
         }
@@ -767,6 +770,9 @@ pub struct PropertyAnalysis {
 
     /// True if the property is linked to another property that is read only. That property becomes read-only
     pub is_linked_to_read_only: bool,
+
+    /// True if this property is linked to another property
+    pub is_linked: bool,
 }
 
 impl PropertyAnalysis {
@@ -819,6 +825,7 @@ pub struct RepeatedElementInfo {
 }
 
 pub type ElementRc = Rc<RefCell<Element>>;
+pub type ElementWeak = Weak<RefCell<Element>>;
 
 impl Element {
     pub fn make_rc(self) -> ElementRc {
@@ -1926,7 +1933,7 @@ pub fn recurse_elem<State>(
     }
 }
 
-/// Same as [`recurse_elem`] but include the elements form sub_components
+/// Same as [`recurse_elem`] but include the elements from sub_components
 pub fn recurse_elem_including_sub_components<State>(
     component: &Component,
     state: &State,

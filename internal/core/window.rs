@@ -21,7 +21,7 @@ use crate::items::{InputType, ItemRef, MouseCursor};
 use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, SizeLengths};
 use crate::properties::{Property, PropertyTracker};
 use crate::renderer::Renderer;
-use crate::{Callback, Coord, SharedString};
+use crate::{Callback, Coord, SharedString, GLOBAL_CONTEXT};
 use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
 use core::cell::{Cell, RefCell};
@@ -277,6 +277,11 @@ impl<'a> WindowProperties<'a> {
             ),
         }
     }
+
+    /// Returns true if the window should be shown fullscreen; false otherwise.
+    pub fn fullscreen(&self) -> bool {
+        self.0.fullscreen.get()
+    }
 }
 
 struct WindowPropertiesTracker {
@@ -309,7 +314,7 @@ impl crate::properties::PropertyDirtyHandler for WindowRedrawTracker {
 /// This enum describes the different ways a popup can be rendered by the back-end.
 enum PopupWindowLocation {
     /// The popup is rendered in its own top-level window that is know to the windowing system.
-    TopLevel(Rc<dyn WindowAdapter>),
+    TopLevel { _adapter: Rc<dyn WindowAdapter> },
     /// The popup is rendered as an embedded child window at the given position.
     ChildWindow(LogicalPoint),
 }
@@ -360,7 +365,9 @@ pub struct WindowInner {
     cursor_blinker: RefCell<pin_weak::rc::PinWeak<crate::input::TextCursorBlinker>>,
 
     pinned_fields: Pin<Box<WindowPinnedFields>>,
+    fullscreen: Cell<bool>,
     active_popup: RefCell<Option<PopupWindow>>,
+    had_popup_on_press: Cell<bool>,
     close_requested: Callback<(), CloseRequestResponse>,
     click_state: ClickState,
 }
@@ -410,9 +417,14 @@ impl WindowInner {
                     "i_slint_core::Window::text_input_focused",
                 ),
             }),
+            #[cfg(feature = "std")]
+            fullscreen: Cell::new(std::env::var("SLINT_FULLSCREEN").is_ok()),
+            #[cfg(not(feature = "std"))]
+            fullscreen: Cell::new(false),
             focus_item: Default::default(),
             cursor_blinker: Default::default(),
             active_popup: Default::default(),
+            had_popup_on_press: Default::default(),
             close_requested: Default::default(),
             click_state: ClickState::default(),
             prevent_focus_change: Default::default(),
@@ -474,16 +486,22 @@ impl WindowInner {
         // handle multiple press release
         event = self.click_state.check_repeat(event);
 
+        let pressed_event = matches!(event, MouseEvent::Pressed { .. });
+        let released_event = matches!(event, MouseEvent::Released { .. });
+
         let window_adapter = self.window_adapter();
         let mut mouse_input_state = self.mouse_input_state.take();
-        if matches!(event, MouseEvent::Released { .. }) {
+        if released_event {
             mouse_input_state =
                 crate::input::process_delayed_event(&window_adapter, mouse_input_state);
         }
 
-        let close_popup_after_click = matches!(event, MouseEvent::Released { .. })
-            && self.close_popup_after_click()
-            && self.active_popup.borrow().is_some();
+        if pressed_event {
+            self.had_popup_on_press.set(self.active_popup.borrow().is_some());
+        }
+
+        let close_popup_on_click = self.close_popup_on_click();
+        let mut mouse_inside_popup = false;
 
         mouse_input_state = if let Some(mut event) =
             crate::input::handle_mouse_grab(event, &window_adapter, &mut mouse_input_state)
@@ -495,13 +513,15 @@ impl WindowInner {
             }) = self.active_popup.borrow().as_ref()
             {
                 let geom = ItemTreeRc::borrow_pin(component).as_ref().item_geometry(0);
-                if event
+
+                mouse_inside_popup = event
                     .position()
-                    .map_or(false, |pos| !geom.contains(pos - coordinates.to_vector()))
-                {
-                    (None, LogicalPoint::default())
-                } else {
+                    .map_or(true, |pos| geom.contains(pos - coordinates.to_vector()));
+
+                if mouse_inside_popup {
                     (Some(component.clone()), *coordinates)
+                } else {
+                    (None, LogicalPoint::default())
                 }
             } else {
                 (self.component.borrow().upgrade(), LogicalPoint::default())
@@ -534,7 +554,10 @@ impl WindowInner {
 
         self.mouse_input_state.set(mouse_input_state);
 
-        if close_popup_after_click {
+        if close_popup_on_click
+            && ((mouse_inside_popup && released_event && self.had_popup_on_press.get())
+                || (!mouse_inside_popup && pressed_event))
+        {
             self.close_popup();
         }
     }
@@ -767,7 +790,7 @@ impl WindowInner {
 
             let popup_component =
                 self.active_popup.borrow().as_ref().and_then(|popup| match popup.location {
-                    PopupWindowLocation::TopLevel(_) => None,
+                    PopupWindowLocation::TopLevel { .. } => None,
                     PopupWindowLocation::ChildWindow(coordinates) => {
                         Some((popup.component.clone(), coordinates))
                     }
@@ -794,7 +817,14 @@ impl WindowInner {
     /// to input events once the event loop spins.
     pub fn show(&self) -> Result<(), PlatformError> {
         if let Some(component) = self.try_component() {
-            *self.strong_component_ref.borrow_mut() = Some(component);
+            let was_visible = self.strong_component_ref.replace(Some(component)).is_some();
+            if !was_visible {
+                GLOBAL_CONTEXT.with(|ctx| {
+                    if let Some(ctx) = ctx.get() {
+                        *(ctx.window_count.borrow_mut()) += 1;
+                    }
+                });
+            }
         }
 
         self.update_window_properties();
@@ -810,7 +840,19 @@ impl WindowInner {
     /// De-registers the window with the windowing system.
     pub fn hide(&self) -> Result<(), PlatformError> {
         let result = self.window_adapter().set_visible(false);
-        self.strong_component_ref.borrow_mut().take();
+        let was_visible = self.strong_component_ref.borrow_mut().take().is_some();
+        if was_visible {
+            GLOBAL_CONTEXT.with(|ctx| {
+                if let Some(ctx) = ctx.get() {
+                    let mut count = ctx.window_count.borrow_mut();
+                    *count -= 1;
+                    if *count <= 0 {
+                        drop(count);
+                        let _ = crate::api::quit_event_loop();
+                    }
+                }
+            });
+        }
         result
     }
 
@@ -880,7 +922,7 @@ impl WindowInner {
 
             Some(window_adapter) => {
                 WindowInner::from_pub(window_adapter.window()).set_component(popup_componentrc);
-                PopupWindowLocation::TopLevel(window_adapter)
+                PopupWindowLocation::TopLevel { _adapter: window_adapter }
             }
         };
 
@@ -913,7 +955,7 @@ impl WindowInner {
     }
 
     /// Returns true if the currently active popup is configured to close on click. None if there is no active popup.
-    pub fn close_popup_after_click(&self) -> bool {
+    pub fn close_popup_on_click(&self) -> bool {
         self.active_popup.borrow().as_ref().map_or(false, |popup| popup.close_on_click)
     }
 
@@ -976,6 +1018,12 @@ impl WindowInner {
             CloseRequestResponse::HideWindow => true,
             CloseRequestResponse::KeepWindowShown => false,
         }
+    }
+
+    /// Set or unset the window to display fullscreen.
+    pub fn set_fullscreen(&self, enabled: bool) {
+        self.fullscreen.set(enabled);
+        self.update_window_properties()
     }
 
     /// Returns the upgraded window adapter

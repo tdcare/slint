@@ -1,21 +1,15 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use std::iter::once;
+use std::{collections::HashMap, iter::once, rc::Rc};
 
-use i_slint_core::{
-    model::{Model, VecModel},
-    SharedString,
-};
+use slint::{Model, SharedString, VecModel};
 use slint_interpreter::{DiagnosticLevel, PlatformError};
 
 slint::include_modules!();
 
 pub fn create_ui(style: String) -> Result<PreviewUi, PlatformError> {
     let ui = PreviewUi::new()?;
-
-    // design mode:
-    ui.on_design_mode_changed(super::set_design_mode);
 
     // styles:
     let known_styles = once(&"native")
@@ -29,16 +23,29 @@ pub fn create_ui(style: String) -> Result<PreviewUi, PlatformError> {
         known_styles.first().map(|s| s.to_string()).unwrap_or_default()
     };
 
-    let style_model = std::rc::Rc::new({
+    let style_model = Rc::new({
         let model = VecModel::default();
         model.extend(known_styles.iter().map(|s| SharedString::from(*s)));
         assert!(model.row_count() > 1);
         model
     });
 
-    ui.on_style_changed(super::change_style);
     ui.set_known_styles(style_model.into());
     ui.set_current_style(style.clone().into());
+    #[cfg(feature = "experimental")]
+    ui.set_experimental(true);
+
+    ui.on_style_changed(super::change_style);
+    ui.on_show_document(|url, line, column| {
+        use lsp_types::{Position, Range};
+        let pos = Position::new((line as u32).saturating_sub(1), (column as u32).saturating_sub(1));
+
+        super::ask_editor_to_show_document(url.into(), Range::new(pos, pos))
+    });
+    ui.on_select_at(super::select_element_at);
+    ui.on_select_into(super::select_element_into);
+    ui.on_can_drop(super::can_drop_component);
+    ui.on_drop(super::drop_component);
 
     Ok(ui)
 }
@@ -62,4 +69,33 @@ pub fn convert_diagnostics(diagnostics: &[slint_interpreter::Diagnostic]) -> Vec
             }
         })
         .collect::<Vec<_>>()
+}
+
+pub fn ui_set_known_components(
+    ui: &PreviewUi,
+    known_components: &[crate::common::ComponentInformation],
+) {
+    let mut map: HashMap<String, Vec<ComponentListSubItem>> = Default::default();
+    for ci in known_components {
+        if ci.is_global {
+            continue;
+        }
+        map.entry(ci.category.clone()).or_default().push(ComponentListSubItem {
+            name: ci.name.clone().into(),
+            is_builtin: ci.is_builtin,
+            is_std_widget: ci.is_std_widget,
+            is_exported: ci.is_exported,
+        });
+    }
+    let mut result = map
+        .into_iter()
+        .map(|(k, v)| {
+            let model = Rc::new(VecModel::from(v));
+            ComponentListItem { category: k.into(), components: model.into() }
+        })
+        .collect::<Vec<_>>();
+    result.sort_by_key(|k| k.category.clone());
+
+    let result = Rc::new(VecModel::from(result));
+    ui.set_known_components(result.into());
 }

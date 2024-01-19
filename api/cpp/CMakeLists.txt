@@ -13,7 +13,7 @@ include(FetchContent)
 FetchContent_Declare(
     Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-    GIT_TAG v0.4.5
+    GIT_TAG v0.4.6
 )
 FetchContent_MakeAvailable(Corrosion)
 
@@ -30,30 +30,30 @@ set(SLINT_COMPILER "" CACHE FILEPATH "Path to the slint-compiler executable. Whe
 set(SLINT_LIBRARY_CARGO_FLAGS "" CACHE STRING
     "Flags to pass to cargo when building the Slint runtime library")
 
-function(define_cargo_feature cargo-feature description default)
+function(define_cargo_feature cargo_feature description default)
     # turn foo-bar into SLINT_FEATURE_FOO_BAR
-    string(TOUPPER "${cargo-feature}" cmake_option)
+    string(TOUPPER "${cargo_feature}" cmake_option)
     string(REPLACE "-" "_" cmake_option "${cmake_option}")
     set(cmake_option "SLINT_FEATURE_${cmake_option}")
     option("${cmake_option}" "${description}" ${default})
 
     if(${cmake_option})
-        list(APPEND features ${cargo-feature})
+        list(APPEND features ${cargo_feature})
     endif()
 
     set(features "${features}" PARENT_SCOPE)
     add_feature_info(${cmake_option} ${cmake_option} ${description})
 endfunction()
 
-function(define_cargo_dependent_feature cargo-feature description default depends_condition)
+function(define_cargo_dependent_feature cargo_feature description default depends_condition)
     # turn foo-bar into SLINT_FEATURE_FOO_BAR
-    string(TOUPPER "${cargo-feature}" cmake_option)
+    string(TOUPPER "${cargo_feature}" cmake_option)
     string(REPLACE "-" "_" cmake_option "${cmake_option}")
     set(cmake_option "SLINT_FEATURE_${cmake_option}")
     cmake_dependent_option("${cmake_option}" "${description}" ${default} ${depends_condition} OFF)
 
     if(${cmake_option})
-        list(APPEND features ${cargo-feature})
+        list(APPEND features ${cargo_feature})
     endif()
 
     set(features "${features}" PARENT_SCOPE)
@@ -95,7 +95,8 @@ define_cargo_feature(renderer-software "Enable support for the software renderer
 
 define_cargo_dependent_feature(backend-qt "Enable Qt based rendering backend" ON "NOT SLINT_FEATURE_FREESTANDING")
 
-define_cargo_dependent_feature(backend-linuxkms "Enable support for the backend that renders a single window fullscreen on Linux (Experimental)" OFF "NOT SLINT_FEATURE_FREESTANDING")
+define_cargo_dependent_feature(backend-linuxkms "Enable support for the backend that renders a single window fullscreen on Linux. Requires libseat. If you don't have libseat, select `backend-linuxkms-noseat` instead. (Experimental)" OFF "NOT SLINT_FEATURE_FREESTANDING")
+define_cargo_dependent_feature(backend-linuxkms-noseat "Enable support for the backend that renders a single window fullscreen on Linux (Experimental)" OFF "NOT SLINT_FEATURE_FREESTANDING")
 
 define_cargo_dependent_feature(gettext "Enable support of translations using gettext" OFF "NOT SLINT_FEATURE_FREESTANDING")
 define_cargo_dependent_feature(accessibility "Enable integration with operating system provided accessibility APIs" ON "NOT SLINT_FEATURE_FREESTANDING")
@@ -306,21 +307,22 @@ if (SLINT_BUILD_RUNTIME)
     endforeach()
 
     set(generated_headers
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_enums_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_enums.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_builtin_structs_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_builtin_structs.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_string_internal.h
         ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_brush_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_sharedvector_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_properties_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_image_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_builtin_structs.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_builtin_structs_internal.h
         ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_color_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_pathdata_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_qt_internal.h
-        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_platform_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_enums.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_enums_internal.h
         ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_generated_public.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_image_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_pathdata_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_platform_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_properties_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_qt_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_sharedvector_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_string_internal.h
+        ${CMAKE_CURRENT_BINARY_DIR}/generated_include/slint_timer_internal.h
     )
 
     if(SLINT_FEATURE_INTERPRETER)
@@ -407,7 +409,7 @@ if(SLINT_BUILD_RUNTIME)
 
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/lib/cmake/Slint/SlintConfigVersion.cmake
-        VERSION 1.3.2
+        VERSION 1.4.0
         COMPATIBILITY SameMinorVersion
     )
 
@@ -424,8 +426,8 @@ set(CPACK_PACKAGE_NAME "Slint-cpp")
 set(CPACK_PACKAGE_VENDOR "Slint")
 set(CPACK_VERBATIM_VARIABLES true)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
-set(CPACK_PACKAGE_VERSION_MINOR 3)
-set(CPACK_PACKAGE_VERSION_PATCH 2)
+set(CPACK_PACKAGE_VERSION_MINOR 4)
+set(CPACK_PACKAGE_VERSION_PATCH 0)
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://slint.dev")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/../../LICENSE.md")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_LIST_DIR}/README.md")

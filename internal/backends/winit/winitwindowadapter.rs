@@ -35,6 +35,7 @@ use corelib::Property;
 use corelib::{graphics::*, Coord};
 use i_slint_core as corelib;
 use once_cell::unsync::OnceCell;
+use winit::window::WindowBuilder;
 
 fn position_to_winit(pos: &corelib::api::WindowPosition) -> winit::dpi::Position {
     match pos {
@@ -140,24 +141,10 @@ pub struct WinitWindowAdapter {
 
 impl WinitWindowAdapter {
     /// Creates a new reference-counted instance.
-    #[allow(clippy::new_ret_no_self)]
     pub(crate) fn new(
-        renderer_factory_fn: fn(
-            window_builder: winit::window::WindowBuilder,
-        ) -> Result<
-            (Box<dyn WinitCompatibleRenderer>, winit::window::Window),
-            PlatformError,
-        >,
-        #[cfg(target_arch = "wasm32")] canvas_id: &str,
-    ) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-        let (renderer, winit_window) = Self::window_builder(
-            #[cfg(target_arch = "wasm32")]
-            canvas_id,
-        )
-        .and_then(|builder| renderer_factory_fn(builder))?;
-
-        let winit_window = Rc::new(winit_window);
-
+        renderer: Box<dyn WinitCompatibleRenderer>,
+        winit_window: Rc<winit::window::Window>,
+    ) -> Rc<Self> {
         let self_rc = Rc::new_cyclic(|self_weak| Self {
             window: OnceCell::with_value(corelib::api::Window::new(self_weak.clone() as _)),
             #[cfg(target_arch = "wasm32")]
@@ -190,23 +177,17 @@ impl WinitWindowAdapter {
             .unwrap_or_else(|| self_rc.winit_window().scale_factor() as f32);
         self_rc.window().dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor });
 
-        Ok(self_rc as _)
+        self_rc
     }
 
     fn renderer(&self) -> &dyn WinitCompatibleRenderer {
         self.renderer.as_ref()
     }
 
-    fn window_builder(
+    pub(crate) fn window_builder(
         #[cfg(target_arch = "wasm32")] canvas_id: &str,
-    ) -> Result<winit::window::WindowBuilder, PlatformError> {
-        let mut window_builder =
-            winit::window::WindowBuilder::new().with_transparent(true).with_visible(false);
-
-        if std::env::var("SLINT_FULLSCREEN").is_ok() {
-            window_builder =
-                window_builder.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-        }
+    ) -> Result<WindowBuilder, PlatformError> {
+        let mut window_builder = WindowBuilder::new().with_transparent(true).with_visible(false);
 
         window_builder = window_builder.with_title("Slint Window".to_string());
 
@@ -240,14 +221,10 @@ impl WinitWindowAdapter {
         Ok(window_builder)
     }
 
-    pub fn take_pending_redraw(&self) -> bool {
-        self.pending_redraw.take()
-    }
-
     /// Draw the items of the specified `component` in the given window.
-    pub fn draw(&self) -> Result<bool, PlatformError> {
+    pub fn draw(&self) -> Result<(), PlatformError> {
         if !self.shown.get() {
-            return Ok(false); // caller bug, doesn't make sense to call draw() when not shown
+            return Ok(()); // caller bug, doesn't make sense to call draw() when not shown
         }
 
         self.pending_redraw.set(false);
@@ -255,7 +232,7 @@ impl WinitWindowAdapter {
         let renderer = self.renderer();
         renderer.render(self.window())?;
 
-        Ok(self.pending_redraw.get())
+        Ok(())
     }
 
     fn with_window_handle(&self, callback: &mut dyn FnMut(&winit::window::Window)) {
@@ -264,10 +241,6 @@ impl WinitWindowAdapter {
 
     pub fn winit_window(&self) -> Rc<winit::window::Window> {
         self.winit_window.clone()
-    }
-
-    pub fn is_shown(&self) -> bool {
-        self.shown.get()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -419,10 +392,6 @@ impl WindowAdapter for WinitWindowAdapter {
             if let Some(existing_blinker) = self.cursor_blinker.borrow().upgrade() {
                 existing_blinker.stop();
             }*/
-            crate::send_event_via_global_event_loop_proxy(crate::SlintUserEvent::CustomEvent {
-                event: crate::event_loop::CustomEvent::WindowHidden,
-            })
-            .ok(); // It's okay to call hide() even after the event loop is closed. We don't need the logic for quitting the event loop anymore at this point.
             Ok(())
         }
     }
@@ -525,6 +494,16 @@ impl WindowAdapter for WinitWindowAdapter {
         }
 
         self.with_window_handle(&mut |winit_window| {
+            if properties.fullscreen() {
+                if winit_window.fullscreen().is_none() {
+                    winit_window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                }
+            } else {
+                if winit_window.fullscreen().is_some() {
+                    winit_window.set_fullscreen(None);
+                }
+            }
+
             // If we're in fullscreen state, don't try to resize the window but maintain the surface
             // size we've been assigned to from the windowing system. Weston/Wayland don't like it
             // when we create a surface that's bigger than the screen due to constraints (#532).

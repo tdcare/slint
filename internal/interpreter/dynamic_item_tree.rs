@@ -6,9 +6,9 @@ use crate::{api::Value, dynamic_type, eval};
 use core::convert::TryInto;
 use core::ptr::NonNull;
 use dynamic_type::{Instance, InstanceBox};
+use i_slint_compiler::diagnostics::SourceFileVersion;
 use i_slint_compiler::expression_tree::{Expression, NamedReference};
 use i_slint_compiler::langtype::{ElementType, Type};
-use i_slint_compiler::llr::ComponentContainerIndex;
 use i_slint_compiler::object_tree::ElementRc;
 use i_slint_compiler::*;
 use i_slint_compiler::{diagnostics::BuildDiagnostics, object_tree::PropertyDeclaration};
@@ -127,21 +127,34 @@ impl RepeatedItemTree for ErasedItemTreeBox {
         generativity::make_guard!(guard);
         let s = self.unerase(guard);
 
-        s.description
-            .set_property(s.borrow(), "y", Value::Number(offset_y.get() as f64))
-            .expect("cannot set y");
-        let h: f32 = s
-            .description
-            .get_property(s.borrow(), "height")
-            .expect("missing height")
-            .try_into()
-            .expect("height not the right type");
-        let w: f32 = s
-            .description
-            .get_property(s.borrow(), "width")
-            .expect("missing width")
-            .try_into()
-            .expect("width not the right type");
+        let geom = s.description.original.root_element.borrow().geometry_props.clone().unwrap();
+
+        crate::eval::store_property(
+            s.borrow_instance(),
+            &geom.y.element(),
+            geom.y.name(),
+            Value::Number(offset_y.get() as f64),
+        )
+        .expect("cannot set y");
+
+        let h: f32 = crate::eval::load_property(
+            s.borrow_instance(),
+            &geom.height.element(),
+            geom.height.name(),
+        )
+        .expect("missing height")
+        .try_into()
+        .expect("height not the right type");
+
+        let w: f32 = crate::eval::load_property(
+            s.borrow_instance(),
+            &geom.width.element(),
+            geom.width.name(),
+        )
+        .expect("missing width")
+        .try_into()
+        .expect("width not the right type");
+
         let h = LogicalLength::new(h);
         let w = LogicalLength::new(w);
         *offset_y += h;
@@ -659,8 +672,8 @@ extern "C" fn visit_children_item(
         order,
         v,
         |_, order, visitor, index| {
-            if let Some(_) = ComponentContainerIndex::try_from_repeater_index(index) {
-                // Do nothing: Our parent already did all the work!
+            if index as usize >= instance_ref.description.repeater.len() {
+                // Do nothing: We are ComponentContainer and Our parent already did all the work!
                 VisitChildrenResult::CONTINUE
             } else {
                 // `ensure_updated` needs a 'static lifetime so we must call get_untagged.
@@ -752,6 +765,7 @@ fn rtti_for<T: 'static + Default + rtti::BuiltinItem + vtable::HasStaticVTable<I
 pub async fn load(
     source: String,
     path: std::path::PathBuf,
+    version: SourceFileVersion,
     #[allow(unused_mut)] mut compiler_config: CompilerConfiguration,
     guard: generativity::Guard<'_>,
 ) -> (Result<Rc<ItemTreeDescription<'_>>, ()>, i_slint_compiler::diagnostics::BuildDiagnostics) {
@@ -768,7 +782,7 @@ pub async fn load(
     }
 
     let mut diag = BuildDiagnostics::default();
-    let syntax_node = parser::parse(source, Some(path.as_path()), &mut diag);
+    let syntax_node = parser::parse(source, Some(path.as_path()), version, &mut diag);
     if diag.has_error() {
         return (Err(()), diag);
     }
@@ -783,9 +797,6 @@ pub async fn load(
         diag.push_error_with_span("No component found".into(), Default::default());
         return (Err(()), diag);
     }
-
-    #[cfg(feature = "highlight")]
-    crate::highlight::add_highlighting(&doc);
 
     (Ok(generate_item_tree(&doc.root_component, guard)), diag)
 }
@@ -883,14 +894,12 @@ pub(crate) fn generate_item_tree<'id>(
         fn push_component_placeholder_item(
             &mut self,
             item: &i_slint_compiler::object_tree::ElementRc,
+            container_count: u32,
             parent_index: u32,
             _component_state: &Self::SubComponentState,
         ) {
-            let component_index = ComponentContainerIndex::from(parent_index);
-            self.tree_array.push(ItemTreeNode::DynamicTree {
-                index: component_index.as_repeater_index(),
-                parent_index,
-            });
+            self.tree_array
+                .push(ItemTreeNode::DynamicTree { index: container_count, parent_index });
             self.original_elements.push(item.clone());
         }
 
@@ -1030,11 +1039,15 @@ pub(crate) fn generate_item_tree<'id>(
                             $(
                                 stringify!($Name) => property_info::<i_slint_core::items::$Name>(),
                             )*
-                            _ => property_info::<Value>(),
+                            x => unreachable!("Unknown non-builtin enum {x}"),
                         }
                     }
                 }
-                i_slint_common::for_each_enums!(match_enum_type)
+                if e.node.is_some() {
+                    property_info::<Value>()
+                } else {
+                    i_slint_common::for_each_enums!(match_enum_type)
+                }
             }
             Type::LayoutCache => property_info::<SharedVector<f32>>(),
             Type::Function { .. } => continue,
@@ -1631,8 +1644,16 @@ unsafe extern "C" fn get_item_ref(component: ItemTreeRefPin, index: u32) -> Pin<
 extern "C" fn get_subtree_range(component: ItemTreeRefPin, index: u32) -> IndexRange {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
-    if let Some(container_index) = ComponentContainerIndex::try_from_repeater_index(index) {
-        let container = component.as_ref().get_item_ref(container_index.as_item_tree_index());
+    if index as usize >= instance_ref.description.repeater.len() {
+        let container_index = {
+            let tree_node = &component.as_ref().get_item_tree()[index as usize];
+            if let ItemTreeNode::DynamicTree { parent_index, .. } = tree_node {
+                *parent_index
+            } else {
+                u32::MAX
+            }
+        };
+        let container = component.as_ref().get_item_ref(container_index);
         let container = i_slint_core::items::ItemRef::downcast_pin::<
             i_slint_core::items::ComponentContainer,
         >(container)
@@ -1657,8 +1678,16 @@ extern "C" fn get_subtree(
 ) {
     generativity::make_guard!(guard);
     let instance_ref = unsafe { InstanceRef::from_pin_ref(component, guard) };
-    if let Some(container_index) = ComponentContainerIndex::try_from_repeater_index(index) {
-        let container = component.as_ref().get_item_ref(container_index.as_item_tree_index());
+    if index as usize >= instance_ref.description.repeater.len() {
+        let container_index = {
+            let tree_node = &component.as_ref().get_item_tree()[index as usize];
+            if let ItemTreeNode::DynamicTree { parent_index, .. } = tree_node {
+                *parent_index
+            } else {
+                u32::MAX
+            }
+        };
+        let container = component.as_ref().get_item_ref(container_index);
         let container = i_slint_core::items::ItemRef::downcast_pin::<
             i_slint_core::items::ComponentContainer,
         >(container)

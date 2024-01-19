@@ -11,8 +11,13 @@ This crate implements the Android backend/platform for Slint.
 It uses the [android-activity](https://github.com/rust-mobile/android-activity) crate
 to initialize the app and provide events handling.
 
+## Status
+
 At the moment, this is a work in progress. In the future, we expect to add features directly to the the slint crate.
 In the mean time, it is already possible to use this crate to test Slint applications on Android.
+
+An example of app using it is the `todo` example: <https://github.com/slint-ui/slint/tree/master/examples/todo/rust>
+In order to try it out, edit the Cargo.toml to uncomment the `#wasm#` lines, and add `-p todo` to the cargo apk command bellow.
 
 ## Usage
 
@@ -35,12 +40,12 @@ Below is an example of how to set up your `Cargo.toml`:
 crate-type = ["cdylib"]
 
 [dependencies]
-slint = { version = "1.3.0", ... }
-i-slint-backend-android-activity = { version = "=1.3.0", features = ["native-activity"] }
+slint = { version = "1.3.2", ... }
+i-slint-backend-android-activity = { version = "=1.3.2", features = ["native-activity"] }
 ```
 
 As with any application using `android-activity`, you need to implement the `android_init` function as `#[no_mangle]`.
-In it, create a [`AndroidPlatform`] and pass it to [`slint::platform::set_platform`][i_slint_core::platform::set_platform].
+In it, create a [`AndroidPlatform`] and pass it to [`slint::platform::set_platform`](`i_slint_core::platform::set_platform`).
 
 Here is an example:
 

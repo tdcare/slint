@@ -10,15 +10,15 @@ pub mod lsp_ext;
 mod preview;
 pub mod util;
 
-use common::{PreviewApi, Result};
-use i_slint_compiler::CompilerConfiguration;
+use common::{ComponentInformation, PreviewApi, Result, VersionedUrl};
+use i_slint_compiler::{pathutils::to_url, CompilerConfiguration};
 use js_sys::Function;
 pub use language::{Context, DocumentCache, RequestHandler};
+use lsp_types::Url;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::future::Future;
 use std::io::ErrorKind;
-use std::path::PathBuf;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
@@ -52,32 +52,24 @@ impl PreviewApi for Previewer {
         // The WASM LSP always needs to use the WASM preview!
     }
 
-    fn set_contents(&self, path: &std::path::Path, contents: &str) {
+    fn set_contents(&self, url: &VersionedUrl, contents: &str) {
         #[cfg(feature = "preview-external")]
         let _ = self.server_notifier.send_notification(
             "slint/lsp_to_preview".to_string(),
             crate::common::LspToPreviewMessage::SetContents {
-                path: path.to_string_lossy().to_string(),
+                url: url.clone(),
                 contents: contents.to_string(),
             },
         );
     }
 
     fn load_preview(&self, component: common::PreviewComponent) {
-        if component.path.as_os_str().is_empty() {
-            return;
-        }
-
         self.to_show.replace(Some(component.clone()));
 
         #[cfg(feature = "preview-external")]
         let _ = self.server_notifier.send_notification(
             "slint/lsp_to_preview".to_string(),
-            crate::common::LspToPreviewMessage::ShowPreview {
-                path: component.path.to_string_lossy().to_string(),
-                component: component.component,
-                style: component.style.to_string(),
-            },
+            crate::common::LspToPreviewMessage::ShowPreview(component),
         );
     }
 
@@ -89,19 +81,33 @@ impl PreviewApi for Previewer {
         );
     }
 
-    fn highlight(&self, path: Option<std::path::PathBuf>, offset: u32) -> Result<()> {
+    fn highlight(&self, url: Option<Url>, offset: u32) -> Result<()> {
         #[cfg(feature = "preview-external")]
         self.server_notifier.send_notification(
             "slint/lsp_to_preview".to_string(),
-            crate::common::LspToPreviewMessage::HighlightFromEditor {
-                path: path.map(|p| p.to_string_lossy().to_string()),
-                offset,
-            },
+            crate::common::LspToPreviewMessage::HighlightFromEditor { url, offset },
         )
     }
 
     fn current_component(&self) -> Option<crate::common::PreviewComponent> {
         self.to_show.borrow().clone()
+    }
+
+    fn report_known_components(
+        &self,
+        _url: Option<VersionedUrl>,
+        _components: Vec<ComponentInformation>,
+    ) {
+        #[cfg(feature = "preview-external")]
+        {
+            let _ = self.server_notifier.send_notification(
+                "slint/lsp_to_preview".to_string(),
+                crate::common::LspToPreviewMessage::KnownComponents {
+                    url: _url,
+                    components: _components,
+                },
+            );
+        }
     }
 }
 
@@ -256,8 +262,11 @@ pub fn create(
         let preview_notifier = preview_notifier.clone();
         Box::pin(async move {
             let contents = self::load_file(path.clone(), &load_file).await;
+            let Some(url) = to_url(&path) else {
+                return Some(contents);
+            };
             if let Ok(contents) = &contents {
-                preview_notifier.set_contents(&PathBuf::from(path), contents);
+                preview_notifier.set_contents(&VersionedUrl { url, version: None }, contents);
             }
             Some(contents)
         })
@@ -303,15 +312,8 @@ impl SlintServer {
             M::Diagnostics { diagnostics, uri } => {
                 crate::preview::notify_lsp_diagnostics(&self.ctx.server_notifier, uri, diagnostics);
             }
-            M::ShowDocument { file, start_line, start_column, end_line, end_column } => {
-                send_show_document_to_editor(
-                    self.ctx.server_notifier.clone(),
-                    file,
-                    start_line,
-                    start_column,
-                    end_line,
-                    end_column,
-                )
+            M::ShowDocument { file, selection } => {
+                send_show_document_to_editor(self.ctx.server_notifier.clone(), file, selection)
             }
             M::PreviewTypeChanged { is_external: _ } => {
                 // Nothing to do!
@@ -339,7 +341,7 @@ impl SlintServer {
                 &ctx,
                 content,
                 uri.clone(),
-                version,
+                Some(version),
                 &mut ctx.document_cache.borrow_mut(),
             )
             .await
@@ -388,19 +390,12 @@ fn to_value<T: serde::Serialize + ?Sized>(
 pub fn send_show_document_to_editor(
     sender: ServerNotifier,
     file: String,
-    start_line: u32,
-    start_column: u32,
-    end_line: u32,
-    end_column: u32,
+    selection: lsp_types::Range,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
-        let Some(params) = crate::preview::show_document_request_from_element_callback(
-            &file,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
-        ) else {
+        let Some(params) =
+            crate::preview::show_document_request_from_element_callback(&file, selection)
+        else {
             return;
         };
         let Ok(fut) = sender.send_request::<lsp_types::request::ShowDocument>(params) else {

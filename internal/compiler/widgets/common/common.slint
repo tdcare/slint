@@ -12,6 +12,10 @@ export component TextEdit inherits ScrollView {
 
     callback edited(/* text */ string);
 
+    public function set-selection-offsets(start: int, end: int) {
+        i-text-input.set-selection-offsets(start, end);
+    }
+
     public function select-all() {
         i-text-input.select-all();
     }
@@ -87,7 +91,7 @@ export component AboutSlint {
         }
 
         Text {
-            text: "Version 1.3.2\nhttps://slint.dev/";
+            text: "Version 1.4.0\nhttps://slint.dev/";
             font-size: 10px;
             horizontal-alignment: center;
         }

@@ -2,19 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 import * as napi from "./rust-module.cjs";
-const {
-    Diagnostic,
-    DiagnosticLevel,
-    RgbaColor,
-    Brush
-} = napi;
-
 export {
     Diagnostic,
     DiagnosticLevel,
     RgbaColor,
     Brush
-};
+} from "./rust-module";
+
+import {
+    Diagnostic
+} from "./rust-module.cjs";
 
 /**
  *  Represents a two-dimensional point.
@@ -81,6 +78,9 @@ export interface Window {
 
     /** Issues a request to the windowing system to re-render the contents of the window. */
     requestRedraw(): void;
+
+    /** Set or unset the window to display fullscreen. */
+    set fullscreen(enable: boolean);
 }
 
 /**
@@ -206,8 +206,8 @@ export abstract class Model<T> {
     /**
      * Implementations of this function must store the provided data parameter
      * in the model at the specified row.
-     * @param row index in range 0..(rowCount() - 1).
-     * @param data new data item to store on the given row index
+     * @param _row index in range 0..(rowCount() - 1).
+     * @param _data new data item to store on the given row index
      */
     setRowData(_row: number, _data: T): void {
         console.log(
@@ -956,6 +956,7 @@ export function quitEventLoop() {
  */
 export namespace private_api {
     export import mock_elapsed_time = napi.mockElapsedTime;
+    export import get_mocked_time = napi.getMockedTime;
     export import ComponentCompiler = napi.ComponentCompiler;
     export import ComponentDefinition = napi.ComponentDefinition;
     export import ComponentInstance = napi.ComponentInstance;
@@ -974,6 +975,14 @@ export namespace private_api {
         y: number
     ) {
         component.component_instance.sendMouseClick(x, y);
+    }
+
+    export function send_mouse_double_click(
+        component: Component,
+        x: number,
+        y: number
+    ) {
+        component.component_instance.sendMouseDoubleClick(x, y);
     }
 
     export function send_keyboard_string_sequence(

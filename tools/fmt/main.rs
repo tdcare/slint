@@ -17,7 +17,7 @@
 
 use i_slint_compiler::diagnostics::BuildDiagnostics;
 use i_slint_compiler::parser::{syntax_nodes, SyntaxNode};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use clap::Parser;
@@ -43,7 +43,7 @@ fn main() -> std::io::Result<()> {
         let source = std::fs::read_to_string(&path)?;
 
         if args.inline {
-            let file = std::fs::File::create(&path)?;
+            let file = BufWriter::new(std::fs::File::create(&path)?);
             process_file(source, path, file)?
         } else {
             process_file(source, path, std::io::stdout())?
@@ -61,7 +61,7 @@ fn process_rust_file(source: String, mut file: impl Write) -> std::io::Result<()
         let code = &source[range];
 
         let mut diag = BuildDiagnostics::default();
-        let syntax_node = i_slint_compiler::parser::parse(code.to_owned(), None, &mut diag);
+        let syntax_node = i_slint_compiler::parser::parse(code.to_owned(), None, None, &mut diag);
         let len = syntax_node.text_range().end().into();
         visit_node(syntax_node, &mut file)?;
         if diag.has_error() {
@@ -91,7 +91,7 @@ fn process_markdown_file(source: String, mut file: impl Write) -> std::io::Resul
         source_slice = &source_slice[code_end..];
 
         let mut diag = BuildDiagnostics::default();
-        let syntax_node = i_slint_compiler::parser::parse(code.to_owned(), None, &mut diag);
+        let syntax_node = i_slint_compiler::parser::parse(code.to_owned(), None, None, &mut diag);
         let len = syntax_node.text_range().end().into();
         visit_node(syntax_node, &mut file)?;
         if diag.has_error() {
@@ -108,7 +108,7 @@ fn process_slint_file(
     mut file: impl Write,
 ) -> std::io::Result<()> {
     let mut diag = BuildDiagnostics::default();
-    let syntax_node = i_slint_compiler::parser::parse(source.clone(), Some(&path), &mut diag);
+    let syntax_node = i_slint_compiler::parser::parse(source.clone(), Some(&path), None, &mut diag);
     let len = syntax_node.node.text_range().end().into();
     visit_node(syntax_node, &mut file)?;
     if diag.has_error() {

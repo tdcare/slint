@@ -13,21 +13,20 @@ pub mod lsp_ext;
 mod preview;
 pub mod util;
 
-use common::{PreviewApi, Result};
+use common::{ComponentInformation, PreviewApi, Result, VersionedUrl};
 use language::*;
 
 use i_slint_compiler::CompilerConfiguration;
 use lsp_types::notification::{
     DidChangeConfiguration, DidChangeTextDocument, DidOpenTextDocument, Notification,
 };
-use lsp_types::{DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams};
+use lsp_types::{DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, Url};
 
 use clap::Parser;
 use lsp_server::{Connection, ErrorCode, IoThreads, Message, RequestId, Response};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::{atomic, Arc, Mutex};
@@ -53,19 +52,19 @@ impl PreviewApi for Previewer {
         }
     }
 
-    fn set_contents(&self, _path: &std::path::Path, _contents: &str) {
+    fn set_contents(&self, _url: &VersionedUrl, _contents: &str) {
         if *self.use_external_previewer.borrow() {
             #[cfg(feature = "preview-external")]
             let _ = self.server_notifier.send_notification(
                 "slint/lsp_to_preview".to_string(),
                 crate::common::LspToPreviewMessage::SetContents {
-                    path: _path.to_string_lossy().to_string(),
+                    url: _url.to_owned(),
                     contents: _contents.to_string(),
                 },
             );
         } else {
             #[cfg(feature = "preview-builtin")]
-            preview::set_contents(_path, _contents.to_string());
+            preview::set_contents(_url, _contents.to_string());
         }
     }
 
@@ -76,11 +75,7 @@ impl PreviewApi for Previewer {
             #[cfg(feature = "preview-external")]
             let _ = self.server_notifier.send_notification(
                 "slint/lsp_to_preview".to_string(),
-                crate::common::LspToPreviewMessage::ShowPreview {
-                    path: component.path.to_string_lossy().to_string(),
-                    component: component.component,
-                    style: component.style.to_string(),
-                },
+                crate::common::LspToPreviewMessage::ShowPreview(component),
             );
         } else {
             #[cfg(feature = "preview-builtin")]
@@ -104,23 +99,43 @@ impl PreviewApi for Previewer {
         }
     }
 
-    fn highlight(&self, _path: Option<std::path::PathBuf>, _offset: u32) -> Result<()> {
-        {
-            if *self.use_external_previewer.borrow() {
-                #[cfg(feature = "preview-external")]
-                self.server_notifier.send_notification(
+    fn highlight(&self, _url: Option<Url>, _offset: u32) -> Result<()> {
+        if *self.use_external_previewer.borrow() {
+            #[cfg(feature = "preview-external")]
+            self.server_notifier.send_notification(
+                "slint/lsp_to_preview".to_string(),
+                crate::common::LspToPreviewMessage::HighlightFromEditor {
+                    url: _url.clone(),
+                    offset: _offset,
+                },
+            )?;
+            Ok(())
+        } else {
+            #[cfg(feature = "preview-builtin")]
+            preview::highlight(_url, _offset);
+            Ok(())
+        }
+    }
+
+    fn report_known_components(
+        &self,
+        _url: Option<VersionedUrl>,
+        _components: Vec<ComponentInformation>,
+    ) {
+        if *self.use_external_previewer.borrow() {
+            #[cfg(feature = "preview-external")]
+            {
+                let _ = self.server_notifier.send_notification(
                     "slint/lsp_to_preview".to_string(),
-                    crate::common::LspToPreviewMessage::HighlightFromEditor {
-                        path: _path.as_ref().map(|p| p.to_string_lossy().to_string()),
-                        offset: _offset,
+                    crate::common::LspToPreviewMessage::KnownComponents {
+                        url: _url,
+                        components: _components,
                     },
-                )?;
-                Ok(())
-            } else {
-                #[cfg(feature = "preview-builtin")]
-                preview::highlight(&_path, _offset);
-                Ok(())
+                );
             }
+        } else {
+            #[cfg(feature = "preview-builtin")]
+            preview::known_components(&_url, _components);
         }
     }
 
@@ -239,10 +254,6 @@ fn main() {
     if !args.backend.is_empty() {
         std::env::set_var("SLINT_BACKEND", &args.backend);
     }
-    if args.fullscreen {
-        // TODO: Have an API to set the Window fullscreen #3283
-        std::env::set_var("SLINT_FULLSCREEN", "1");
-    }
 
     #[cfg(feature = "preview-engine")]
     {
@@ -329,7 +340,13 @@ fn main_loop(connection: Connection, init_param: InitializeParams, cli_args: Cli
         Box::pin(async move {
             let contents = std::fs::read_to_string(&path);
             if let Ok(contents) = &contents {
-                preview_notifier.set_contents(&PathBuf::from(path), contents);
+                if let Ok(url) = Url::from_file_path(&path) {
+                    preview_notifier.set_contents(&VersionedUrl { url, version: None }, contents);
+                } else {
+                    i_slint_core::debug_log!(
+                        "Could not sent contents of file {path:?}: NOT AN URL"
+                    );
+                }
             }
             Some(contents)
         })
@@ -414,7 +431,7 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
                 ctx,
                 params.text_document.text,
                 params.text_document.uri,
-                params.text_document.version,
+                Some(params.text_document.version),
                 &mut ctx.document_cache.borrow_mut(),
             )
             .await?;
@@ -425,7 +442,7 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
                 ctx,
                 params.content_changes.pop().unwrap().text,
                 params.text_document.uri,
-                params.text_document.version,
+                Some(params.text_document.version),
                 &mut ctx.document_cache.borrow_mut(),
             )
             .await?;
@@ -457,16 +474,9 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
                 M::Diagnostics { uri, diagnostics } => {
                     crate::preview::notify_lsp_diagnostics(&ctx.server_notifier, uri, diagnostics);
                 }
-                M::ShowDocument { file, start_line, start_column, end_line, end_column } => {
-                    send_show_document_to_editor(
-                        ctx.server_notifier.clone(),
-                        file,
-                        start_line,
-                        start_column,
-                        end_line,
-                        end_column,
-                    )
-                    .await;
+                M::ShowDocument { file, selection } => {
+                    send_show_document_to_editor(ctx.server_notifier.clone(), file, selection)
+                        .await;
                 }
                 M::PreviewTypeChanged { is_external } => {
                     ctx.preview.set_use_external_previewer(is_external);
@@ -485,18 +495,10 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
 pub async fn send_show_document_to_editor(
     sender: ServerNotifier,
     file: String,
-    start_line: u32,
-    start_column: u32,
-    end_line: u32,
-    end_column: u32,
+    range: lsp_types::Range,
 ) {
-    let Some(params) = crate::preview::show_document_request_from_element_callback(
-        &file,
-        start_line,
-        start_column,
-        end_line,
-        end_column,
-    ) else {
+    let Some(params) = crate::preview::show_document_request_from_element_callback(&file, range)
+    else {
         return;
     };
     let Ok(fut) = sender.send_request::<lsp_types::request::ShowDocument>(params) else {

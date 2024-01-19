@@ -8,24 +8,17 @@
 mod fullscreenwindowadapter;
 
 #[cfg(target_os = "linux")]
-use std::os::fd::AsFd;
+use std::os::fd::OwnedFd;
 
 #[cfg(target_os = "linux")]
-type DeviceOpener<'a> = dyn Fn(&std::path::Path) -> Result<std::sync::Arc<dyn AsFd>, i_slint_core::platform::PlatformError>
+type DeviceOpener<'a> = dyn Fn(&std::path::Path) -> Result<std::rc::Rc<OwnedFd>, i_slint_core::platform::PlatformError>
     + 'a;
 
 #[cfg(target_os = "linux")]
-mod display {
-    pub trait Presenter {
-        // Present updated front-buffer to the screen
-        fn present(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    }
+mod drmoutput;
 
-    #[cfg(any(feature = "renderer-skia-opengl", feature = "renderer-femtovg"))]
-    pub mod egldisplay;
-    #[cfg(feature = "renderer-skia-vulkan")]
-    pub mod vulkandisplay;
-}
+#[cfg(target_os = "linux")]
+mod display;
 
 #[cfg(target_os = "linux")]
 mod renderer {
@@ -46,7 +39,8 @@ mod renderer {
 
         #[cfg(any(feature = "renderer-skia-opengl", feature = "renderer-skia-vulkan"))]
         {
-            result = skia::SkiaRendererAdapter::new_try_vulkan_then_opengl(_device_opener);
+            result =
+                skia::SkiaRendererAdapter::new_try_vulkan_then_opengl_then_software(_device_opener);
         }
 
         #[cfg(feature = "renderer-femtovg")]

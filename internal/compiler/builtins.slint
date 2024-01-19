@@ -100,6 +100,7 @@ export component TouchArea {
     out property <length> pressed_y;
     in property <MouseCursor> mouse-cursor;
     callback clicked;
+    callback double-clicked;
     callback moved;
     callback pointer-event(PointerEvent);
     callback scroll-event(PointerScrollEvent) -> EventResult;
@@ -183,6 +184,7 @@ export component TextInput {
     out property <string> preedit-text;
     //-default_size_binding:expands_to_parent_geometry
     //-accepts_focus
+    function set-selection-offsets(start: int, end: int) {}
     function select-all() {}
     function clear-selection() {}
     function cut() {}
@@ -344,7 +346,7 @@ export component PopupWindow {
     in property <length> anchor_y;
     in property <length> anchor_height;
     in property <length> anchor_width;*/
-    in property <bool> close-on-click: true;
+    in property <bool> close-on-click: true;  // constexpr hardcoded in typeregister.rs
     //show() is hardcoded in typeregister.rs
 }
 
@@ -370,6 +372,7 @@ export component NativeButton {
     in-out property <bool> checked;
     out property <bool> has-focus;
     in property <bool> primary;
+    in property <bool> colorize-icon;
     callback clicked;
     in property <bool> enabled: true;
     in property <StandardButtonKind> standard-button-kind;
@@ -455,7 +458,11 @@ export component NativeStandardListViewItem {
     in property <StandardListViewItem> item;
     in-out property <bool> is_selected;
     in property <bool> has_hover;
+    in property <bool> has_focus;
+    in property <bool> pressed;
     in property <bool> combobox;
+    in property <length> pressed-x;
+    in property <length> pressed-y;
     //-is_internal
 }
 
@@ -530,6 +537,23 @@ export global NativeStyleMetrics {
 
     // Tab Bar metrics:
     out property <LayoutAlignment> tab-bar-alignment;
+
+    //-is_non_item_type
+    //-is_internal
+}
+
+export global NativePalette {
+    out property <brush> background;
+    out property <brush> foreground;
+    out property <brush> alternate-background;
+    out property <brush> alternate-foreground;
+    out property <brush> control-background;
+    out property <brush> control-foreground;
+    out property <brush> accent-background;
+    out property <brush> accent-foreground;
+    out property <brush> selection-background;
+    out property <brush> selection-foreground;
+    out property <brush> border;
 
     //-is_non_item_type
     //-is_internal

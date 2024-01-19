@@ -168,7 +168,7 @@ To run a function with a delay or with an interval use a [`Timer`].
 ## Exported Global singletons
 
 */
-#![doc = concat!("When you export a [global singleton](https://slint.dev/releases/", env!("CARGO_PKG_VERSION"), "/docs/slint/src/reference/globals.html) from the main file,")]
+#![doc = concat!("When you export a [global singleton](https://slint.dev/releases/", env!("CARGO_PKG_VERSION"), "/docs/slint/src/language/syntax/globals.html) from the main file,")]
 /*! it is also generated with the exported name. Like the main component, the generated struct have
 inherent method to access the properties and callback:
 
@@ -221,10 +221,29 @@ pub use i_slint_core::{format, string::SharedString};
 pub mod private_unstable_api;
 
 /// Enters the main event loop. This is necessary in order to receive
-/// events from the windowing system in order to render to the screen
-/// and react to user input.
+/// events from the windowing system for rendering to the screen
+/// and reacting to user input.
+/// This function will run until the last window is closed or until
+/// [`quit_event_loop()`] is called.
+///
+/// See also [`run_event_loop_until_quit()`] to keep the event loop running until
+/// [`quit_event_loop()`] is called, even if all windows are closed.
 pub fn run_event_loop() -> Result<(), PlatformError> {
     i_slint_backend_selector::with_platform(|b| b.run_event_loop())
+}
+
+/// Similar to [`run_event_loop()`], but this function enters the main event loop
+/// and continues to run even when the last window is closed, until
+/// [`quit_event_loop()`] is called.
+///
+/// This is useful for system tray applications where the application needs to stay alive
+/// even if no windows are visible.
+pub fn run_event_loop_until_quit() -> Result<(), PlatformError> {
+    i_slint_backend_selector::with_platform(|b| {
+        #[allow(deprecated)]
+        b.set_event_loop_quit_on_last_window_closed(false);
+        b.run_event_loop()
+    })
 }
 
 /// Include the code generated with the slint-build crate from the build script. After calling `slint_build::compile`
@@ -299,7 +318,7 @@ pub mod platform {
 /// Helper type that helps checking that the generated code is generated for the right version
 #[doc(hidden)]
 #[allow(non_camel_case_types)]
-pub struct VersionCheck_1_3_2;
+pub struct VersionCheck_1_4_0;
 
 #[cfg(doctest)]
 mod compile_fail_tests;

@@ -3,111 +3,112 @@
 
 // cSpell: ignore Heade
 
-import { Button, ComboBox, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button, ComboBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
+import { ComponentList, ComponentListItem } from "component-list.slint";
+import { DrawArea, Selection } from "draw-area.slint";
 import { HeaderBar } from "header-bar.slint";
 import { Diagnostics, DiagnosticsOverlay } from "diagnostics-overlay.slint";
-import { Resizer } from "resizer.slint";
 
 export { Diagnostics }
 
 export component PreviewUi inherits Window {
-    in property<[string]> known-styles;
-    in property<[Diagnostics]> diagnostics;
-    in property<string> status-text;
-    in property<component-factory> preview-area;
-    in-out property<string> current-style;
-    in property<bool> show-preview-ui : true;
+    in property <[ComponentListItem]> known-components;
+    in property <[Diagnostics]> diagnostics;
+    in property <[Selection]> selections;
+    in property <[string]> known-styles;
+    in property <bool> experimental: false;
+    in property <bool> show-preview-ui: true;
+    in property <component-factory> preview-area;
+    in property <string> status-text;
+    in-out property <string> current-style;
+    out property <bool> design-mode;
 
-    callback design-mode-changed(/* enabled */ bool);
-    callback style-changed();
+    callback can-drop(/* component_type */ string, /* x */ length, /* y */ length) -> bool;
+    callback drop(/* component_type */ string, /* x */ length, /* y */ length);
+    callback select-at(/* x */ length, /* y */ length);
+    callback select-into(/* x */ length, /* y */ length);
     callback show-document(/* url */ string, /* line */ int, /* column */ int);
+    callback style-changed();
 
     property <length> border: 20px;
 
     title: "Slint Live-Preview";
     icon: @image-url("assets/slint-logo-small-light.png");
 
-    if (!show-preview-ui): VerticalLayout {
-        no-ui-drawing-rect := Rectangle {
-            ComponentContainer {
-                component-factory <=> root.preview-area;
-                width: clamp(no-ui-drawing-rect.width, self.min-width, self.max-width);
-                height: clamp(no-ui-drawing-rect.height, self.min-height, self.max-height);
+    VerticalLayout {
+        if (!show-preview-ui): no-ui-drawing-rect := Rectangle {
+            VerticalLayout {
+                ComponentContainer {
+                    component-factory <=> root.preview-area;
+                }
             }
 
             // Diagnostics overlay:
             DiagnosticsOverlay {
+                width: 100%;
+                height: 100%;
                 diagnostics <=> root.diagnostics;
                 show-document(url, line, column) => { root.show-document(url, line, column); }
             }
         }
-    }
-    if (show-preview-ui): VerticalLayout {
-        HeaderBar {
-            vertical-stretch: 0.0;
+        if (show-preview-ui): VerticalLayout {
+            HeaderBar {
+                vertical-stretch: 0.0;
 
-            height: self.preferred-height;
+                height: self.preferred-height;
 
-            // i-pick-button := Button {
-            //     text: "Design Mode";
-            //     checkable: true;
-            //
-            //     clicked => {
-            //         root.design-mode-changed(self.checked);
-            //     }
-            // }
-
-            Text {
-                text: "Style:";
-                vertical-alignment: center;
-            }
-            i-style-select := ComboBox {
-                model: root.known-styles;
-                current-value <=> current-style;
-                selected(value) => {
-                    root.style-changed();
+                i-pick-button := Button {
+                    text: @tr("Pick Mode");
+                    checkable: true;
+                    checked <=> root.design-mode;
                 }
-            }
 
-            Text {
-                text: root.status-text;
-                vertical-alignment: center;
-            }
-        }
-
-        i-scroll-view := ScrollView {
-            property <length> border: 60px;
-
-            viewport-width: i-drawing-rect.width;
-            viewport-height: i-drawing-rect.height;
-
-            i-drawing-rect := Rectangle {
-                background: Colors.white;
-
-                width: max(i-scroll-view.visible-width, i-resizer.width + i-scroll-view.border);
-                height: max(i-scroll-view.visible-height, i-resizer.height + i-scroll-view.border);
-
-                i-resizer := Resizer {
-                    is-resizable <=> i-preview-area-container.is-resizable;
-
-                    resize(w, h) => {
-                        i-preview-area-container.width = clamp(w, i-preview-area-container.min-width, i-preview-area-container.max-width);
-                        i-preview-area-container.height = clamp(h, i-preview-area-container.min-height, i-preview-area-container.max-height);
-                    }
-
-                    width <=> i-preview-area-container.width;
-                    height <=> i-preview-area-container.height;
-
-                    i-preview-area-container := ComponentContainer {
-                        property <bool> is-resizable: (self.min-width != self.max-width && self.min-height != self.max-height) && self.has-component;
-
-                        component-factory <=> root.preview-area;
+                Text {
+                    text: @tr("Style:");
+                    vertical-alignment: center;
+                }
+                i-style-select := ComboBox {
+                    model: root.known-styles;
+                    current-value <=> current-style;
+                    selected(value) => {
+                        root.style-changed();
                     }
                 }
 
-                // Diagnostics overlay:
-                DiagnosticsOverlay {
+                Text {
+                    text: root.status-text;
+                    vertical-alignment: center;
+                }
+            }
+
+            HorizontalLayout {
+                if (root.experimental): left-sidebar := Rectangle {
+                    width: 200px;
+                    background: Colors.red;
+
+                    VerticalBox {
+                        ComponentList {
+                            known-components <=> root.known-components;
+                            preview-area-position-x: draw-area.preview-area-position-x;
+                            preview-area-position-y: draw-area.preview-area-position-y;
+                            preview-area-width: draw-area.preview-area-width;
+                            preview-area-height: draw-area.preview-area-height;
+
+                            can-drop(ct, x, y) => { return root.can-drop(ct, x, y); }
+                            drop(ct, x, y) => { root.drop(ct, x, y); }
+                        }
+                    }
+                }
+
+                draw-area := DrawArea {
+                    design-mode <=> root.design-mode;
                     diagnostics <=> root.diagnostics;
+                    experimental <=> root.experimental;
+                    preview-area <=> root.preview-area;
+                    selections <=> root.selections;
+
+                    select-at(x, y) => { root.select-at(x, y); }
+                    select-into(x, y) => { root.select-into(x, y); }
                     show-document(url, line, column) => { root.show-document(url, line, column); }
                 }
             }

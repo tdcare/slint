@@ -1,0 +1,97 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
+
+import { ScrollView, VerticalBox } from "std-widgets.slint";
+
+export struct ComponentListSubItem {
+    name: string,
+    is_builtin: bool,
+    is_std_widget: bool,
+    is_exported: bool,
+}
+export struct ComponentListItem {
+    category: string,
+    components: [ComponentListSubItem]
+}
+
+export component ComponentList {
+    in property <[ComponentListItem]> known-components;
+
+    in property <length> preview-area-position-x;
+    in property <length> preview-area-position-y;
+    in property <length> preview-area-width;
+    in property <length> preview-area-height;
+
+    callback can-drop(string /* component type */, length /* x */, length /* y */) -> bool;
+    callback drop(string /* component type */, length /* x */, length /* y */);
+
+    private property <bool> preview-visible: preview-area-width > 0px && preview-area-height > 0px;
+
+    ScrollView {
+        VerticalBox {
+            Text {
+                font-weight: 800;
+                text: @tr("Assets");
+            }
+
+            for cli in root.known-components: VerticalLayout {
+                Rectangle {
+                    height: title.preferred-height + 10px;
+
+                    background: #ffffff40; // Darken default background
+
+                    title := Text {
+                        font-size: 1.2rem;
+                        font-weight: 800;
+
+                        text: cli.category;
+                    }
+                }
+                for ci in cli.components: TouchArea {
+                    private property <length> drop-x: self.absolute-position.x + self.mouse-x;
+                    private property <length> drop-y: self.absolute-position.y + self.mouse-y;
+
+                    private property <bool> dragging-on-preview-area: drop-x >= preview-area-position-x && drop-x <= preview-area-position-x + preview-area-width &&
+                            drop-y >= preview-area-position-y && drop-y <= preview-area-position-y + preview-area-height;
+                    private property <bool> can-drop-here: false;
+
+                    enabled: preview-visible;
+
+                    height: name.preferred-height + 10px;
+                    width: 100%;
+
+                    name := Text {
+                        text: ci.name;
+                    }
+
+                    moved() => {
+                        if (drop-x >= preview-area-position-x && drop-x <= preview-area-position-x + preview-area-width &&
+                            drop-y >= preview-area-position-y && drop-y <= preview-area-position-y + preview-area-height) {
+                            self.can-drop-here = root.can-drop(ci.name, drop-x, drop-y);
+                        } else {
+                            can-drop-here = false;
+                        }
+                    }
+
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                            root.drop(ci.name, drop-x, drop-y);
+                        }
+                    }
+
+                    states [
+                        dragging when self.pressed && !(self.can-drop-here && self.pressed): {
+                            mouse-cursor: MouseCursor.no-drop;
+                        }
+                        dragging-can-drop when self.pressed && self.can-drop-here && self.pressed: {
+                            mouse-cursor: MouseCursor.copy;
+                        }
+                        normal when !self.pressed: {
+                            mouse-cursor: MouseCursor.default;
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}
