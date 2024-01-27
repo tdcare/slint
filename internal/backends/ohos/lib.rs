@@ -11,7 +11,7 @@ use i_slint_core::with_platform;
 
 use chrono::NaiveDate;
 use libc::c_int;
-use napi_ohos::bindgen_prelude::*;
+
 
 
 
@@ -43,26 +43,26 @@ use PlatformError::NoPlatform;
 use crate::calloop_backend::Backend;
 use crate::calloop_backend::input::{GLOBAL_PROXY, OHOS_EVENT_SENDER};
 use crate::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
-use napi_derive_ohos::napi;
-use napi_ohos::*;
-
-#[napi]
-pub fn sum(a: i32, b: i32) -> i32 {
-    a + b + 100
-}
-
-#[napi]
-pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
-    let v = p.await?;
-    hilog_debug!(
-        "test",
-        LogOptions {
-          tag: Some("testTag"),
-          domain: None
-      }
-    );
-    Ok(v + 210)
-}
+// use napi_derive_ohos::napi;
+// use napi_ohos::*;
+//
+// #[napi]
+// pub fn sum(a: i32, b: i32) -> i32 {
+//     a + b + 100
+// }
+//
+// #[napi]
+// pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
+//     let v = p.await?;
+//     hilog_debug!(
+//         "test",
+//         LogOptions {
+//           tag: Some("testTag"),
+//           domain: None
+//       }
+//     );
+//     Ok(v + 210)
+// }
 
 #[no_mangle]
 pub unsafe extern "C" fn slint_windowrc_init(out: *mut std::os::raw::c_void) {
