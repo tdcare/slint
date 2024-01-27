@@ -9,7 +9,7 @@ use std::rc::Rc;
 // use i_slint_core::window::WindowAdapter;
 // use i_slint_core::with_platform;
 
-use chrono::NaiveDate;
+// use chrono::NaiveDate;
 use libc::c_int;
 use slint::SharedString;
 

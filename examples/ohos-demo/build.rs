@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 fn main() {
+    napi_build_ohos::setup();
+
     slint_build::compile_with_config(
         "demo.slint",
         slint_build::CompilerConfiguration::new()
