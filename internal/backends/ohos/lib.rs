@@ -11,6 +11,7 @@ use i_slint_core::with_platform;
 
 use chrono::NaiveDate;
 use libc::c_int;
+use napi_ohos::bindgen_prelude::*;
 use slint::SharedString;
 
 
@@ -39,11 +40,12 @@ use hilog_binding::hilog_debug;
 use i_slint_core::api::EventLoopError;
 use i_slint_core::string::format;
 use PlatformError::NoPlatform;
-use slint::private_unstable_api::create_window_adapter;
+// use slint::private_unstable_api::create_window_adapter;
 use crate::calloop_backend::Backend;
 use crate::calloop_backend::input::{GLOBAL_PROXY, OHOS_EVENT_SENDER};
 use crate::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
 use napi_derive_ohos::napi;
+use napi_ohos::*;
 
 #[napi]
 pub fn sum(a: i32, b: i32) -> i32 {
