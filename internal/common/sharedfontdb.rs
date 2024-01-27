@@ -16,6 +16,7 @@ pub struct FontDatabase {
         target_os = "ios",
         feature = "ohos",
         target_arch = "wasm32"
+        target_os = "android",
     )))]
     pub fontconfig_fallback_families: Vec<String>,
     // Default font families to use instead of SansSerif when SLINT_DEFAULT_FONT env var is set.
@@ -60,6 +61,7 @@ thread_local! {
     target_os = "ios",
     feature = "ohos",
     target_arch = "wasm32"
+    target_os = "android",
 )))]
 mod fontconfig;
 
@@ -114,6 +116,7 @@ fn init_fontdb() -> FontDatabase {
         target_os = "ios",
         feature = "ohos",
         target_arch = "wasm32"
+        target_os = "android",
     )))]
     let mut fontconfig_fallback_families = Vec::new();
 
@@ -125,6 +128,12 @@ fn init_fontdb() -> FontDatabase {
     }
 
     #[cfg(not(any(target_arch = "wasm32",feature = "ohos")))]
+    #[cfg(target_os = "android")]
+    {
+        font_db.load_fonts_dir("/system/fonts");
+        font_db.set_sans_serif_family("Roboto");
+    }
+    #[cfg(not(any(target_arch = "wasm32", target_arch = "android")))]
     {
         font_db.load_system_fonts();
         cfg_if::cfg_if! {
@@ -134,6 +143,7 @@ fn init_fontdb() -> FontDatabase {
                 target_os = "ios",
                 feature = "ohos",
                 target_arch = "wasm32"
+                target_os = "android",
             )))] {
                 match fontconfig::find_families("sans-serif") {
                     Ok(mut fallback_families) => {
@@ -168,6 +178,7 @@ fn init_fontdb() -> FontDatabase {
             target_os = "ios",
             feature = "ohos",
             target_arch = "wasm32"
+            target_os = "android",
         )))]
         fontconfig_fallback_families,
         default_font_family_ids,

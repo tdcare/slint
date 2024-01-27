@@ -1203,7 +1203,7 @@ impl ComponentInstance {
     pub fn element_position(
         &self,
         element: &i_slint_compiler::object_tree::ElementRc,
-    ) -> Option<i_slint_core::lengths::LogicalRect> {
+    ) -> Vec<i_slint_core::lengths::LogicalRect> {
         crate::highlight::element_position(&self.inner, element)
     }
 }
@@ -1338,14 +1338,7 @@ pub mod testing {
             &WindowInner::from_pub(comp.window()).window_adapter(),
         );
     }
-    /// Wrapper around [`i_slint_core::tests::slint_send_mouse_double_click`]
-    pub fn send_mouse_double_click(comp: &super::ComponentInstance, x: f32, y: f32) {
-        i_slint_core::tests::slint_send_mouse_double_click(
-            x,
-            y,
-            &WindowInner::from_pub(comp.window()).window_adapter(),
-        );
-    }
+
     /// Wrapper around [`i_slint_core::tests::slint_send_keyboard_char`]
     pub fn send_keyboard_char(
         comp: &super::ComponentInstance,

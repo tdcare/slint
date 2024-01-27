@@ -64,7 +64,7 @@ pub(crate) fn component_positions(
 pub(crate) fn element_position(
     component_instance: &DynamicComponentVRc,
     element: &ElementRc,
-) -> Option<LogicalRect> {
+) -> Vec<LogicalRect> {
     generativity::make_guard!(guard);
     let c = component_instance.unerase(guard);
 
@@ -72,7 +72,7 @@ pub(crate) fn element_position(
     if let Some(repeater_path) = repeater_path(element) {
         fill_highlight_data(&repeater_path, &element, &c, &c, &mut values);
     }
-    values.geometries.get(0).cloned()
+    values.geometries
 }
 
 fn fill_highlight_data(
@@ -136,7 +136,7 @@ fn find_element_at_offset(component: &Rc<Component>, path: PathBuf, offset: u32)
             if elem.borrow().repeated.is_some() {
                 return;
             }
-            if let Some(node) = elem.borrow().node.as_ref().and_then(|n| n.QualifiedName()) {
+            for node in elem.borrow().node.iter().filter_map(|n| n.QualifiedName()) {
                 if node.source_file.path() == path && node.text_range().contains(offset.into()) {
                     result.push(elem.clone());
                 }

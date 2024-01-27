@@ -3,6 +3,7 @@
 
 //! Inline each object_tree::Component within the main Component
 
+use crate::diagnostics::Spanned;
 use crate::expression_tree::{BindingExpression, Expression, NamedReference};
 use crate::langtype::{ElementType, Type};
 use crate::object_tree::*;
@@ -129,6 +130,7 @@ fn inline_element(
     }
 
     elem_mut.children = new_children;
+    elem_mut.node.extend_from_slice(&inlined_component.root_element.borrow().node);
 
     if let ElementType::Component(c) = &mut elem_mut.base_type {
         if c.parent_element.upgrade().is_some() {
@@ -510,15 +512,8 @@ fn component_requires_inlining(component: &Rc<Component>) -> bool {
 
     let root_element = &component.root_element;
     if super::flickable::is_flickable_element(root_element)
-        || super::focus_item::get_explicit_forward_focus(root_element).is_some()
         || super::lower_layout::is_layout_element(root_element)
     {
-        return true;
-    }
-
-    // the focus_item pass needs to refer to elements that are focusable, if it is not inline
-    // it is not possible to refer to them in an  Expression::ElementReference
-    if matches!(&root_element.borrow().base_type, ElementType::Builtin(b) if b.accepts_focus) {
         return true;
     }
 
@@ -538,9 +533,18 @@ fn component_requires_inlining(component: &Rc<Component>) -> bool {
             return true;
         }
         if binding.animation.is_some() {
-            // If there is an animation, we currently inline so that if this property
-            // is set with a binding, it is merged
-            return true;
+            let lookup_result = root_element.borrow().lookup_property(prop);
+            if !lookup_result.is_valid()
+                || !lookup_result.is_local_to_component
+                || !matches!(
+                    lookup_result.property_visibility,
+                    PropertyVisibility::Private | PropertyVisibility::Output
+                )
+            {
+                // If there is an animation, we currently inline so that if this property
+                // is set with a binding, it is merged
+                return true;
+            }
         }
     }
 

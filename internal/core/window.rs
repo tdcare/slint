@@ -357,6 +357,8 @@ pub struct WindowInner {
 
     /// itemRC will retrieve on wasms
     pub focus_item: RefCell<crate::item_tree::ItemWeak>,
+    /// The last text that was sent to the input method
+    pub(crate) last_ime_text: RefCell<SharedString>,
     /// Don't let ComponentContainers's instantiation change the focus.
     /// This is a workaround for a recursion when instantiating ComponentContainer because the
     /// init code for the component might have code that sets the focus, but we don't want that
@@ -422,6 +424,7 @@ impl WindowInner {
             #[cfg(not(feature = "std"))]
             fullscreen: Cell::new(false),
             focus_item: Default::default(),
+            last_ime_text: Default::default(),
             cursor_blinker: Default::default(),
             active_popup: Default::default(),
             had_popup_on_press: Default::default(),
@@ -491,6 +494,7 @@ impl WindowInner {
 
         let window_adapter = self.window_adapter();
         let mut mouse_input_state = self.mouse_input_state.take();
+        let last_top_item = mouse_input_state.top_item();
         if released_event {
             mouse_input_state =
                 crate::input::process_delayed_event(&window_adapter, mouse_input_state);
@@ -551,6 +555,11 @@ impl WindowInner {
         } else {
             mouse_input_state
         };
+
+        if last_top_item != mouse_input_state.top_item() {
+            self.click_state.reset();
+            self.click_state.check_repeat(event);
+        }
 
         self.mouse_input_state.set(mouse_input_state);
 

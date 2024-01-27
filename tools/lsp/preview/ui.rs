@@ -36,14 +36,14 @@ pub fn create_ui(style: String) -> Result<PreviewUi, PlatformError> {
     ui.set_experimental(true);
 
     ui.on_style_changed(super::change_style);
-    ui.on_show_document(|url, line, column| {
+    ui.on_show_document(|file, line, column| {
         use lsp_types::{Position, Range};
         let pos = Position::new((line as u32).saturating_sub(1), (column as u32).saturating_sub(1));
-
-        super::ask_editor_to_show_document(url.into(), Range::new(pos, pos))
+        super::ask_editor_to_show_document(&file, Range::new(pos, pos))
     });
-    ui.on_select_at(super::select_element_at);
-    ui.on_select_into(super::select_element_into);
+    ui.on_unselect(super::element_selection::unselect_element);
+    ui.on_select_at(super::element_selection::select_element_at);
+    ui.on_select_behind(super::element_selection::select_element_behind);
     ui.on_can_drop(super::can_drop_component);
     ui.on_drop(super::drop_component);
 

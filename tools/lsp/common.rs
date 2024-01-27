@@ -3,6 +3,10 @@
 
 //! Data structures common between LSP and previewer
 
+use i_slint_compiler::{
+    object_tree::Element,
+    parser::{syntax_nodes, SyntaxKind},
+};
 use lsp_types::Url;
 
 use std::{collections::HashMap, path::PathBuf};
@@ -10,6 +14,21 @@ use std::{collections::HashMap, path::PathBuf};
 pub type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
 pub type UrlVersion = Option<i32>;
+
+/// Use this in nodes you want the language server and preview to
+/// ignore a node for code analysis purposes.
+pub const NODE_IGNORE_COMMENT: &str = "@lsp:ignore-node";
+
+/// Filter nodes that are marked up to be ignored from the list of nodes.
+pub fn filter_ignore_nodes_in_element(
+    element: &Element,
+) -> impl Iterator<Item = &syntax_nodes::Element> {
+    element.node.iter().filter(move |e| {
+        !e.children().any(|n| {
+            n.kind() == SyntaxKind::Comment && format!("{}", n.text()).contains(NODE_IGNORE_COMMENT)
+        })
+    })
+}
 
 /// A versioned file
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -42,25 +61,6 @@ pub struct PreviewConfig {
     pub style: String,
     pub include_paths: Vec<PathBuf>,
     pub library_paths: HashMap<String, PathBuf>,
-}
-
-/// API used by the LSP to talk to the Preview. The other direction uses the
-/// ServerNotifier
-pub trait PreviewApi {
-    fn set_use_external_previewer(&self, use_external: bool);
-    fn set_contents(&self, url: &VersionedUrl, contents: &str);
-    fn load_preview(&self, component: PreviewComponent);
-    fn config_changed(&self, config: PreviewConfig);
-    fn highlight(&self, url: Option<Url>, offset: u32) -> Result<()>;
-
-    /// What is the current component to preview?
-    fn current_component(&self) -> Option<PreviewComponent>;
-
-    fn report_known_components(
-        &self,
-        url: Option<VersionedUrl>,
-        components: Vec<ComponentInformation>,
-    );
 }
 
 /// The Component to preview
@@ -102,7 +102,7 @@ pub struct Diagnostic {
 pub enum PreviewToLspMessage {
     Status { message: String, health: crate::lsp_ext::Health },
     Diagnostics { uri: Url, diagnostics: Vec<lsp_types::Diagnostic> },
-    ShowDocument { file: String, selection: lsp_types::Range },
+    ShowDocument { file: Url, selection: lsp_types::Range },
     PreviewTypeChanged { is_external: bool },
     RequestState { unused: bool }, // send all documents!
 }

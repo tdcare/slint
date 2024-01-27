@@ -42,7 +42,7 @@ jobs:
       run: |
          version=`npm pkg get version | jq -r`
          if [ "$RELEASE_INPUT" != "true" ]; then
-             nightly_version_suffix=`git log -1 --format=%cd --date="format:%Y%-m%-d%H"`
+             nightly_version_suffix=`git log -1 --format=%cd --date="format:%Y%m%d%H"`
              version="$version-nightly.$nightly_version_suffix"
          fi
          echo $version
@@ -92,7 +92,15 @@ jobs:
         run: |
           if [ "$RELEASE_INPUT" != "true" ]; then
               npm version $PKG_VERSION
-          fi    
+          fi
+      - name: Prepare feature config for binaries
+        working-directory: api/node
+        shell: bash
+        run: |
+            perl -pi -e 's,^default =.*,,' Cargo.toml
+            perl -pi -e 's,# binaries:,,' Cargo.toml
+            echo "New defaults:"
+            grep "^\s*default =" Cargo.toml
       - name: Build binary
         shell: bash
         working-directory: api/node      
