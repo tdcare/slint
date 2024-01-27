@@ -9,12 +9,12 @@ license = "MIT"
 build = "build.rs"
 publish = false
 
-[[bin]]
-path = "main.rs"
-name = "ohos-demo"
+#[[bin]]
+#path = "main.rs"
+#name = "ohos-demo"
 [lib]
 path="lib.rs"
-#crate-type = ["cdylib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 slint = { workspace = true, default-features = false, features = [
