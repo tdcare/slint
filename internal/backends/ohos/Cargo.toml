@@ -1,5 +1,5 @@
 [package]
-name = "slint-ohos"
+name = "i-slint-backend-ohos"
 authors = ["TDCare <tzw@tdcare.cn>"]
 documentation.workspace = true
 edition.workspace = true
@@ -11,7 +11,6 @@ version.workspace = true
 description = "Slint for OpenHarmony"
 categories = ["gui", "rendering::engine"]
 keywords = ["gui", "toolkit", "graphics", "design", "ui","OpenHarmony","OHOS"]
-
 
 
 #[[bin]]
@@ -27,18 +26,19 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
-napi = { version = "2.12.2", default-features = false, features = ["napi4","tokio_rt"] }
-napi-derive = "2.12.2"
+#napi = { version = "2.12.2", default-features = false, features = ["napi4","tokio_rt"] }
+#napi-derive = "2.12.2"
 
-slint = { path = "../rs/slint", default-features = false, features = [
-    "compat-1-0",
-    "std",
-    "ohos",
-] }
+#slint = { workspace = true, default-features = false, features = [
+#    "compat-1-0",
+#    "std",
+#    "ohos",
+#] }
 
-i-slint-core = {  path="../../internal/core", default-features = false, features = ["std","ffi","software-renderer","ohos"] }
-i-slint-renderer-femtovg = {  path = "../../internal/renderers/femtovg",features=["ohos"] }
-slint-interpreter = {  path="../../internal/interpreter", default-features = false, features = ["ffi", "compat-1-2"], optional = true }
+i-slint-core = {  workspace = true, default-features = false, features = ["std","ffi","software-renderer","ohos"] }
+i-slint-renderer-femtovg = {  workspace = true,features=["ohos"] }
+
+#slint-interpreter = {  workspace = true, default-features = false, features = ["ffi", "compat-1-2"], optional = true }
 
 glutin = {git="https://gitee.com/tdcare/glutin.git",branch="0.30.x",default-features = false,features=["egl"]}
 
@@ -55,16 +55,19 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 
 libc = "0.2"
 
-webrtc = "0.9.0"
+#webrtc = "0.9.0"
 lazy_static = "1"
 tokio = { version = "1.32.0", features = ["full"] }
 
 napi-ohos        = { version = "*" }
 napi-derive-ohos = { version = "*" }
+#OpenHarmony 日志库
+hilog-binding = "0.0.2"
 
 [build-dependencies]
-napi-build = "2.0.1"
-slint-build = { path = "../rs/build" }
+#napi-build = "2.0.1"
+slint-build = { path = "../../../api/rs/build" }
+
 napi-build-ohos = { version = "*" }
 
 

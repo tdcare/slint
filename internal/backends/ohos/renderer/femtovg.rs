@@ -3,6 +3,7 @@
 
 use std::num::NonZeroU32;
 use std::os::raw::c_void;
+use hilog_binding::*;
 
 use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
 use i_slint_core::item_rendering::ItemRenderer;
@@ -183,6 +184,7 @@ impl FemtoVGRendererAdapter {
 
         let gl_context=GlContextWrapper::new(display, )?;
 
+
         // return Err(PlatformError::NoPlatform);
 
         let inner_renderer=i_slint_renderer_femtovg::FemtoVGRenderer::new(gl_context)?;
@@ -192,7 +194,7 @@ impl FemtoVGRendererAdapter {
             size,
         });
          // return Err(PlatformError::NoPlatform);
-
+        hilog_info!("使用 FemtoVG OpenGL renderer");
         eprintln!("Using FemtoVG OpenGL renderer");
 
         Ok(renderer)

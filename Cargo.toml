@@ -5,7 +5,6 @@
 members = [
     'api/cpp',
     'api/node',
-    'api/ohos',
     'api/rs/build',
     'api/rs/macros',
     'api/rs/slint',
@@ -30,6 +29,7 @@ members = [
     'examples/energy-monitor',
     'examples/mcu-board-support',
     'examples/uefi-demo',
+    'examples/ohos-demo',
     'helper_crates/const-field-offset',
     'helper_crates/vtable',
     'helper_crates/vtable/macro',
@@ -39,6 +39,7 @@ members = [
     'internal/backends/selector',
     'internal/backends/testing',
     'internal/backends/linuxkms',
+    'internal/backends/ohos',
     'internal/renderers/skia',
     'internal/renderers/femtovg',
     'internal/common',
@@ -109,6 +110,7 @@ version = "1.4.0"
 
 [workspace.dependencies]
 i-slint-backend-android-activity = { version = "=1.4.0", path = "internal/backends/android-activity", default-features = false }
+i-slint-backend-ohos = { version = "=1.4.0", path = "internal/backends/ohos", default-features = false }
 i-slint-backend-linuxkms = { version = "=1.4.0", path = "internal/backends/linuxkms", default-features = false }
 i-slint-backend-qt = { version = "=1.4.0", path="internal/backends/qt", default-features = false }
 i-slint-backend-selector = { version = "=1.4.0", path = "internal/backends/selector", default-features = false }

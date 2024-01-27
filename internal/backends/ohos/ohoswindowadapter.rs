@@ -6,6 +6,7 @@
 use std::cell::Cell;
 use std::pin::Pin;
 use std::rc::Rc;
+use hilog_binding::hilog_debug;
 
 use i_slint_core::api::{LogicalPosition, PhysicalSize as PhysicalWindowSize};
 use i_slint_core::graphics::euclid;

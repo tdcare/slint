@@ -34,6 +34,7 @@ pub mod ohoswindowadapter;
 #[macro_use]
 extern crate napi_derive;
 
+use hilog_binding::hilog_debug;
 use napi::bindgen_prelude::*;
 use i_slint_core::api::EventLoopError;
 use i_slint_core::string::format;
@@ -51,6 +52,13 @@ pub fn sum(a: i32, b: i32) -> i32 {
 #[napi]
 pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
     let v = p.await?;
+    hilog_debug!(
+        "test",
+        LogOptions {
+          tag: Some("testTag"),
+          domain: None
+      }
+    );
     Ok(v + 210)
 }
 
@@ -181,7 +189,7 @@ pub fn glution_egl(ohos_widows: *mut c_void, w:u32, h:u32,error:*mut c_char) -> 
 /// 将OHOS中的事件传递给Slint 由OHOS 的C++ 进行调用
 ///触摸事件
 #[no_mangle]
-pub unsafe fn slint_touch(touch_event:*mut OH_NativeXComponent_TouchEvent, message:*mut c_char) ->i32{
+pub  fn slint_touch(touch_event:*mut OH_NativeXComponent_TouchEvent, message:*mut c_char) ->i32{
     let event=OHOS_Input_Event::TouchEvent(*touch_event);
     let (status,message_c_string)=slint_event_proxy(event);
     unsafe {
@@ -190,7 +198,7 @@ pub unsafe fn slint_touch(touch_event:*mut OH_NativeXComponent_TouchEvent, messa
     status
 }
 
- fn slint_event_proxy(input_event:OHOS_Input_Event)->(i32,CString){
+pub fn slint_event_proxy(input_event:OHOS_Input_Event)->(i32,CString){
     let mut errored=false;
     let mut message_c_string=CString::new("运行成功").expect("Failed to create CString");
 
