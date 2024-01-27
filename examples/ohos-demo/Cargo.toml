@@ -14,7 +14,7 @@ path = "main.rs"
 name = "ohos-demo"
 [lib]
 path="lib.rs"
-crate-type = ["cdylib"]
+#crate-type = ["cdylib"]
 
 [dependencies]
 slint = { workspace = true, default-features = false, features = [
