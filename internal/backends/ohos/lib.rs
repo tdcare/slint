@@ -31,8 +31,8 @@ pub mod calloop_backend;
 // #[cfg(target_os = "ohos")]
 pub mod ohoswindowadapter;
 
-#[macro_use]
-extern crate napi_derive;
+// #[macro_use]
+// extern crate napi_derive;
 
 use hilog_binding::hilog_debug;
 use napi::bindgen_prelude::*;
