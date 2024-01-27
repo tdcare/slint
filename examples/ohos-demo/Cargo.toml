@@ -13,7 +13,7 @@ publish = false
 path = "main.rs"
 name = "ohos-demo"
 [lib]
-##path="src/lib.rs"
+path="lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
