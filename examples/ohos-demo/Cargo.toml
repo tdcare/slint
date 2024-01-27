@@ -3,9 +3,18 @@
 
 [package]
 name = "ohos-demo"
-version = "1.4.0"
-edition = "2021"
-license = "MIT"
+
+documentation.workspace = true
+edition.workspace = true
+homepage = "https://slint.rs"
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+description = "Slint for OpenHarmony"
+categories = ["gui", "rendering::engine"]
+keywords = ["gui", "toolkit", "graphics", "design", "ui","OpenHarmony","OHOS"]
+
 build = "build.rs"
 publish = false
 
