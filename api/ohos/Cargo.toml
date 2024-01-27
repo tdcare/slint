@@ -59,10 +59,14 @@ webrtc = "0.9.0"
 lazy_static = "1"
 tokio = { version = "1.32.0", features = ["full"] }
 
+napi-ohos        = { version = "*" }
+napi-derive-ohos = { version = "*" }
 
 [build-dependencies]
 napi-build = "2.0.1"
 slint-build = { path = "../rs/build" }
+napi-build-ohos = { version = "*" }
+
 
 gl_generator = "0.14"
 cfg_aliases = "0.1.1"

@@ -127,13 +127,12 @@ fn init_fontdb() -> FontDatabase {
         font_db.set_sans_serif_family("DejaVu Sans");
     }
 
-    #[cfg(not(any(target_arch = "wasm32",feature = "ohos")))]
     #[cfg(target_os = "android")]
     {
         font_db.load_fonts_dir("/system/fonts");
         font_db.set_sans_serif_family("Roboto");
     }
-    #[cfg(not(any(target_arch = "wasm32", target_arch = "android")))]
+    #[cfg(not(any(target_arch = "wasm32",feature = "ohos", target_arch = "android")))]
     {
         font_db.load_system_fonts();
         cfg_if::cfg_if! {
@@ -196,7 +195,7 @@ pub fn register_font_from_memory(data: &'static [u8]) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32",feature = "ohos")))]
 pub fn register_font_from_path(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let requested_path = path.canonicalize().unwrap_or_else(|_| path.to_owned());
     FONT_DB.with(|db| {
@@ -215,7 +214,7 @@ pub fn register_font_from_path(path: &std::path::Path) -> Result<(), Box<dyn std
     })
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32",feature = "ohos"))]
 pub fn register_font_from_path(_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     return Err(std::io::Error::new(
         std::io::ErrorKind::Other,
