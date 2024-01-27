@@ -6,18 +6,19 @@ use std::path::PathBuf;
 
 use cfg_aliases::cfg_aliases;
 use gl_generator::{Api, Fallbacks, Profile, Registry, StructGenerator};
+use napi_build_ohos;
 
 
 fn main() {
   // napi_build::setup();
-
-  slint_build::compile_with_config(
-    "booker.slint",
-    slint_build::CompilerConfiguration::new()
-        .with_style("fluent-dark".to_owned())
-        .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer),
-  )
-      .unwrap();
+    napi_build_ohos::setup();
+  // slint_build::compile_with_config(
+  //   "demo.slint",
+  //   slint_build::CompilerConfiguration::new()
+  //       .with_style("fluent-dark".to_owned())
+  //       .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer),
+  // )
+  //     .unwrap();
 
 
 
