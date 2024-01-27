@@ -12,7 +12,6 @@ use i_slint_core::with_platform;
 use chrono::NaiveDate;
 use libc::c_int;
 use napi_ohos::bindgen_prelude::*;
-use slint::SharedString;
 
 
 
