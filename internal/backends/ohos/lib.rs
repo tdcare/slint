@@ -189,18 +189,18 @@ pub fn glution_egl(ohos_widows: *mut c_void, w:u32, h:u32,error:*mut c_char) -> 
         }
     }
 }
-
-/// 将OHOS中的事件传递给Slint 由OHOS 的C++ 进行调用
-///触摸事件
-#[no_mangle]
-pub unsafe fn slint_touch(touch_event:*mut OH_NativeXComponent_TouchEvent, message:*mut c_char) ->i32{
-    let event=OHOS_Input_Event::TouchEvent(*touch_event);
-    let (status,message_c_string)=slint_event_proxy(event);
-    unsafe {
-        libc::strcpy(message, message_c_string.as_ptr());
-    }
-    status
-}
+//
+// /// 将OHOS中的事件传递给Slint 由OHOS 的C++ 进行调用
+// ///触摸事件
+// #[no_mangle]
+// pub unsafe fn slint_touch(touch_event:*mut OH_NativeXComponent_TouchEvent, message:*mut c_char) ->i32{
+//     let event=OHOS_Input_Event::TouchEvent(*touch_event);
+//     let (status,message_c_string)=slint_event_proxy(event);
+//     unsafe {
+//         libc::strcpy(message, message_c_string.as_ptr());
+//     }
+//     status
+// }
 
 pub fn slint_event_proxy(input_event:OHOS_Input_Event)->(i32,CString){
     let mut errored=false;
