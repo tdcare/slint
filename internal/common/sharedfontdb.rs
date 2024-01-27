@@ -60,7 +60,7 @@ thread_local! {
     target_os = "macos",
     target_os = "ios",
     feature = "ohos",
-    target_arch = "wasm32"
+    target_arch = "wasm32",
     target_os = "android",
 )))]
 mod fontconfig;
@@ -115,7 +115,7 @@ fn init_fontdb() -> FontDatabase {
         target_os = "macos",
         target_os = "ios",
         feature = "ohos",
-        target_arch = "wasm32"
+        target_arch = "wasm32",
         target_os = "android",
     )))]
     let mut fontconfig_fallback_families = Vec::new();
@@ -141,7 +141,7 @@ fn init_fontdb() -> FontDatabase {
                 target_os = "macos",
                 target_os = "ios",
                 feature = "ohos",
-                target_arch = "wasm32"
+                target_arch = "wasm32",
                 target_os = "android",
             )))] {
                 match fontconfig::find_families("sans-serif") {
@@ -176,7 +176,7 @@ fn init_fontdb() -> FontDatabase {
             target_os = "macos",
             target_os = "ios",
             feature = "ohos",
-            target_arch = "wasm32"
+            target_arch = "wasm32",
             target_os = "android",
         )))]
         fontconfig_fallback_families,
