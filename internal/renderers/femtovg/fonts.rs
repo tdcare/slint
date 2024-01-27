@@ -425,7 +425,7 @@ impl FontCache {
         target_os = "macos",
         target_os = "ios",
         feature = "ohos",
-        target_arch = "wasm32"
+        target_arch = "wasm32",
         target_os = "android",
     )))]
     fn font_fallbacks_for_request(
