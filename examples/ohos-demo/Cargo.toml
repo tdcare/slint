@@ -41,3 +41,4 @@ napi-ohos        = { version = "*" }
 napi-derive-ohos = { version = "*" }
 [build-dependencies]
 slint-build = { path = "../../api/rs/build" }
+napi-build-ohos = { version = "*" }
