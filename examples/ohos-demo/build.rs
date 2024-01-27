@@ -1,5 +1,6 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: MIT
+use napi_build_ohos;
 
 fn main() {
     napi_build_ohos::setup();
