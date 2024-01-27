@@ -14,8 +14,9 @@ use libc::c_int;
 use slint::SharedString;
 
 
-#[macro_use]
-extern crate napi_derive;
+// #[macro_use]
+// extern crate napi_derive;
+use napi_derive_ohos::napi;
 
 use hilog_binding::hilog_debug;
 
