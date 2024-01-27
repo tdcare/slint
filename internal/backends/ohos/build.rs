@@ -1,5 +1,5 @@
 
-extern crate napi_build;
+// extern crate napi_build;
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ use gl_generator::{Api, Fallbacks, Profile, Registry, StructGenerator};
 
 
 fn main() {
-  napi_build::setup();
+  // napi_build::setup();
 
   slint_build::compile_with_config(
     "booker.slint",

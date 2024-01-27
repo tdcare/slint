@@ -35,7 +35,7 @@ pub mod ohoswindowadapter;
 // extern crate napi_derive;
 
 use hilog_binding::hilog_debug;
-use napi::bindgen_prelude::*;
+// use napi::bindgen_prelude::*;
 use i_slint_core::api::EventLoopError;
 use i_slint_core::string::format;
 use PlatformError::NoPlatform;
@@ -44,23 +44,23 @@ use crate::calloop_backend::Backend;
 use crate::calloop_backend::input::{GLOBAL_PROXY, OHOS_EVENT_SENDER};
 use crate::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
 
-#[napi]
-pub fn sum(a: i32, b: i32) -> i32 {
-    a + b + 100
-}
-
-#[napi]
-pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
-    let v = p.await?;
-    hilog_debug!(
-        "test",
-        LogOptions {
-          tag: Some("testTag"),
-          domain: None
-      }
-    );
-    Ok(v + 210)
-}
+// #[napi]
+// pub fn sum(a: i32, b: i32) -> i32 {
+//     a + b + 100
+// }
+//
+// #[napi]
+// pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
+//     let v = p.await?;
+//     hilog_debug!(
+//         "test",
+//         LogOptions {
+//           tag: Some("testTag"),
+//           domain: None
+//       }
+//     );
+//     Ok(v + 210)
+// }
 
 #[no_mangle]
 pub unsafe extern "C" fn slint_windowrc_init(out: *mut std::os::raw::c_void) {
