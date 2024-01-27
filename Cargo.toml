@@ -142,7 +142,7 @@ toml_edit = { version = "0.21" }
 cfg_aliases = { version = "0.2.0" }
 
 [profile.release]
-lto = true
+#lto = true
 panic = "abort"
 
 [profile.dev]
