@@ -15,7 +15,7 @@ pub struct FontDatabase {
         target_os = "macos",
         target_os = "ios",
         feature = "ohos",
-        target_arch = "wasm32"
+        target_arch = "wasm32",
         target_os = "android",
     )))]
     pub fontconfig_fallback_families: Vec<String>,
