@@ -34,7 +34,7 @@ pub mod ohoswindowadapter;
 // #[macro_use]
 // extern crate napi_derive;
 
-use hilog_binding::hilog_debug;
+// use hilog_binding::hilog_debug;
 // use napi::bindgen_prelude::*;
 use i_slint_core::api::EventLoopError;
 use i_slint_core::string::format;

@@ -40,8 +40,8 @@ tokio = { version = "1.32.0", features = ["full"] }
 napi-ohos        = { version = "*" }
 napi-derive-ohos = { version = "*" }
 
-#OpenHarmony 日志库
-hilog-binding = "0.0.2"
+##OpenHarmony 日志库
+#hilog-binding = "0.0.2"
 
 
 [build-dependencies]

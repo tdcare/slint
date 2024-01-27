@@ -18,7 +18,7 @@ use slint::SharedString;
 // extern crate napi_derive;
 use napi_derive_ohos::napi;
 
-use hilog_binding::hilog_debug;
+// use hilog_binding::hilog_debug;
 
 // use napi::bindgen_prelude::*;
 // use i_slint_core::api::EventLoopError;
