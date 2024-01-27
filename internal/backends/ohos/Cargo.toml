@@ -19,9 +19,8 @@ keywords = ["gui", "toolkit", "graphics", "design", "ui","OpenHarmony","OHOS"]
 
 #
 [lib]
-##path="src/lib.rs"
-crate-type = ["cdylib"]
-#crate-type = ["staticlib"]
+path="lib.rs"
+#crate-type = ["cdylib"]
 [features]
 
 [dependencies]
