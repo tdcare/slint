@@ -120,27 +120,6 @@ impl Platform for Backend {
         Rc<dyn WindowAdapter>,
         PlatformError,
     > {
-        // let renderer = (self.renderer_factory)(&|device: &std::path::Path| {
-        //     let (_, fd) = self
-        //         .seat
-        //         .borrow_mut()
-        //         .open_device(&device)
-        //         .map_err(|e| format!("Error opening device: {e}"))?;
-        //
-        //     // For polling for drm::control::Event::PageFlip we need a blocking FD. Would be better to do this non-blocking
-        //     let flags = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFL)
-        //         .map_err(|e| format!("Error getting file descriptor flags: {e}"))?;
-        //     // Safetly: We only remove a bit, don't care about the others
-        //     let mut flags = unsafe { nix::fcntl::OFlag::from_bits_unchecked(flags) };
-        //     flags.remove(nix::fcntl::OFlag::O_NONBLOCK);
-        //     nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_SETFL(flags))
-        //         .map_err(|e| format!("Error making device fd non-blocking: {e}"))?;
-        //
-        //     // Safety: We take ownership of the now shared FD, ... although we should be using libseat's close_device....
-        //     use std::os::fd::FromRawFd;
-        //     Ok(Arc::new(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) }))
-        // })?;
-        // let renderer = (self.renderer_factory)(self.ohos_windows,self.width,self.height)?;
 
         let renderer=FemtoVGRendererAdapter::new(self.ohos_windows,self.width,self.height)?;
         // This could be per-screen, once we support multiple outputs
@@ -223,14 +202,15 @@ impl Platform for Backend {
 
             if let Some(adapter) = self.window.borrow().as_ref() {
                 adapter.register_event_loop(event_loop.handle())?;
-                // adapter.clone().render_if_needed(mouse_position_property.as_ref())?;
+                adapter.clone().render_if_needed(mouse_position_property.as_ref())?;
             };
 
-            let next_timeout = if adapter.window().has_active_animations() {
-                Some(std::time::Duration::from_millis(16))
-            } else {
-                i_slint_core::platform::duration_until_next_timer_update()
-            };
+            // let next_timeout = if adapter.window().has_active_animations() {
+            //     Some(std::time::Duration::from_millis(16))
+            // } else {
+            //     i_slint_core::platform::duration_until_next_timer_update()
+            // };
+            let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
 
             event_loop
                 .dispatch(next_timeout, &mut loop_data)
