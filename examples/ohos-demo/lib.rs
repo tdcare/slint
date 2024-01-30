@@ -97,7 +97,7 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
                         }
                         Err(e) => {
                             errored=true;
-                            message_c_string = CString::new(format!("Run Fail")).expect("Failed to create CString");
+                            message_c_string = CString::new(format!("Run Fail:{?}",e)).expect("Failed to create CString");
                         }
                     }
                 }
