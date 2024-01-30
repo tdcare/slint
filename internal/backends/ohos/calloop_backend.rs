@@ -88,7 +88,7 @@ impl Backend {
     pub fn new(ohos_windows: *mut c_void, width: u32, height: u32,) -> Result<Self, PlatformError> {
         let (user_event_sender, user_event_receiver) = calloop::channel::channel();
         let (ohos_event_sender, ohos_event_receiver) = calloop::channel::channel::<OHOS_Input_Event>();
-        let (sender,receiver)=mpsc::sync_channel::<OHOS_Input_Event>(1);
+        // let (sender,receiver)=mpsc::sync_channel::<OHOS_Input_Event>(1);
 
         // std::thread::spawn(|| {
         //     OHOS_EVENT_SENDER.set(sender);//.map_err(|e| format!("保存到全局变量出错了")).expect("TODO: panic message");
@@ -96,63 +96,14 @@ impl Backend {
         OHOS_EVENT_SENDER.get_or_init(||Mutex::from(ohos_event_sender));
        // GLOBAL_PROXY.get_or_init(Default::default);
 
-        // let renderer_factory = crate::renderer::femtovg::FemtoVGRendererAdapter::new;
-        // let renderer_factory = match renderer_name {
-        //     #[cfg(feature = "renderer-skia-vulkan")]
-        //     Some("skia-vulkan") => crate::renderer::skia::SkiaRendererAdapter::new_vulkan,
-        //     #[cfg(feature = "renderer-skia-opengl")]
-        //     Some("skia-opengl") => crate::renderer::skia::SkiaRendererAdapter::new_opengl,
-        //     #[cfg(feature = "renderer-femtovg")]
-        //     Some("femtovg") => crate::renderer::femtovg::FemtoVGRendererAdapter::new,
-        //     None => crate::renderer::try_skia_then_femtovg,
-        //     Some(renderer_name) => {
-        //         eprintln!(
-        //             "slint linuxkms backend: unrecognized renderer {}, falling back default",
-        //             renderer_name
-        //         );
-        //         crate::renderer::try_skia_then_femtovg
-        //     }
-        // };
-
-        // let seat_active = Rc::new(RefCell::new(false));
-        //
-        // //libseat::set_log_level(libseat::LogLevel::Debug);
-        //
-        // let mut seat = {
-        //     let seat_active = seat_active.clone();
-        //     libseat::Seat::open(
-        //         move |_seat, event| match event {
-        //             libseat::SeatEvent::Enable => {
-        //                 *seat_active.borrow_mut() = true;
-        //             }
-        //             libseat::SeatEvent::Disable => {
-        //                 unimplemented!("Seat deactivation is not implemented");
-        //             }
-        //         },
-        //         None,
-        //     )
-        //         .map_err(|e| format!("Error opening session with libseat: {e}"))?
-        // };
-        //
-        // while !(*seat_active.borrow()) {
-        //     if seat.dispatch(5000).map_err(|e| format!("Error waiting for seat activation: {e}"))?
-        //         == 0
-        //     {
-        //         return Err(format!("Timeout while waiting to activate session").into());
-        //     }
-        // }
-
         Ok(Backend {
             ohos_windows,
             width,
             height,
             // seat: Rc::new(RefCell::new(seat)),
             window: Default::default(),
-
             user_event_receiver: RefCell::new(Some(user_event_receiver)),
-
             ohos_event_receiver:RefCell::new(Some(ohos_event_receiver)),
-
             proxy: Proxy::new(user_event_sender),
             // renderer_factory,
             sel_clipboard: Default::default(),
