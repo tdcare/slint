@@ -199,6 +199,7 @@ impl Platform for Backend {
             for callback in callbacks_to_invoke_per_iteration.take().into_iter() {
                 callback();
             }
+            return Err(PlatformError::from("调试".to_string()));
 
             if let Some(adapter) = self.window.borrow().as_ref() {
                 adapter.register_event_loop(event_loop.handle())?;
