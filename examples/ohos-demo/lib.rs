@@ -59,7 +59,7 @@ slint::slint!(import { Booker } from "booker.slint";);
 pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
     let mut errored=false;
     let mut message_c_string=CString::new("Running ").expect("Failed to create CString");
-
+/*
     match   Backend::new(ohos_widows, w, h) {
         Ok(backend) => {
            match  slint::platform::set_platform(Box::new(backend)){
@@ -111,7 +111,7 @@ pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i3
             message_c_string = CString::new(format!("Err")).expect("Failed to create CString");
         }
     }
-
+*/
     unsafe {
         libc::strcpy(message, message_c_string.as_ptr());
     }
