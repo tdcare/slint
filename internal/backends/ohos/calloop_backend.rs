@@ -202,7 +202,7 @@ impl Platform for Backend {
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
-        // return Err(PlatformError::from("错误".to_string()));
+        return Err(PlatformError::from("错误".to_string()));
         // let adapter = self.window.borrow().as_ref().unwrap().clone();
         let adapter = self.window.borrow().as_ref().ok_or_else(|| format!("Error windows adapter "))?.clone();
 
