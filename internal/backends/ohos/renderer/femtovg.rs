@@ -193,7 +193,7 @@ impl FemtoVGRendererAdapter {
             renderer: inner_renderer,
             size,
         });
-         return Err(PlatformError::NoPlatform);
+         // return Err(PlatformError::NoPlatform);
         // hilog_info!("使用 FemtoVG OpenGL renderer");
         eprintln!("Using FemtoVG OpenGL renderer");
 

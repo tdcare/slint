@@ -194,7 +194,7 @@ impl Platform for Backend {
         let renderer=FemtoVGRendererAdapter::new(self.ohos_windows,self.width,self.height)?;
 
         let adapter = OhosWindowAdapter::new(renderer)?;
-        // return Err(PlatformError::NoEventLoopProvider);
+        return Err(PlatformError::NoEventLoopProvider);
 
        *self.window.borrow_mut() = Some(adapter.clone());
 
