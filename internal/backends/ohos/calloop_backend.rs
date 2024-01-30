@@ -192,8 +192,15 @@ impl Platform for Backend {
         // let renderer = (self.renderer_factory)(self.ohos_windows,self.width,self.height)?;
 
         let renderer=FemtoVGRendererAdapter::new(self.ohos_windows,self.width,self.height)?;
-
-        let adapter = OhosWindowAdapter::new(renderer)?;
+        // This could be per-screen, once we support multiple outputs
+        let rotation =
+            std::env::var("SLINT_KMS_ROTATION").map_or(Ok(Default::default()), |rot_str| {
+                rot_str
+                    .as_str()
+                    .try_into()
+                    .map_err(|e| format!("Failed to parse SLINT_KMS_ROTATION: {e}"))
+            })?;
+        let adapter = OhosWindowAdapter::new(renderer,rotation)?;
         // return Err(PlatformError::NoEventLoopProvider);
 
        *self.window.borrow_mut() = Some(adapter.clone());
@@ -236,17 +243,13 @@ impl Platform for Backend {
 
         event_loop
             .handle()
-            .insert_source(user_event_receiver, |event, _, _| {
+            .insert_source(user_event_receiver, {
                 let callbacks_to_invoke_per_iteration = callbacks_to_invoke_per_iteration.clone();
-
-                // let calloop::channel::Event::Msg(callback) = event else { return; };
-                // callback();
                 move |event, _, _| {
                     let calloop::channel::Event::Msg(callback) = event else { return };
                     // Remember the callbacks and invoke them after updating the animation tick
                     callbacks_to_invoke_per_iteration.borrow_mut().push(callback);
                 }
-
             })
             .map_err(
                 |e: calloop::InsertError<calloop::channel::Channel<Box<dyn FnOnce() + Send>>>| {

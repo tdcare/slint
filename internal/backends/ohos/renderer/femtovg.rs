@@ -217,7 +217,7 @@ impl OhosRenderer for FemtoVGRendererAdapter {
         Ok(())
     }
     fn size(&self) -> i_slint_core::api::PhysicalSize {
-        let (width, height) = self.egl_display.size();
+        let (width, height) = self.egl_display.size;
         i_slint_core::api::PhysicalSize::new(width, height)
     }
 

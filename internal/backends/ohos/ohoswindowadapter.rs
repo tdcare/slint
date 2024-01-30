@@ -154,27 +154,27 @@ impl OhosWindowAdapter {
 
 }
 
-// fn mouse_cursor_image() -> Image {
-//     let mouse_pointer_svg = i_slint_core::graphics::load_image_from_embedded_data(
-//         Slice::from_slice(include_bytes!("mouse-pointer.svg")),
-//         Slice::from_slice(b"svg"),
-//     );
-//     let mouse_pointer_inner: &i_slint_core::graphics::ImageInner = (&mouse_pointer_svg).into();
-//     match mouse_pointer_inner {
-//         i_slint_core::ImageInner::Svg(svg) => {
-//             let pixels = svg.render(None).unwrap();
-//             let cache_key = svg.cache_key();
-//             let mouse_pointer_pixel_image = i_slint_core::graphics::ImageInner::EmbeddedImage {
-//                 cache_key: cache_key.clone(),
-//                 buffer: pixels,
-//             };
-//             i_slint_core::graphics::cache::replace_cached_image(
-//                 cache_key,
-//                 mouse_pointer_pixel_image.clone(),
-//             );
-//
-//             mouse_pointer_pixel_image.into()
-//         }
-//         cached_image @ _ => cached_image.clone().into(),
-//     }
-// }
+fn mouse_cursor_image() -> Image {
+    let mouse_pointer_svg = i_slint_core::graphics::load_image_from_embedded_data(
+        Slice::from_slice(include_bytes!("mouse-pointer.svg")),
+        Slice::from_slice(b"svg"),
+    );
+    let mouse_pointer_inner: &i_slint_core::graphics::ImageInner = (&mouse_pointer_svg).into();
+    match mouse_pointer_inner {
+        i_slint_core::ImageInner::Svg(svg) => {
+            let pixels = svg.render(None).unwrap();
+            let cache_key = svg.cache_key();
+            let mouse_pointer_pixel_image = i_slint_core::graphics::ImageInner::EmbeddedImage {
+                cache_key: cache_key.clone(),
+                buffer: pixels,
+            };
+            i_slint_core::graphics::cache::replace_cached_image(
+                cache_key,
+                mouse_pointer_pixel_image.clone(),
+            );
+
+            mouse_pointer_pixel_image.into()
+        }
+        cached_image @ _ => cached_image.clone().into(),
+    }
+}
