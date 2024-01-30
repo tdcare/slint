@@ -199,12 +199,13 @@ impl Platform for Backend {
             for callback in callbacks_to_invoke_per_iteration.take().into_iter() {
                 callback();
             }
-            return Err(PlatformError::from("调试".to_string()));
+            // return Err(PlatformError::from("调试".to_string()));
 
             if let Some(adapter) = self.window.borrow().as_ref() {
                 adapter.register_event_loop(event_loop.handle())?;
                 adapter.clone().render_if_needed(mouse_position_property.as_ref())?;
             };
+            return Err(PlatformError::from("调试1".to_string()));
 
             // let next_timeout = if adapter.window().has_active_animations() {
             //     Some(std::time::Duration::from_millis(16))
