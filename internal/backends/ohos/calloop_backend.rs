@@ -317,7 +317,7 @@ impl Platform for Backend {
 }
 
 #[derive(Default)]
-struct LoopData {}
+pub struct LoopData {}
 
 struct Device {
     // in the future, use this from libseat: device_id: i32,
