@@ -213,11 +213,11 @@ impl Platform for Backend {
             //     i_slint_core::platform::duration_until_next_timer_update()
             // };
 
-            // let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
-            //
-            // event_loop
-            //     .dispatch(next_timeout, &mut loop_data)
-            //     .map_err(|e| format!("Error dispatch events: {e}"))?;
+            let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
+
+            event_loop
+                .dispatch(next_timeout, &mut loop_data)
+                .map_err(|e| format!("Error dispatch events: {e}"))?;
         }
 
         Ok(())
