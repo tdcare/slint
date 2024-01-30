@@ -205,18 +205,19 @@ impl Platform for Backend {
                 adapter.register_event_loop(event_loop.handle())?;
                 adapter.clone().render_if_needed(mouse_position_property.as_ref())?;
             };
-            return Err(PlatformError::from("调试1".to_string()));
+            // return Err(PlatformError::from("调试1".to_string()));
 
             // let next_timeout = if adapter.window().has_active_animations() {
             //     Some(std::time::Duration::from_millis(16))
             // } else {
             //     i_slint_core::platform::duration_until_next_timer_update()
             // };
-            let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
 
-            event_loop
-                .dispatch(next_timeout, &mut loop_data)
-                .map_err(|e| format!("Error dispatch events: {e}"))?;
+            // let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
+            //
+            // event_loop
+            //     .dispatch(next_timeout, &mut loop_data)
+            //     .map_err(|e| format!("Error dispatch events: {e}"))?;
         }
 
         Ok(())
