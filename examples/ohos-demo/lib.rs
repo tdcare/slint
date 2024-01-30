@@ -69,7 +69,7 @@ pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i3
                }
                Err(e) => {
                    errored=true;
-                   message_c_string = CString::new(format!("Configed Platform Fail:{:?}", e)).expect("Failed to create CString");
+                   message_c_string = CString::new(format!("Configed Platform Fail")).expect("Failed to create CString");
                }
            }
 
@@ -101,18 +101,18 @@ pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i3
                         }
                         Err(e) => {
                             errored=true;
-                            message_c_string = CString::new(format!("Run Fail:{:?}", e)).expect("Failed to create CString");
+                            message_c_string = CString::new(format!("Run Fail")).expect("Failed to create CString");
                         }
                     }
                 }
                 Err(e) => {
                     errored=true;
-                    message_c_string = CString::new(format!("Build Fail:{:?}", e)).expect("Failed to create CString");
+                    message_c_string = CString::new(format!("Build Fail")).expect("Failed to create CString");
                 }
             }
         }
         Err(e) => {
-            message_c_string = CString::new(format!("{:?}", e)).expect("Failed to create CString");
+            message_c_string = CString::new(format!("Err")).expect("Failed to create CString");
         }
     }
 
