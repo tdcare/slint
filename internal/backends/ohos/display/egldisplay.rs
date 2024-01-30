@@ -5,7 +5,6 @@ use std::cell::Cell;
 use std::os::raw::c_void;
 // use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
-use std::cell::Cell;
 use std::rc::{Rc, Weak};
 
 // use crate::DeviceOpener;
