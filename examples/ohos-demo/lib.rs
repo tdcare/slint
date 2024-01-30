@@ -56,7 +56,7 @@ slint::slint!(import { Booker } from "booker.slint";);
 
 /// 初始化 Slint 由OHOS 的C++ 进行调用
 #[no_mangle]
-pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
+pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
     let mut errored=false;
     let mut message_c_string=CString::new("Running ").expect("Failed to create CString");
 /*
