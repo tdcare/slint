@@ -31,7 +31,7 @@ use i_slint_backend_ohos::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent
 use hilog_binding::hilog_debug;
 #[napi]
 pub fn sum(a: i32, b: i32) -> i32 {
-    hilog_debug!("hello world");
+    hilog_debug!("hello world!");
     a + b + 100
 }
 
@@ -58,7 +58,7 @@ slint::slint!(import { Booker } from "booker.slint";);
 #[no_mangle]
 pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
     let mut errored=false;
-    let mut message_c_string=CString::new("Running").expect("Failed to create CString");
+    let mut message_c_string=CString::new("Running ").expect("Failed to create CString");
 
     match   Backend::new(ohos_widows, w, h) {
         Ok(backend) => {
