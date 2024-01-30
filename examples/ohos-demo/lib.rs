@@ -58,18 +58,18 @@ slint::slint!(import { Booker } from "booker.slint";);
 #[no_mangle]
 pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
     let mut errored=false;
-    let mut message_c_string=CString::new("运行成功").expect("Failed to create CString");
+    let mut message_c_string=CString::new("Running").expect("Failed to create CString");
 
     match   Backend::new(ohos_widows, w, h) {
         Ok(backend) => {
            match  slint::platform::set_platform(Box::new(backend)){
                Ok(paltform) => {
-                   message_c_string = CString::new(format!("设置平台信息成功")).expect("Failed to create CString");
+                   message_c_string = CString::new(format!("Configed Platform ")).expect("Failed to create CString");
 
                }
                Err(e) => {
                    errored=true;
-                   message_c_string = CString::new(format!("设置失败:{:?}", e)).expect("Failed to create CString");
+                   message_c_string = CString::new(format!("Configed Platform Fail:{:?}", e)).expect("Failed to create CString");
                }
            }
 
@@ -96,18 +96,18 @@ pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i3
                     match main_window.run() {
                         Ok(run) => {
                             errored=false;
-                            message_c_string = CString::new(format!("运行成功")).expect("Failed to create CString");
+                            message_c_string = CString::new(format!("Run")).expect("Failed to create CString");
 
                         }
                         Err(e) => {
                             errored=true;
-                            message_c_string = CString::new(format!("运行失败:{:?}", e)).expect("Failed to create CString");
+                            message_c_string = CString::new(format!("Run Fail:{:?}", e)).expect("Failed to create CString");
                         }
                     }
                 }
                 Err(e) => {
                     errored=true;
-                    message_c_string = CString::new(format!("构建失败:{:?}", e)).expect("Failed to create CString");
+                    message_c_string = CString::new(format!("Build Fail:{:?}", e)).expect("Failed to create CString");
                 }
             }
         }
