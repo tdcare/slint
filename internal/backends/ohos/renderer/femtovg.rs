@@ -3,6 +3,7 @@
 
 use std::num::NonZeroU32;
 use std::os::raw::c_void;
+use std::rc::Rc;
 // use hilog_binding::*;
 
 use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
@@ -20,22 +21,17 @@ use glutin::{
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
 use i_slint_renderer_femtovg::OpenGLInterface;
+use crate::calloop_backend::EventLoopHandle;
 use crate::display::egldisplay::EglDisplay;
+use crate::display::RenderingRotation;
 use crate::ohoswindowadapter::OhosRenderer;
 
 struct GlContextWrapper {
     glutin_context: glutin::context::PossiblyCurrentContext,
     glutin_surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    // egl_display: EglDisplay,
-
-    //
-    // context:*mut std::os::raw::c_void,
-    // surface: *mut std::os::raw::c_void,
-    // display:*mut std::os::raw::c_void,
-    // get_proc_address:unsafe extern "C" fn(std::ffi::CStr)->*const std::ffi::c_void,
 }
 impl GlContextWrapper {
-    fn new(egl_display: EglDisplay) -> Result<Self, PlatformError> {
+    fn new(egl_display: &EglDisplay) -> Result<Self, PlatformError> {
         let width: std::num::NonZeroU32 = egl_display.size.width.try_into().map_err(|_| {
             format!(
                 "Attempting to create window surface with an invalid width: {}",
@@ -154,13 +150,6 @@ unsafe impl OpenGLInterface for GlContextWrapper {
         width: NonZeroU32,
         height: NonZeroU32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // if self.egl_display.size.height != height.get()
-        //     || self.egl_display.size.width != width.get()
-        // {
-        //     Err("Resizing a fullscreen window is not supported".into())
-        // } else {
-        //     Ok(())
-        // }
         Ok(())
     }
 
@@ -172,26 +161,25 @@ unsafe impl OpenGLInterface for GlContextWrapper {
 
 pub struct FemtoVGRendererAdapter {
     renderer: i_slint_renderer_femtovg::FemtoVGRenderer,
-    size: PhysicalWindowSize,
+    egl_display: Rc<EglDisplay>,
 }
 
 impl FemtoVGRendererAdapter {
     pub fn new(oh_native_window: *mut c_void, width: u32, height: u32,
     ) -> Result<Box<dyn OhosRenderer>, PlatformError> {
-        let display = crate::display::egldisplay::create_egl_display(oh_native_window, width, height)?;
+        let egl_display =Rc::new(crate::display::egldisplay::create_egl_display(oh_native_window, width, height)?);
 
-        let size = display.size;
-
-        let gl_context=GlContextWrapper::new(display, )?;
-
+        // let gl_context=GlContextWrapper::new(&display)?;
 
         // return Err(PlatformError::NoPlatform);
 
-        let inner_renderer=i_slint_renderer_femtovg::FemtoVGRenderer::new(gl_context)?;
+        // let inner_renderer=i_slint_renderer_femtovg::FemtoVGRenderer::new(gl_context)?;
 
         let renderer = Box::new(Self {
-            renderer: inner_renderer,
-            size,
+            renderer: i_slint_renderer_femtovg::FemtoVGRenderer::new(GlContextWrapper::new(
+                &egl_display,
+            )?)?,
+            egl_display,
         });
          // return Err(PlatformError::NoPlatform);
         // hilog_info!("使用 FemtoVG OpenGL renderer");
@@ -205,17 +193,35 @@ impl OhosRenderer for FemtoVGRendererAdapter {
     fn as_core_renderer(&self) -> &dyn i_slint_core::renderer::Renderer {
         &self.renderer
     }
+
+    fn is_ready_to_present(&self) -> bool {
+        self.egl_display.presenter.is_ready_to_present()
+    }
+
     fn render_and_present(
         &self,
+        rotation: RenderingRotation,
         draw_mouse_cursor_callback: &dyn Fn(&mut dyn ItemRenderer),
+        ready_for_next_animation_frame: Box<dyn FnOnce()>,
     ) -> Result<(), PlatformError> {
-        // self.renderer.render_with_post_callback(Some(&|item_renderer| {
-        //     draw_mouse_cursor_callback(item_renderer);
-        // }))
-        // return Err(PlatformError::NoPlatform);
+        let size = self.size();
+        self.renderer.render_transformed_with_post_callback(
+            rotation.degrees(),
+            rotation.translation_after_rotation(size),
+            size,
+            Some(&|item_renderer| {
+                draw_mouse_cursor_callback(item_renderer);
+            }),
+        )?;
+        self.egl_display.presenter.present_with_next_frame_callback(ready_for_next_animation_frame)?;
         Ok(())
     }
     fn size(&self) -> i_slint_core::api::PhysicalSize {
-        self.size
+        let (width, height) = self.egl_display.size();
+        i_slint_core::api::PhysicalSize::new(width, height)
+    }
+
+    fn register_page_flip_handler(&self, event_loop_handle: EventLoopHandle) -> Result<(), PlatformError> {
+        self.egl_display.clone().presenter.register_page_flip_handler(event_loop_handle)
     }
 }

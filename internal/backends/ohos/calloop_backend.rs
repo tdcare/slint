@@ -202,7 +202,7 @@ impl Platform for Backend {
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
-        return Err(PlatformError::from("错误".to_string()));
+        // return Err(PlatformError::from("错误".to_string()));
         // let adapter = self.window.borrow().as_ref().unwrap().clone();
         let adapter = self.window.borrow().as_ref().ok_or_else(|| format!("Error windows adapter "))?.clone();
 
@@ -231,12 +231,22 @@ impl Platform for Backend {
                 format!("Re-entering the linuxkms event loop is currently not supported").into()
             );
         };
+        let callbacks_to_invoke_per_iteration = Rc::new(RefCell::new(Vec::new()));
+
 
         event_loop
             .handle()
             .insert_source(user_event_receiver, |event, _, _| {
-                let calloop::channel::Event::Msg(callback) = event else { return; };
-                callback();
+                let callbacks_to_invoke_per_iteration = callbacks_to_invoke_per_iteration.clone();
+
+                // let calloop::channel::Event::Msg(callback) = event else { return; };
+                // callback();
+                move |event, _, _| {
+                    let calloop::channel::Event::Msg(callback) = event else { return };
+                    // Remember the callbacks and invoke them after updating the animation tick
+                    callbacks_to_invoke_per_iteration.borrow_mut().push(callback);
+                }
+
             })
             .map_err(
                 |e: calloop::InsertError<calloop::channel::Channel<Box<dyn FnOnce() + Send>>>| {
@@ -251,8 +261,16 @@ impl Platform for Backend {
         while !quit_loop.load(std::sync::atomic::Ordering::Acquire) {
             i_slint_core::platform::update_timers_and_animations();
 
-            // adapter.render_if_needed(mouse_position_property.as_ref())?;
-            adapter.render_if_needed()?;
+            // Only after updating the animation tick, invoke callbacks from invoke_from_event_loop(). They
+            // might set animated properties, which requires an up-to-date start time.
+            for callback in callbacks_to_invoke_per_iteration.take().into_iter() {
+                callback();
+            }
+
+            if let Some(adapter) = self.window.borrow().as_ref() {
+                adapter.register_event_loop(event_loop.handle())?;
+                // adapter.clone().render_if_needed(mouse_position_property.as_ref())?;
+            };
 
             let next_timeout = if adapter.window().has_active_animations() {
                 Some(std::time::Duration::from_millis(16))
@@ -272,6 +290,16 @@ impl Platform for Backend {
         Some(Box::new(self.proxy.clone()))
     }
 
+
+    fn clipboard_text(&self, clipboard: i_slint_core::platform::Clipboard) -> Option<String> {
+        match clipboard {
+            i_slint_core::platform::Clipboard::DefaultClipboard => self.clipboard.borrow().clone(),
+            i_slint_core::platform::Clipboard::SelectionClipboard => {
+                self.sel_clipboard.borrow().clone()
+            }
+            _ => None,
+        }
+    }
     fn set_clipboard_text(&self, text: &str, clipboard: i_slint_core::platform::Clipboard) {
         match clipboard {
             i_slint_core::platform::Clipboard::DefaultClipboard => {
@@ -281,15 +309,6 @@ impl Platform for Backend {
                 *self.sel_clipboard.borrow_mut() = Some(text.into())
             }
             _ => (),
-        }
-    }
-    fn clipboard_text(&self, clipboard: i_slint_core::platform::Clipboard) -> Option<String> {
-        match clipboard {
-            i_slint_core::platform::Clipboard::DefaultClipboard => self.clipboard.borrow().clone(),
-            i_slint_core::platform::Clipboard::SelectionClipboard => {
-                self.sel_clipboard.borrow().clone()
-            }
-            _ => None,
         }
     }
 }
@@ -307,3 +326,5 @@ impl AsFd for Device {
         unsafe { BorrowedFd::borrow_raw(self.fd) }
     }
 }
+
+pub type EventLoopHandle<'a> = calloop::LoopHandle<'a, LoopData>;

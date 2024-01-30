@@ -5,12 +5,16 @@ use std::cell::Cell;
 use std::os::raw::c_void;
 // use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
+use std::cell::Cell;
+use std::rc::{Rc, Weak};
 
 // use crate::DeviceOpener;
 // use drm::control::Device;
 // use gbm::AsRaw;
 use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
 use i_slint_core::platform::PlatformError;
+use super::Presenter;
+
 
 // Wrapped needed because gbm::Device<T> wants T to be sized.
 // #[derive(Clone)]
@@ -37,62 +41,11 @@ use i_slint_core::platform::PlatformError;
 // }
 
 pub struct EglDisplay {
-    // last_buffer: Cell<Option<gbm::BufferObject<OwnedFramebufferHandle>>>,
-    // crtc: drm::control::crtc::Handle,
-    // connector: drm::control::connector::Info,
-    // mode: drm::control::Mode,
-    // gbm_surface: gbm::Surface<OwnedFramebufferHandle>,
-    // gbm_device: gbm::Device<SharedFd>,
-    // drm_device: SharedFd,
-
-    // context:*mut std::os::raw::c_void,
-    // surface: *mut std::os::raw::c_void,
-    // display:*mut std::os::raw::c_void,
-
     pub oh_native_window:*mut std::os::raw::c_void,
     pub size: PhysicalWindowSize,
+    pub presenter: Rc<dyn Presenter>,
 }
 
-// impl super::Presenter for EglDisplay {
-//     fn present(&self) -> Result<(), Box<dyn std::error::Error>> {
-//         let mut front_buffer = unsafe {
-//             self.gbm_surface
-//                 .lock_front_buffer()
-//                 .map_err(|e| format!("Error locking gmb surface front buffer: {e}"))?
-//         };
-//
-//         // TODO: support modifiers
-//         // TODO: consider falling back to the old non-planar API
-//         let fb = self
-//             .gbm_device
-//             .add_planar_framebuffer(&front_buffer, &[None, None, None, None], 0)
-//             .map_err(|e| format!("Error adding gbm buffer as framebuffer: {e}"))?;
-//
-//         front_buffer
-//             .set_userdata(OwnedFramebufferHandle { handle: fb, device: self.drm_device.clone() })
-//             .map_err(|e| format!("Error setting userdata on gbm surface front buffer: {e}"))?;
-//
-//         if let Some(last_buffer) = self.last_buffer.replace(Some(front_buffer)) {
-//             self.gbm_device
-//                 .page_flip(self.crtc, fb, drm::control::PageFlipFlags::EVENT, None)
-//                 .map_err(|e| format!("Error presenting fb: {e}"))?;
-//
-//             for event in self.gbm_device.receive_events().unwrap() {
-//                 if matches!(event, drm::control::Event::PageFlip(..)) {
-//                     break;
-//                 }
-//             }
-//
-//             drop(last_buffer);
-//         } else {
-//             self.gbm_device
-//                 .set_crtc(self.crtc, Some(fb), (0, 0), &[self.connector.handle()], Some(self.mode))
-//                 .map_err(|e| format!("Error presenting fb: {e}"))?;
-//         }
-//
-//         Ok(())
-//     }
-// }
 
 impl raw_window_handle::HasWindowHandle for EglDisplay {
     fn window_handle(
@@ -134,137 +87,64 @@ pub fn create_egl_display(oh_native_window:*mut c_void,width:u32,height:u32) -> 
     Ok(EglDisplay {
         oh_native_window,
         size: window_size,
+        presenter: TimerBasedAnimationDriver::new(),
     })
 }
 
 
-// pub fn create_egl_display(device_opener: &DeviceOpener) -> Result<EglDisplay, PlatformError> {
-//     let mut last_err = None;
-//     if let Ok(drm_devices) = std::fs::read_dir("/dev/dri/") {
-//         for device in drm_devices {
-//             if let Ok(device) = device.map_err(|e| format!("Error opening DRM device: {e}")) {
-//                 match try_create_egl_display(device_opener, &device.path()) {
-//                     Ok(dsp) => return Ok(dsp),
-//                     Err(e) => last_err = Some(e),
-//                 }
-//             }
-//         }
-//     }
-//     Err(last_err.unwrap_or_else(|| "Could not create an egl display".into()))
-// }
-//
-// pub fn try_create_egl_display(
-//     device_opener: &DeviceOpener,
-//     device: &std::path::Path,
-// ) -> Result<EglDisplay, PlatformError> {
-//     let drm_device = SharedFd(device_opener(device)?);
-//
-//     let resources = drm_device
-//         .resource_handles()
-//         .map_err(|e| format!("Error reading DRM resource handles: {e}"))?;
-//
-//     let connector = if let Ok(requested_connector_name) = std::env::var("SLINT_DRM_OUTPUT") {
-//         let mut connectors = resources.connectors().iter().filter_map(|handle| {
-//             let connector = drm_device.get_connector(*handle, false).ok()?;
-//             let name = format!("{}-{}", connector.interface().as_str(), connector.interface_id());
-//             let connected = connector.state() == drm::control::connector::State::Connected;
-//             Some((name, connector, connected))
-//         });
-//
-//         if requested_connector_name.eq_ignore_ascii_case("list") {
-//             let names_and_status = connectors
-//                 .map(|(name, _, connected)| format!("{} (connected: {})", name, connected))
-//                 .collect::<Vec<_>>();
-//             // Can't return error here because newlines are escaped.
-//             panic!("\nDRM Output List Requested:\n{}\n", names_and_status.join("\n"));
-//         } else {
-//             let (_, connector, connected) =
-//                 connectors.find(|(name, _, _)| name == &requested_connector_name).ok_or_else(
-//                     || format!("No output with the name '{}' found", requested_connector_name),
-//                 )?;
-//
-//             if !connected {
-//                 return Err(format!(
-//                     "Requested output '{}' is not connected",
-//                     requested_connector_name
-//                 )
-//                 .into());
-//             };
-//
-//             connector
-//         }
-//     } else {
-//         resources
-//             .connectors()
-//             .iter()
-//             .find_map(|handle| {
-//                 let connector = drm_device.get_connector(*handle, false).ok()?;
-//                 (connector.state() == drm::control::connector::State::Connected).then(|| connector)
-//             })
-//             .ok_or_else(|| format!("No connected display connector found"))?
-//     };
-//
-//     let mode = *connector
-//         .modes()
-//         .iter()
-//         .max_by(|current_mode, next_mode| {
-//             let current = (
-//                 current_mode.mode_type().contains(drm::control::ModeTypeFlags::PREFERRED),
-//                 current_mode.size().0 as u32 * current_mode.size().1 as u32,
-//             );
-//             let next = (
-//                 next_mode.mode_type().contains(drm::control::ModeTypeFlags::PREFERRED),
-//                 next_mode.size().0 as u32 * next_mode.size().1 as u32,
-//             );
-//
-//             current.cmp(&next)
-//         })
-//         .ok_or_else(|| format!("No preferred or non-zero size display mode found"))?;
-//
-//     let encoder = connector
-//         .encoders()
-//         .iter()
-//         .find_map(|handle| {
-//             if connector.current_encoder() == Some(*handle) {
-//                 drm_device.get_encoder(*handle).ok()
-//             } else {
-//                 None
-//             }
-//         })
-//         .ok_or_else(|| format!("Not encoder found for connector"))?;
-//
-//     let crtc = encoder.crtc().ok_or_else(|| format!("no crtc for encoder"))?;
-//
-//     let (width, height) = mode.size();
-//     let width = std::num::NonZeroU32::new(width as _)
-//         .ok_or_else(|| format!("Invalid mode screen width {width}"))?;
-//     let height = std::num::NonZeroU32::new(height as _)
-//         .ok_or_else(|| format!("Invalid mode screen height {height}"))?;
-//
-//     //eprintln!("mode {}/{}", width, height);
-//
-//     let gbm_device = gbm::Device::new(drm_device.clone())
-//         .map_err(|e| format!("Error creating gbm device: {e}"))?;
-//
-//     let gbm_surface = gbm_device
-//         .create_surface::<OwnedFramebufferHandle>(
-//             width.get(),
-//             height.get(),
-//             gbm::Format::Xrgb8888,
-//             gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING,
-//         )
-//         .map_err(|e| format!("Error creating gbm surface: {e}"))?;
-//
-//     let window_size = PhysicalWindowSize::new(width.get(), height.get());
-//
-//     Ok(EglDisplay {
-//         last_buffer: Cell::default(),
-//         crtc,
-//         connector,
-//         mode,
-//         gbm_surface,
-//         gbm_device,
-//         drm_device,
-//         size: window_size,
-//     })
-// }
+
+struct TimerBasedAnimationDriver {
+    timer: i_slint_core::timers::Timer,
+    next_animation_frame_callback: Cell<Option<Box<dyn FnOnce()>>>,
+}
+
+impl TimerBasedAnimationDriver {
+    fn new() -> Rc<Self> {
+        Rc::new_cyclic(|self_weak: &Weak<Self>| {
+            let self_weak = self_weak.clone();
+            let timer = i_slint_core::timers::Timer::default();
+            timer.start(
+                i_slint_core::timers::TimerMode::Repeated,
+                std::time::Duration::from_millis(16),
+                move || {
+                    let Some(this) = self_weak.upgrade() else { return };
+                    // Stop the timer and let the callback decide if we need to continue. It will set
+                    // `needs_redraw` to true of animations should continue, render() will be called,
+                    // present_with_next_frame_callback() will be called and then the timer restarted.
+                    this.timer.stop();
+                    if let Some(next_animation_frame_callback) =
+                        this.next_animation_frame_callback.take()
+                    {
+                        next_animation_frame_callback();
+                    }
+                },
+            );
+            // Activate it only when we present a frame.
+            timer.stop();
+
+            Self { timer, next_animation_frame_callback: Default::default() }
+        })
+    }
+}
+
+impl Presenter for TimerBasedAnimationDriver {
+    fn is_ready_to_present(&self) -> bool {
+        true
+    }
+
+    fn register_page_flip_handler(
+        &self,
+        _event_loop_handle: crate::calloop_backend::EventLoopHandle,
+    ) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn present_with_next_frame_callback(
+        &self,
+        ready_for_next_animation_frame: Box<dyn FnOnce()>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.next_animation_frame_callback.set(Some(ready_for_next_animation_frame));
+        self.timer.restart();
+        Ok(())
+    }
+}

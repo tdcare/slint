@@ -17,10 +17,8 @@ use libc::c_int;
 
 
 // pub mod platform;
-pub mod display{
-    pub mod egldisplay;
-    pub mod glutin;
-}
+pub mod display;
+
 pub mod renderer {
     // pub mod sw;
     pub mod femtovg;
