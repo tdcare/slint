@@ -185,7 +185,7 @@ impl FemtoVGRendererAdapter {
         let gl_context=GlContextWrapper::new(display, )?;
 
 
-        // return Err(PlatformError::NoPlatform);
+        return Err(PlatformError::NoPlatform);
 
         let inner_renderer=i_slint_renderer_femtovg::FemtoVGRenderer::new(gl_context)?;
 

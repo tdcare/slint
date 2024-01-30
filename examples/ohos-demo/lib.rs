@@ -65,15 +65,12 @@ pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i3
            match  slint::platform::set_platform(Box::new(backend)){
                Ok(paltform) => {
                    message_c_string = CString::new(format!("Configed Platform ")).expect("Failed to create CString");
-
                }
                Err(e) => {
                    errored=true;
                    message_c_string = CString::new(format!("Configed Platform Fail")).expect("Failed to create CString");
                }
            }
-
-
             match Booker::new() {
                 Ok(main_window) => {
                     // main_window.on_validate_date(|date: SharedString| {
@@ -97,7 +94,6 @@ pub fn init_slint(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i3
                         Ok(run) => {
                             errored=false;
                             message_c_string = CString::new(format!("Run")).expect("Failed to create CString");
-
                         }
                         Err(e) => {
                             errored=true;
