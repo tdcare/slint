@@ -212,6 +212,7 @@ impl OhosRenderer for FemtoVGRendererAdapter {
         // self.renderer.render_with_post_callback(Some(&|item_renderer| {
         //     draw_mouse_cursor_callback(item_renderer);
         // }))
+        return Err(PlatformError::NoPlatform);
         Ok(())
     }
     fn size(&self) -> i_slint_core::api::PhysicalSize {
