@@ -217,8 +217,9 @@ impl OhosRenderer for FemtoVGRendererAdapter {
         Ok(())
     }
     fn size(&self) -> i_slint_core::api::PhysicalSize {
-        let (width, height) = self.egl_display.size;
-        i_slint_core::api::PhysicalSize::new(width, height)
+        // let (width, height) = self.egl_display.size;
+        // i_slint_core::api::PhysicalSize::new(width, height)
+        self.egl_display.size
     }
 
     fn register_page_flip_handler(&self, event_loop_handle: EventLoopHandle) -> Result<(), PlatformError> {
