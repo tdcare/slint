@@ -58,7 +58,7 @@ pub fn sum(a: i32, b: i32) -> i32 {
 
 // slint::include_modules!();
 // slint::slint!(import { Demo } from "demo.slint";);
-slint::slint!(import { Memory } from "memory.slint";);
+slint::slint!(import { MainWindow } from "memory.slint";);
 
 
 /// 初始化 Slint 由OHOS 的C++ 进行调用
@@ -79,7 +79,7 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
                    message_c_string = CString::new(format!("Configed Platform Fail")).expect("Failed to create CString");
                }
            }
-            match Memory::new() {
+            match MainWindow::new() {
                 Ok(main_window) => {
                     // main_window.on_validate_date(|date: SharedString| {
                     //     NaiveDate::parse_from_str(date.as_str(), "%d.%m.%Y").is_ok()
