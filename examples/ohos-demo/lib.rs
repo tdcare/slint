@@ -32,7 +32,14 @@ use hilog_binding::hilog_debug;
 #[napi]
 pub fn sum(a: i32, b: i32) -> i32 {
     hilog_debug!("hello world!");
-    a + b + 100
+    hilog_debug!(
+        "tdcare",
+        LogOptions {
+          tag: Some("testTag"),
+          domain: None
+      }
+    );
+    a + b + 200
 }
 
 // #[napi]
