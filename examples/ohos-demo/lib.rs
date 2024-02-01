@@ -59,7 +59,7 @@ pub fn sum(a: i32, b: i32) -> i32 {
 // slint::include_modules!();
 slint::slint!(import { Demo } from "demo.slint";);
 // slint::slint!(import { MainWindow } from "memory.slint";);
-slint::slint!(import { Booker } from "booker.slint";);
+// slint::slint!(import { Booker } from "booker.slint";);
 
 
 
