@@ -128,9 +128,9 @@ fn init_fontdb() -> FontDatabase {
     }
     #[cfg(any(feature = "ohos"))]
     {
-        let data = include_bytes!("sharedfontdb/Fangsong.ttf");
+        let data = include_bytes!("sharedfontdb/DejaVuSans.ttf.ttf");
         font_db.load_font_data(data.to_vec());
-        font_db.set_sans_serif_family("Fangsong");
+        font_db.set_sans_serif_family("DejaVu Sans");
     }
     #[cfg(target_os = "android")]
     {
