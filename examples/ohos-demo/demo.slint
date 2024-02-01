@@ -18,6 +18,44 @@ export component Demo inherits Window {
     TabWidget {
         width: root.width;
         height: root.height;
+              Tab {
+                   title: "标准部件";
+                   VerticalBox {
+                       enabler := Button {
+                           checked: true;
+                           checkable: true;
+                           text: "使能 Widgets ";
+                       }
+
+                       LineEdit {
+                           enabled: enabler.checked;
+                           placeholder-text: "Edit Me!";
+                       }
+
+                       Slider {
+                           enabled: enabler.checked;
+                       }
+
+                       StandardListView {
+                           vertical-stretch: 1;
+                           enabled: enabler.checked;
+                           model: [
+                               { text: "Abydos"}, { text: "Asuras" }, { text: "Athos" },
+                               { text: "Celestis" }, { text: "Chulak"}, { text: "Dakara"},
+                               { text: "Earth" }, { text: "Langara" },  { text: "Tollana"},
+                           ];
+                       }
+
+                       HorizontalBox {
+                           alignment: center;
+                           StandardButton { enabled: enabler.checked; kind: 确信; }
+                           StandardButton { enabled: enabler.checked; kind: 清除; }
+                           StandardButton { enabled: enabler.checked; kind: 关于; }
+                       }
+                   }
+               }
+
+
         Tab {
             title: "Info";
             GridBox {
@@ -72,44 +110,6 @@ export component Demo inherits Window {
             }
         }
 
-       Tab {
-            title: "Widgets";
-
-            VerticalBox {
-                enabler := Button {
-                    checked: true;
-                    checkable: true;
-                    text: "Widgets enabled";
-                }
-
-                LineEdit {
-                    enabled: enabler.checked;
-                    placeholder-text: "Edit Me!";
-                }
-
-                Slider {
-                    enabled: enabler.checked;
-                }
-
-                StandardListView {
-                    vertical-stretch: 1;
-                    enabled: enabler.checked;
-                    model: [
-                        { text: "Abydos"}, { text: "Asuras" }, { text: "Athos" },
-                        { text: "Celestis" }, { text: "Chulak"}, { text: "Dakara"},
-                        { text: "Earth" }, { text: "Langara" },  { text: "Tollana"},
-                    ];
-                }
-
-                HorizontalBox {
-                    alignment: center;
-
-                    StandardButton { enabled: enabler.checked; kind: ok; }
-                    StandardButton { enabled: enabler.checked; kind: reset; }
-                    StandardButton { enabled: enabler.checked; kind: abort; }
-                }
-            }
-        }
 
         Tab {
             title: "V-Sync";
