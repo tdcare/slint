@@ -6,7 +6,7 @@ import {
     StandardButton, StandardListView, TabWidget, VerticalBox
 } from "std-widgets.slint";
 
-import "../printerdemo/ui/fonts/NotoSans-Regular.ttf";
+import "./fonts/HarmonyOS_Sans_Black.ttf";
 
 export component Demo inherits Window {
     in property <string> firmware-vendor;
@@ -14,8 +14,7 @@ export component Demo inherits Window {
     in property <string> uefi-version;
     in property <bool> secure-boot;
 
-    default-font-size: 22px;
-    default-font-family: "Noto Sans";
+    default-font-size: 30px;
 
     TabWidget {
         width: root.width;
@@ -29,7 +28,7 @@ export component Demo inherits Window {
                 Row {
                     Text {
                         colspan: 2;
-                        text: "UEFI Demo";
+                        text: "中文字体";
                         horizontal-alignment: center;
                         font-size: 44px;
                         font-weight: 800;
