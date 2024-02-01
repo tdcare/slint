@@ -120,13 +120,18 @@ fn init_fontdb() -> FontDatabase {
     )))]
     let mut fontconfig_fallback_families = Vec::new();
 
-    #[cfg(any(target_arch = "wasm32",feature = "ohos"))]
+    #[cfg(any(target_arch = "wasm32"))]
     {
-        let data = include_bytes!("sharedfontdb/Fangsong.ttf");
+        let data = include_bytes!("sharedfontdb/DejaVuSans.ttf.ttf");
         font_db.load_font_data(data.to_vec());
         font_db.set_sans_serif_family("DejaVu Sans");
     }
-
+    #[cfg(any(feature = "ohos"))]
+    {
+        let data = include_bytes!("sharedfontdb/Fangsong.ttf");
+        font_db.load_font_data(data.to_vec());
+        font_db.set_sans_serif_family("Fangsong");
+    }
     #[cfg(target_os = "android")]
     {
         font_db.load_fonts_dir("/system/fonts");
