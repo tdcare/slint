@@ -209,7 +209,7 @@ impl OhosRenderer for FemtoVGRendererAdapter {
             //     draw_mouse_cursor_callback(item_renderer);
             // }),
         )?;
-        self.egl_display.presenter.present_with_next_frame_callback(ready_for_next_animation_frame)?;
+        // self.egl_display.presenter.present_with_next_frame_callback(ready_for_next_animation_frame)?;
         Ok(())
     }
     fn size(&self) -> i_slint_core::api::PhysicalSize {
