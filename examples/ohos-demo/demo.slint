@@ -26,6 +26,7 @@ export component Demo inherits Window {
                            checkable: true;
                            text: "使能 Widgets ";
                        }
+
                        LineEdit {
                            enabled: enabler.checked;
                            placeholder-text: "Edit Me!";
@@ -47,9 +48,10 @@ export component Demo inherits Window {
 
                        HorizontalBox {
                            alignment: center;
-                           StandardButton { enabled: enabler.checked; kind: 确信; }
-                           StandardButton { enabled: enabler.checked; kind: 清除; }
-                           StandardButton { enabled: enabler.checked; kind: 关于; }
+
+                           StandardButton { enabled: enabler.checked; kind: ok; }
+                           StandardButton { enabled: enabler.checked; kind: reset; }
+                           StandardButton { enabled: enabler.checked; kind: abort; }
                        }
                    }
                }
@@ -59,6 +61,7 @@ export component Demo inherits Window {
             title: "Info";
             GridBox {
                 Row { Rectangle {} }
+
                 Row {
                     Text {
                         colspan: 2;
