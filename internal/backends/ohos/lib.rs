@@ -40,7 +40,7 @@ use PlatformError::NoPlatform;
 // use slint::private_unstable_api::create_window_adapter;
 use crate::calloop_backend::Backend;
 use crate::calloop_backend::input::{GLOBAL_PROXY, OHOS_EVENT_SENDER};
-use crate::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
+use crate::calloop_backend::ohos::{OH_NativeXComponent_EventSourceType, OH_NativeXComponent_KeyAction, OH_NativeXComponent_KeyCode, OH_NativeXComponent_KeyEvent, OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
 
 
 // 直接使用egl
@@ -60,6 +60,78 @@ pub fn glution_egl(ohos_widows: *mut c_void, w:u32, h:u32,error:*mut c_char) -> 
         }
     }
 }
+
+/// 将OHOS中的事件传递给Slint 由OHOS 的C++ 进行调用
+///触摸事件
+#[no_mangle]
+pub unsafe fn slint_touch(event:*mut OH_NativeXComponent_TouchEvent, message:*mut c_char) ->i32{
+    let event=OHOS_Input_Event::TouchEvent(*event);
+    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+    status
+}
+/// 鼠标事件
+#[no_mangle]
+pub unsafe fn slint_mouse(event:*mut OH_NativeXComponent_MouseEvent, message:*mut c_char) ->i32{
+    let event=OHOS_Input_Event::MouseEvent(*event);
+    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+    status
+}
+
+/// 鼠标事件
+#[no_mangle]
+pub unsafe fn slint_mouse_hover( message:*mut c_char) ->i32{
+    let event=OHOS_Input_Event::MouseHoverEvent;
+    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+    status
+}
+/// 焦点事件
+#[no_mangle]
+pub unsafe fn slint_focus( message:*mut c_char) ->i32{
+    let event=OHOS_Input_Event::FocusEvent;
+    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+    status
+}
+/// 模糊事件
+#[no_mangle]
+pub unsafe fn slint_blur( message:*mut c_char) ->i32{
+    let event=OHOS_Input_Event::BlurEvent;
+    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+    status
+}
+/// 按键事件
+#[no_mangle]
+pub unsafe fn slint_key(action:*mut OH_NativeXComponent_KeyAction, code:*mut OH_NativeXComponent_KeyCode, sourceType:*mut OH_NativeXComponent_EventSourceType, deviceId:i64, timeStamp:i64, message:*mut c_char) ->i32{
+    let key_event=OH_NativeXComponent_KeyEvent{
+        deviceId,
+        timeStamp,
+        source_type: *sourceType,
+        key_action: *action,
+        key_code: *code,
+    };
+
+    let event=OHOS_Input_Event::KeyEvent(key_event);
+    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+    status
+}
+
 // slint 事件代理
 pub fn slint_event_proxy(input_event:OHOS_Input_Event)->(i32,CString){
     let mut errored=false;

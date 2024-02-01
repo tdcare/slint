@@ -83,23 +83,6 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
            }
             match Demo::new() {
                 Ok(main_window) => {
-                    // main_window.on_validate_date(|date: SharedString| {
-                    //     NaiveDate::parse_from_str(date.as_str(), "%d.%m.%Y").is_ok()
-                    // });
-                    // main_window.on_compare_date(|date1: SharedString, date2: SharedString| {
-                    //     let date1 = match NaiveDate::parse_from_str(date1.as_str(), "%d.%m.%Y") {
-                    //         Err(_) => return false,
-                    //         Ok(x) => x,
-                    //     };
-                    //     let date2 = match NaiveDate::parse_from_str(date2.as_str(), "%d.%m.%Y") {
-                    //         Err(_) => return false,
-                    //         Ok(x) => x,
-                    //     };
-                    //     date1 <= date2
-                    // });
-
-                    // let w=  main_window.window();//.unwrap()
-                    // create_window_adapter();
                     match main_window.run() {
                         Ok(run) => {
                             errored=false;
@@ -132,16 +115,4 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
     }
 
     }
-
-/// 将OHOS中的事件传递给Slint 由OHOS 的C++ 进行调用
-///触摸事件
-#[no_mangle]
-pub unsafe fn slint_touch(touch_event:*mut OH_NativeXComponent_TouchEvent, message:*mut c_char) ->i32{
-    let event=OHOS_Input_Event::TouchEvent(*touch_event);
-    let (status,message_c_string)=i_slint_backend_ohos::slint_event_proxy(event);
-    unsafe {
-        libc::strcpy(message, message_c_string.as_ptr());
-    }
-    status
-}
 
