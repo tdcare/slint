@@ -48,6 +48,7 @@ pub struct OhosWindowAdapter {
     redraw_requested: Cell<bool>,
     needs_redraw_after_present: Cell<bool>,
     rotation: RenderingRotation,
+    dark_color_scheme: Pin<Box<Property<bool>>>,
 }
 
 impl WindowAdapter for OhosWindowAdapter {
@@ -74,8 +75,25 @@ impl WindowAdapter for OhosWindowAdapter {
         }
         Ok(())
     }
-}
 
+
+    fn internal(
+        &self,
+        _: i_slint_core::InternalToken,
+    ) -> Option<&dyn i_slint_core::window::WindowAdapterInternal> {
+        Some(self)
+    }
+}
+impl i_slint_core::window::WindowAdapterInternal for OhosWindowAdapter {
+
+    fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
+
+    }
+
+    fn dark_color_scheme(&self) -> bool {
+        self.dark_color_scheme.as_ref().get()
+    }
+}
 impl OhosWindowAdapter {
     pub fn new(renderer: Box<dyn OhosRenderer>,
                rotation: RenderingRotation,
@@ -100,6 +118,7 @@ impl OhosWindowAdapter {
             redraw_requested: Cell::new(true),
             needs_redraw_after_present: Cell::new(false),
             rotation,
+            dark_color_scheme:Box::pin(Property::new(true)),
         }))
     }
 

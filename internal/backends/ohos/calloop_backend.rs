@@ -68,18 +68,10 @@ pub struct Backend {
     ohos_windows: *mut c_void,
     width: u32,
     height: u32,
-
-    // seat: Rc<RefCell<libseat::Seat>>,
     window: RefCell<Option<Rc<OhosWindowAdapter>>>,
     user_event_receiver: RefCell<Option<calloop::channel::Channel<Box<dyn FnOnce() + Send>>>>,
     ohos_event_receiver:RefCell<Option<calloop::channel::Channel<OHOS_Input_Event>>>,
     proxy: Proxy,
-    // renderer_factory: for<'a> fn(
-    //        *mut c_void,  u32, u32,
-    // ) -> Result<
-    //     Box<dyn OhosRenderer>,
-    //     PlatformError,
-    // >,
     sel_clipboard: RefCell<Option<String>>,
     clipboard: RefCell<Option<String>>,
 }
@@ -100,12 +92,10 @@ impl Backend {
             ohos_windows,
             width,
             height,
-            // seat: Rc::new(RefCell::new(seat)),
             window: Default::default(),
             user_event_receiver: RefCell::new(Some(user_event_receiver)),
             ohos_event_receiver:RefCell::new(Some(ohos_event_receiver)),
             proxy: Proxy::new(user_event_sender),
-            // renderer_factory,
             sel_clipboard: Default::default(),
             clipboard: Default::default(),
         })
@@ -143,11 +133,11 @@ impl Platform for Backend {
         // let adapter = self.window.borrow().as_ref().unwrap().clone();
         let adapter = self.window.borrow().as_ref().ok_or_else(|| format!("Error windows adapter "))?.clone();
 
+        let mut loop_data = LoopData::default();
         let mut event_loop: EventLoop<LoopData> =
             EventLoop::try_new().map_err(|e| format!("Error creating event loop"))?;
 
         let loop_signal = event_loop.get_signal();
-
         *self.proxy.loop_signal.lock().unwrap() = Some(loop_signal.clone());
         let quit_loop = self.proxy.quit_loop.clone();
 
@@ -157,7 +147,6 @@ impl Platform for Backend {
                 format!("Re-entering the calloop event loop is currently not supported").into()
             );
         };
-
         let mouse_position_property =
             input::OHOSInputHandler::init(adapter.window(), &event_loop.handle(),ohos_event_receiver)?;
 
@@ -187,7 +176,6 @@ impl Platform for Backend {
                 },
             )?;
 
-        let mut loop_data = LoopData::default();
 
         quit_loop.store(false, std::sync::atomic::Ordering::Release);
 
@@ -203,7 +191,7 @@ impl Platform for Backend {
 
             if let Some(adapter) = self.window.borrow().as_ref() {
                 adapter.register_event_loop(event_loop.handle())?;
-                adapter.clone().render_if_needed(mouse_position_property.as_ref())?;
+                adapter.render_if_needed(mouse_position_property.as_ref())?;
             };
             // return Err(PlatformError::from("调试1".to_string()));
 
@@ -252,16 +240,16 @@ impl Platform for Backend {
 
 #[derive(Default)]
 pub struct LoopData {}
-
-struct Device {
-    // in the future, use this from libseat: device_id: i32,
-    fd: RawFd,
-}
-
-impl AsFd for Device {
-    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        unsafe { BorrowedFd::borrow_raw(self.fd) }
-    }
-}
+//
+// struct Device {
+//     // in the future, use this from libseat: device_id: i32,
+//     fd: RawFd,
+// }
+//
+// impl AsFd for Device {
+//     fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+//         unsafe { BorrowedFd::borrow_raw(self.fd) }
+//     }
+// }
 
 pub type EventLoopHandle<'a> = calloop::LoopHandle<'a, LoopData>;

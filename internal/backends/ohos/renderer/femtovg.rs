@@ -217,6 +217,6 @@ impl OhosRenderer for FemtoVGRendererAdapter {
     }
 
     fn register_page_flip_handler(&self, event_loop_handle: EventLoopHandle) -> Result<(), PlatformError> {
-        self.egl_display.clone().presenter.register_page_flip_handler(event_loop_handle)
+        self.egl_display.presenter.register_page_flip_handler(event_loop_handle)
     }
 }

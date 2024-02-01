@@ -61,14 +61,7 @@ impl<'a> OHOSInputHandler<'a> {
 
 
         let mouse_pos_property = Rc::pin(Property::new(None));
-        //
-        // let handler = Self {
-        //     // ohos_event_receiver:ohos_event_receiver.clone(),
-        //     token: Default::default(),
-        //     mouse_pos: mouse_pos_property.clone(),
-        //     last_touch_pos: Default::default(),
-        //     window,
-        // };
+
 
         event_loop_handle
             .insert_source(ohos_event_receiver, move |calloop_event, _, _| {
