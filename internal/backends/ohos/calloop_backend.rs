@@ -165,7 +165,7 @@ impl Platform for Backend {
 
         let Some(user_event_receiver) = self.user_event_receiver.borrow_mut().take() else {
             return Err(
-                format!("Re-entering the linuxkms event loop is currently not supported").into()
+                format!("Re-entering the ohos event loop is currently not supported").into()
             );
         };
         let callbacks_to_invoke_per_iteration = Rc::new(RefCell::new(Vec::new()));

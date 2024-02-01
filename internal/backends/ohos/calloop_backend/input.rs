@@ -119,18 +119,3 @@ impl<'a> OHOSInputHandler<'a> {
     }
 }
 
-
-// fn map_key_sym(sym: u32) -> Option<SharedString> {
-//     macro_rules! keysym_to_string {
-//         ($($char:literal # $name:ident # $($_qt:ident)|* # $($_winit:ident)|* # $($xkb:ident)|*;)*) => {
-//             match(sym) {
-//                 $($(xkb::$xkb => $char,)*)*
-//                 // _ => std::char::from_u32(xkbcommon::xkb::keysym_to_utf32(sym))?,
-//                 _ => std::char::from_u32(sym)?,
-//
-//             }
-//         };
-//     }
-//     let char = i_slint_common::for_each_special_keys!(keysym_to_string);
-//     Some(char.into())
-// }
