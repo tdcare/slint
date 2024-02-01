@@ -190,8 +190,8 @@ impl Platform for Backend {
             // return Err(PlatformError::from("调试".to_string()));
 
             if let Some(adapter) = self.window.borrow().as_ref() {
-                adapter.register_event_loop(event_loop.handle())?;
                 adapter.render_if_needed(mouse_position_property.as_ref())?;
+                adapter.clone().register_event_loop(event_loop.handle())?;
             };
             // return Err(PlatformError::from("调试1".to_string()));
 
