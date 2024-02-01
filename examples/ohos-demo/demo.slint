@@ -24,7 +24,7 @@ export component Demo inherits Window {
                        enabler := Button {
                            checked: true;
                            checkable: true;
-                           text: "使能 Widgets ";
+                           text: "使能Widgets ";
                        }
 
                        LineEdit {
@@ -49,16 +49,16 @@ export component Demo inherits Window {
                        HorizontalBox {
                            alignment: center;
 
-                           StandardButton { enabled: enabler.checked; kind: ok; }
+                           StandardButton { enabled: enabler.checked; kind: ok;text:"确认"; }
                            StandardButton { enabled: enabler.checked; kind: reset; }
-                           StandardButton { enabled: enabler.checked; kind: abort; }
+                           StandardButton { enabled: enabler.checked; kind: abort;text:"关于"; }
                        }
                    }
                }
 
 
         Tab {
-            title: "Info";
+            title: "系统信息";
             GridBox {
                 Row { Rectangle {} }
 
@@ -113,7 +113,7 @@ export component Demo inherits Window {
 
 
         Tab {
-            title: "V-Sync";
+            title: "V-Sync 测试";
 
             Rectangle {
                 for color[index] in [
