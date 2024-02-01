@@ -104,6 +104,7 @@ impl<'a> OHOSInputHandler<'a> {
                             OHOS_Input_Event::NoEvent => {
                                 None
                            }
+                            _ => {None}
                         } {
                             window.dispatch_event(event);
                         }
