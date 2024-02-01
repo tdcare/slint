@@ -20,6 +20,25 @@ export component Demo inherits Window {
         width: root.width;
         height: root.height;
 
+
+        Tab {
+            title: "V-Sync";
+
+            Rectangle {
+                for color[index] in [
+                        #fff, #f00, #0f0,
+                        #00f, #0ff, #ff0,
+                        #f0f]: Rectangle {
+                    y: 0;
+                    height: parent.height;
+                    x: (parent.width - self.width) * 0.5 *
+                       (1 + 1.1 * sin(animation-tick() * (index + 1) / 17ms * 1deg));
+                    width: 25px + 100px * abs(sin(animation-tick() / 25ms * 1deg));
+                    background: color;
+                }
+            }
+        }
+
         Tab {
             title: "Info";
             GridBox {
@@ -75,23 +94,6 @@ export component Demo inherits Window {
         }
 
 
-        Tab {
-            title: "V-Sync";
-
-            Rectangle {
-                for color[index] in [
-                        #fff, #f00, #0f0,
-                        #00f, #0ff, #ff0,
-                        #f0f]: Rectangle {
-                    y: 0;
-                    height: parent.height;
-                    x: (parent.width - self.width) * 0.5 *
-                       (1 + 1.1 * sin(animation-tick() * (index + 1) / 17ms * 1deg));
-                    width: 25px + 100px * abs(sin(animation-tick() / 25ms * 1deg));
-                    background: color;
-                }
-            }
-        }
         Tab {
             title: "Widgets";
 
