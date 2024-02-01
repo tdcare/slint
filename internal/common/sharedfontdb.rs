@@ -128,7 +128,7 @@ fn init_fontdb() -> FontDatabase {
     }
     #[cfg(any(feature = "ohos"))]
     {
-        let data = include_bytes!("sharedfontdb/DejaVuSans.ttf.ttf");
+        let data = include_bytes!("sharedfontdb/DejaVuSans.ttf");
         font_db.load_font_data(data.to_vec());
         font_db.set_sans_serif_family("DejaVu Sans");
     }
