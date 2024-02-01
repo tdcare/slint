@@ -128,9 +128,9 @@ fn init_fontdb() -> FontDatabase {
     }
     #[cfg(any(feature = "ohos"))]
     {
-        let data = include_bytes!("sharedfontdb/DejaVuSans.ttf");
+        let data = include_bytes!("sharedfontdb/SimHei.ttf");
         font_db.load_font_data(data.to_vec());
-        font_db.set_sans_serif_family("DejaVu Sans");
+        font_db.set_sans_serif_family("SimHei");
     }
     #[cfg(target_os = "android")]
     {
