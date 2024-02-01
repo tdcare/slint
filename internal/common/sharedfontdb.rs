@@ -122,7 +122,7 @@ fn init_fontdb() -> FontDatabase {
 
     #[cfg(any(target_arch = "wasm32",feature = "ohos"))]
     {
-        let data = include_bytes!("sharedfontdb/Fangsong.ttf");
+        let data = include_bytes!("sharedfontdb/DejaVuSans.ttf");
         font_db.load_font_data(data.to_vec());
         font_db.set_sans_serif_family("DejaVu Sans");
     }
