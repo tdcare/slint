@@ -74,43 +74,17 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
     let p=Backend::new(ohos_widows, w, h).unwrap();
     slint::platform::set_platform(Box::new(p)).unwrap();
     let demo=Demo::new().unwrap();
-      demo.run().unwrap();
 
-    // match   Backend::new(ohos_widows, w, h) {
-    //     Ok(backend) => {
-    //        match  slint::platform::set_platform(Box::new(backend)){
-    //            Ok(paltform) => {
-    //                message_c_string = CString::new(format!("Configed Platform ")).expect("Failed to create CString");
-    //            }
-    //            Err(e) => {
-    //                errored=true;
-    //                message_c_string = CString::new(format!("Configed Platform Fail")).expect("Failed to create CString");
-    //            }
-    //        }
-    //         match Demo::new() {
-    //             Ok(main_window) => {
-    //                 match main_window.run() {
-    //                     Ok(run) => {
-    //                         errored=false;
-    //                         message_c_string = CString::new(format!("Run")).expect("Failed to create CString");
-    //                     }
-    //                     Err(e) => {
-    //                         errored=true;
-    //                         message_c_string = CString::new(format!("Run Fail:{:?}",e)).expect("Failed to create CString");
-    //                     }
-    //                 }
-    //             }
-    //             Err(e) => {
-    //                 errored=true;
-    //                 message_c_string = CString::new(format!("Build Fail")).expect("Failed to create CString");
-    //             }
-    //         }
-    //     }
-    //     Err(e) => {
-    //         message_c_string = CString::new(format!("Err")).expect("Failed to create CString");
-    //     }
-    // }
-    //
+    demo.set_firmware_vendor(format!("提灯医疗"));
+    demo.set_firmware_version(
+        format!("v1.0.0")
+    );
+    demo.set_uefi_version(format!("12455"));
+    demo.set_secure_boot(false);
+
+
+    demo.run().unwrap();
+
 
     unsafe {
         libc::strcpy(message, message_c_string.as_ptr());
