@@ -231,3 +231,70 @@ pub fn init_crud(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
         0
     }
 }
+
+#[no_mangle]
+pub fn init_memory(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
+
+   slint::slint!(import { MainWindow } from "memory.slint";);
+    let mut errored=false;
+    let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
+
+
+    let p=Backend::new(ohos_widows, w, h).unwrap();
+    slint::platform::set_platform(Box::new(p)).unwrap();
+
+    let main_window = MainWindow::new().unwrap();
+
+    let mut tiles: Vec<TileData> = main_window.get_memory_tiles().iter().collect();
+    tiles.extend(tiles.clone());
+
+    use rand::seq::SliceRandom;
+    let mut rng = rand::thread_rng();
+    tiles.shuffle(&mut rng);
+
+    let tiles_model = Rc::new(VecModel::from(tiles));
+
+    main_window.set_memory_tiles(tiles_model.clone().into());
+
+    let main_window_weak = main_window.as_weak();
+
+    main_window.on_check_if_pair_solved(move || {
+        let mut flipped_tiles =
+            tiles_model.iter().enumerate().filter(|(_, tile)| tile.image_visible && !tile.solved);
+
+        if let (Some((t1_idx, mut t1)), Some((t2_idx, mut t2))) =
+            (flipped_tiles.next(), flipped_tiles.next())
+        {
+            let is_pair_solved = t1 == t2;
+            if is_pair_solved {
+                t1.solved = true;
+                tiles_model.set_row_data(t1_idx, t1);
+                t2.solved = true;
+                tiles_model.set_row_data(t2_idx, t2);
+            } else {
+                main_window_weak.unwrap().set_disable_tiles(true);
+                let main_window_weak = main_window_weak.clone();
+                let tiles_model = tiles_model.clone();
+                Timer::single_shot(Duration::from_secs(1), move || {
+                    main_window_weak.unwrap().set_disable_tiles(false);
+                    t1.image_visible = false;
+                    tiles_model.set_row_data(t1_idx, t1);
+                    t2.image_visible = false;
+                    tiles_model.set_row_data(t2_idx, t2);
+                })
+            }
+        }
+    });
+
+    main_window.run().unwrap();
+
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+
+    return if errored {
+        -1
+    } else {
+        0
+    }
+}
