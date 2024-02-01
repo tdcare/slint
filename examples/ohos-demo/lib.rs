@@ -74,7 +74,7 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
     let p=Backend::new(ohos_widows, w, h).unwrap();
     slint::platform::set_platform(Box::new(p)).unwrap();
     let demo=Demo::new().unwrap();
-      demo.run().unwap();
+      demo.run().unwrap();
 
     // match   Backend::new(ohos_widows, w, h) {
     //     Ok(backend) => {
