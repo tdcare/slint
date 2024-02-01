@@ -33,6 +33,7 @@ slint = { workspace = true, default-features = false, features = [
 ] }
 i-slint-backend-ohos={workspace = true}
 libc = "0.2"
+rand = "0.8"
 
 webrtc = "0.9.0"
 lazy_static = "1"
