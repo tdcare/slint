@@ -137,9 +137,6 @@ impl Platform for Backend {
         let mut event_loop: EventLoop<LoopData> =
             EventLoop::try_new().map_err(|e| format!("Error creating event loop"))?;
 
-        let loop_signal = event_loop.get_signal();
-        *self.proxy.loop_signal.lock().unwrap() = Some(loop_signal.clone());
-        let quit_loop = self.proxy.quit_loop.clone();
 
         //初始化输入事件处理
         let Some(ohos_event_receiver) = self.ohos_event_receiver.borrow_mut().take() else {
@@ -176,7 +173,10 @@ impl Platform for Backend {
                 },
             )?;
 
+        let loop_signal = event_loop.get_signal();
+        *self.proxy.loop_signal.lock().unwrap() = Some(loop_signal.clone());
 
+        let quit_loop = self.proxy.quit_loop.clone();
         quit_loop.store(false, std::sync::atomic::Ordering::Release);
 
         while !quit_loop.load(std::sync::atomic::Ordering::Acquire) {

@@ -133,27 +133,31 @@ impl OhosWindowAdapter {
             self.renderer.render_and_present(
                 self.rotation,
                 &|item_renderer| {
-                    if let Some(mouse_position) = mouse_position.get() {
-                        item_renderer.save_state();
-                        item_renderer.translate(
-                            i_slint_core::lengths::logical_point_from_api(mouse_position)
-                                .to_vector(),
-                        );
-                        item_renderer.draw_image_direct(mouse_cursor_image());
-                        item_renderer.restore_state();
-                    }
+                    // if let Some(mouse_position) = mouse_position.get() {
+                    //     item_renderer.save_state();
+                    //     item_renderer.translate(
+                    //         i_slint_core::lengths::logical_point_from_api(mouse_position)
+                    //             .to_vector(),
+                    //     );
+                    //     item_renderer.draw_image_direct(mouse_cursor_image());
+                    //     item_renderer.restore_state();
+                    // }
                 },
                 Box::new({
-                    let self_weak = Rc::downgrade(&self);
-                    move || {
-                        let Some(this) = self_weak.upgrade() else {
-                            return;
-                        };
-                        if this.needs_redraw_after_present.replace(false) {
-                            this.request_redraw();
-                        }
-                    }
-                }),
+                   || return ;
+
+                //     let self_weak = Rc::downgrade(&self);
+                //     move || {
+                //         let Some(this) = self_weak.upgrade() else {
+                //             return;
+                //         };
+                //         if this.needs_redraw_after_present.replace(false) {
+                //             this.request_redraw();
+                //         }
+                //     }
+                //
+                }
+                ),
             )?;
             // Check once after rendering if we have running animations and
             // remember that to trigger a redraw after the frame is on the screen.
