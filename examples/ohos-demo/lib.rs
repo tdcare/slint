@@ -236,6 +236,11 @@ pub fn init_crud(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
 pub fn init_memory(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
 
    slint::slint!(import { MainWindow } from "memory.slint";);
+    use slint::{Model, Timer, VecModel};
+    use std::rc::Rc;
+    use std::time::Duration;
+
+
     let mut errored=false;
     let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
 
