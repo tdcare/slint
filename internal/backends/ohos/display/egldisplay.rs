@@ -3,41 +3,13 @@
 
 use std::cell::Cell;
 use std::os::raw::c_void;
-// use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
 use std::rc::{Rc, Weak};
 
-// use crate::DeviceOpener;
-// use drm::control::Device;
-// use gbm::AsRaw;
 use i_slint_core::api::PhysicalSize as PhysicalWindowSize;
 use i_slint_core::platform::PlatformError;
 use super::Presenter;
 
-
-// Wrapped needed because gbm::Device<T> wants T to be sized.
-// #[derive(Clone)]
-// pub struct SharedFd(Arc<dyn AsFd>);
-// impl AsFd for SharedFd {
-//     fn as_fd(&self) -> BorrowedFd<'_> {
-//         self.0.as_fd()
-//     }
-// }
-//
-// impl drm::Device for SharedFd {}
-//
-// impl drm::control::Device for SharedFd {}
-//
-// struct OwnedFramebufferHandle {
-//     handle: drm::control::framebuffer::Handle,
-//     device: SharedFd,
-// }
-//
-// impl Drop for OwnedFramebufferHandle {
-//     fn drop(&mut self) {
-//         self.device.destroy_framebuffer(self.handle).ok();
-//     }
-// }
 
 pub struct EglDisplay {
     pub oh_native_window:*mut std::os::raw::c_void,

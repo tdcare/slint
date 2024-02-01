@@ -44,8 +44,11 @@ pub static GLOBAL_PROXY: once_cell::sync::OnceCell<Mutex<OHOSEventQueue>> = once
 pub static OHOS_EVENT_SENDER: once_cell::sync::OnceCell<Mutex<Sender<OHOS_Input_Event>>> =  once_cell::sync::OnceCell::new();
 
 pub struct OHOSInputHandler<'a> {
+    // ohos_event_receiver:Channel<OHOS_Input_Event>,
     token: Option<calloop::Token>,
     window: &'a i_slint_core::api::Window,
+    mouse_pos: Pin<Rc<Property<Option<LogicalPosition>>>>,
+    last_touch_pos: LogicalPosition,
     // keystate: xkb::State,
 }
 
@@ -58,17 +61,22 @@ impl<'a> OHOSInputHandler<'a> {
 
 
         let mouse_pos_property = Rc::pin(Property::new(None));
-
-        let handler = Self {
-            token: Default::default(),
-            window,
-        };
+        //
+        // let handler = Self {
+        //     // ohos_event_receiver:ohos_event_receiver.clone(),
+        //     token: Default::default(),
+        //     mouse_pos: mouse_pos_property.clone(),
+        //     last_touch_pos: Default::default(),
+        //     window,
+        // };
 
         event_loop_handle
             .insert_source(ohos_event_receiver, move |calloop_event, _, _| {
                 match calloop_event {
                     Event::Msg(ohos_event) => {
-                        let screen_size = window.size();
+                        let screen_size = window.size().to_logical(window.scale_factor());
+
+
                         if  let Some(event)=match ohos_event {
                             OHOS_Input_Event::MouseEvent(_) => {
                              None

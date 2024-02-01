@@ -115,8 +115,8 @@ impl GlContextWrapper {
                     .into()
             })?;
 
-        // drop(window_handle);
-        // drop(display_handle);
+        drop(window_handle);
+        drop(display_handle);
 
         // Ok(Self { glutin_context: context, glutin_surface: surface, egl_display })
         Ok(Self { glutin_context: context, glutin_surface: surface })
@@ -147,8 +147,8 @@ unsafe impl OpenGLInterface for GlContextWrapper {
 
     fn resize(
         &self,
-        width: NonZeroU32,
-        height: NonZeroU32,
+        _width: NonZeroU32,
+        _height: NonZeroU32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
@@ -168,12 +168,6 @@ impl FemtoVGRendererAdapter {
     pub fn new(oh_native_window: *mut c_void, width: u32, height: u32,
     ) -> Result<Box<dyn OhosRenderer>, PlatformError> {
         let egl_display =Rc::new(crate::display::egldisplay::create_egl_display(oh_native_window, width, height)?);
-
-        // let gl_context=GlContextWrapper::new(&display)?;
-
-        // return Err(PlatformError::NoPlatform);
-
-        // let inner_renderer=i_slint_renderer_femtovg::FemtoVGRenderer::new(gl_context)?;
 
         let renderer = Box::new(Self {
             renderer: i_slint_renderer_femtovg::FemtoVGRenderer::new(GlContextWrapper::new(

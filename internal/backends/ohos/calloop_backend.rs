@@ -144,7 +144,7 @@ impl Platform for Backend {
         let adapter = self.window.borrow().as_ref().ok_or_else(|| format!("Error windows adapter "))?.clone();
 
         let mut event_loop: EventLoop<LoopData> =
-            EventLoop::try_new().map_err(|e| format!("Error creating event loop: {}", e))?;
+            EventLoop::try_new().map_err(|e| format!("Error creating event loop"))?;
 
         let loop_signal = event_loop.get_signal();
 
