@@ -20,6 +20,44 @@ export component Demo inherits Window {
         width: root.width;
         height: root.height;
 
+Tab {
+            title: "Widgets";
+
+            VerticalBox {
+                enabler := Button {
+                    checked: true;
+                    checkable: true;
+                    text: "Widgets enabled";
+                }
+
+                LineEdit {
+                    enabled: enabler.checked;
+                    placeholder-text: "Edit Me!";
+                }
+
+                Slider {
+                    enabled: enabler.checked;
+                }
+
+                StandardListView {
+                    vertical-stretch: 1;
+                    enabled: enabler.checked;
+                    model: [
+                        { text: "Abydos"}, { text: "Asuras" }, { text: "Athos" },
+                        { text: "Celestis" }, { text: "Chulak"}, { text: "Dakara"},
+                        { text: "Earth" }, { text: "Langara" },  { text: "Tollana"},
+                    ];
+                }
+
+                HorizontalBox {
+                    alignment: center;
+
+                    StandardButton { enabled: enabler.checked; kind: ok; }
+                    StandardButton { enabled: enabler.checked; kind: reset; }
+                    StandardButton { enabled: enabler.checked; kind: abort; }
+                }
+            }
+        }
 
         Tab {
             title: "V-Sync";
@@ -94,44 +132,7 @@ export component Demo inherits Window {
         }
 
 
-        Tab {
-            title: "Widgets";
 
-            VerticalBox {
-                enabler := Button {
-                    checked: true;
-                    checkable: true;
-                    text: "Widgets enabled";
-                }
-
-                LineEdit {
-                    enabled: enabler.checked;
-                    placeholder-text: "Edit Me!";
-                }
-
-                Slider {
-                    enabled: enabler.checked;
-                }
-
-                StandardListView {
-                    vertical-stretch: 1;
-                    enabled: enabler.checked;
-                    model: [
-                        { text: "Abydos"}, { text: "Asuras" }, { text: "Athos" },
-                        { text: "Celestis" }, { text: "Chulak"}, { text: "Dakara"},
-                        { text: "Earth" }, { text: "Langara" },  { text: "Tollana"},
-                    ];
-                }
-
-                HorizontalBox {
-                    alignment: center;
-
-                    StandardButton { enabled: enabler.checked; kind: ok; }
-                    StandardButton { enabled: enabler.checked; kind: reset; }
-                    StandardButton { enabled: enabler.checked; kind: abort; }
-                }
-            }
-        }
 
     }
 }
