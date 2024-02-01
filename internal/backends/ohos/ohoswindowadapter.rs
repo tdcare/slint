@@ -31,8 +31,8 @@ pub trait OhosRenderer {
     fn render_and_present(
         &self,
         rotation: RenderingRotation,
-        draw_mouse_cursor_callback: &dyn Fn(&mut dyn ItemRenderer),
-        ready_for_next_animation_frame: Box<dyn FnOnce()>,
+        // draw_mouse_cursor_callback: &dyn Fn(&mut dyn ItemRenderer),
+        // ready_for_next_animation_frame: Box<dyn FnOnce()>,
     ) -> Result<(), PlatformError>;
     fn size(&self) -> PhysicalWindowSize;
     fn register_page_flip_handler(
@@ -144,7 +144,7 @@ impl OhosWindowAdapter {
                     // }
                 },
                 Box::new({
-                   || return ;
+                  move || {return}
 
                 //     let self_weak = Rc::downgrade(&self);
                 //     move || {

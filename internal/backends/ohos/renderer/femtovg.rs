@@ -20,6 +20,7 @@ use glutin::{
     prelude::*,
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
+use i_slint_core::items::StandardButtonKind::No;
 use i_slint_renderer_femtovg::OpenGLInterface;
 use crate::calloop_backend::EventLoopHandle;
 use crate::display::egldisplay::EglDisplay;
@@ -195,17 +196,19 @@ impl OhosRenderer for FemtoVGRendererAdapter {
     fn render_and_present(
         &self,
         rotation: RenderingRotation,
-        draw_mouse_cursor_callback: &dyn Fn(&mut dyn ItemRenderer),
-        ready_for_next_animation_frame: Box<dyn FnOnce()>,
+        // draw_mouse_cursor_callback: &dyn Fn(&mut dyn ItemRenderer),
+        // ready_for_next_animation_frame: Box<dyn FnOnce()>,
     ) -> Result<(), PlatformError> {
         let size = self.size();
         self.renderer.render_transformed_with_post_callback(
             rotation.degrees(),
             rotation.translation_after_rotation(size),
             size,
-            Some(&|item_renderer| {
-                draw_mouse_cursor_callback(item_renderer);
-            }),
+            None
+            // Some(&|item_renderer| {
+            //     draw_mouse_cursor_callback(item_renderer);
+            // }
+            ),
         )?;
         self.egl_display.presenter.present_with_next_frame_callback(ready_for_next_animation_frame)?;
         Ok(())
