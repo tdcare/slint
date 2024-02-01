@@ -126,6 +126,9 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
 
 #[no_mangle]
 pub fn init_crud(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
+    use slint::{Model, ModelExt, SharedString, StandardListViewItem, VecModel};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[derive(Clone)]
     struct Name {
