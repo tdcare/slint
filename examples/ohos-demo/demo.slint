@@ -18,8 +18,61 @@ export component Demo inherits Window {
     TabWidget {
         width: root.width;
         height: root.height;
+        Tab {
+            title: "Info";
+            GridBox {
+                Row { Rectangle {} }
 
-Tab {
+                Row {
+                    Text {
+                        colspan: 2;
+                        text: "中文字体";
+                        horizontal-alignment: center;
+                        font-size: 44px;
+                        font-weight: 800;
+                    }
+                }
+
+                Row {
+                    HorizontalLayout {
+                        colspan: 2;
+                        alignment: center;
+                        AboutSlint {
+                            width: 256px;
+                        }
+                    }
+                }
+
+                Row {
+                    Text { text: "Firmware vendor:"; horizontal-alignment: right;  }
+                    Text { text: firmware-vendor; }
+                }
+
+                Row {
+                    Text { text: "Firmware version:"; horizontal-alignment: right; }
+                    Text { text: firmware-version; }
+                }
+
+                Row {
+                    Text { text: "UEFI version:"; horizontal-alignment: right; }
+                    Text { text: uefi-version; }
+                }
+
+                Row {
+                    Text { text: "Secure boot:"; horizontal-alignment: right; }
+                    Text { text: secure-boot ? "enabled" : "disabled"; }
+                }
+
+                Row {
+                    Text { text: "Resolution:"; horizontal-alignment: right; }
+                    Text { text: "\{floor(root.width / 1px)}x\{floor(root.height / 1px)}"; }
+                }
+
+                Row { Rectangle {} }
+            }
+        }
+
+       Tab {
             title: "Widgets";
 
             VerticalBox {
@@ -76,59 +129,6 @@ Tab {
             }
         }
 
-        Tab {
-            title: "Info";
-            GridBox {
-                Row { Rectangle {} }
-
-                Row {
-                    Text {
-                        colspan: 2;
-                        text: "中文字体";
-                        horizontal-alignment: center;
-                        font-size: 44px;
-                        font-weight: 800;
-                    }
-                }
-
-                Row {
-                    HorizontalLayout {
-                        colspan: 2;
-                        alignment: center;
-                        AboutSlint {
-                            width: 256px;
-                        }
-                    }
-                }
-
-                Row {
-                    Text { text: "Firmware vendor:"; horizontal-alignment: right;  }
-                    Text { text: firmware-vendor; }
-                }
-
-                Row {
-                    Text { text: "Firmware version:"; horizontal-alignment: right; }
-                    Text { text: firmware-version; }
-                }
-
-                Row {
-                    Text { text: "UEFI version:"; horizontal-alignment: right; }
-                    Text { text: uefi-version; }
-                }
-
-                Row {
-                    Text { text: "Secure boot:"; horizontal-alignment: right; }
-                    Text { text: secure-boot ? "enabled" : "disabled"; }
-                }
-
-                Row {
-                    Text { text: "Resolution:"; horizontal-alignment: right; }
-                    Text { text: "\{floor(root.width / 1px)}x\{floor(root.height / 1px)}"; }
-                }
-
-                Row { Rectangle {} }
-            }
-        }
 
 
 
