@@ -75,11 +75,11 @@ pub fn init_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
     slint::platform::set_platform(Box::new(p)).unwrap();
     let demo=Demo::new().unwrap();
 
-    demo.set_firmware_vendor(format!("提灯医疗"));
+    demo.set_firmware_vendor(format!("提灯医疗").into());
     demo.set_firmware_version(
-        format!("v1.0.0")
+        format!("v1.0.0").into()
     );
-    demo.set_uefi_version(format!("12455"));
+    demo.set_uefi_version(format!("12455").into());
     demo.set_secure_boot(false);
 
 
