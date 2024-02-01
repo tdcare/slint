@@ -142,6 +142,10 @@ pub fn init_crud(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32
     let mut errored=false;
     let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
 
+
+    let p=Backend::new(ohos_widows, w, h).unwrap();
+    slint::platform::set_platform(Box::new(p)).unwrap();
+
     let main_window = MainWindow::new().unwrap();
 
     let prefix = Rc::new(RefCell::new(SharedString::from("")));
