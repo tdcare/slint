@@ -185,7 +185,7 @@ pub trait WindowAdapterInternal {
 
     /// returns wether a dark theme is used
     fn dark_color_scheme(&self) -> bool {
-        false
+        true
     }
 }
 
