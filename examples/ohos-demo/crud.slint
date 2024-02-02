@@ -36,7 +36,7 @@ export component MainWindow inherits Window {
         Text {
             col: 2;
             row: 1;
-            text: "Name: ";
+            text: "姓: ";
             vertical-alignment: center;
             horizontal-alignment: right;
         }
@@ -46,7 +46,7 @@ export component MainWindow inherits Window {
         Text {
             col: 2;
             row: 2;
-            text: "Surname: ";
+            text: "名: ";
             vertical-alignment: center;
             horizontal-alignment: right;
         }
@@ -62,19 +62,19 @@ export component MainWindow inherits Window {
             Button {
                 clicked => { root.createClicked() }
 
-                text: "Create";
+                text: "创建";
             }
             Button {
                 clicked => { root.updateClicked() }
 
-                text: "Update";
+                text: "更新";
                 enabled: list.current-item != -1 && list.current-item < root.names-list.length;
 
             }
             Button {
                 clicked => { root.deleteClicked() }
 
-                text: "Delete";
+                text: "删除";
                 enabled: list.current-item != -1 && list.current-item < root.names-list.length;
             }
         }
