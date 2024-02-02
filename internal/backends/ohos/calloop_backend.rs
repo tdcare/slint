@@ -184,9 +184,9 @@ impl Platform for Backend {
 
             // Only after updating the animation tick, invoke callbacks from invoke_from_event_loop(). They
             // might set animated properties, which requires an up-to-date start time.
-            for callback in callbacks_to_invoke_per_iteration.take().into_iter() {
-                callback();
-            }
+            // for callback in callbacks_to_invoke_per_iteration.take().into_iter() {
+            //     callback();
+            // }
             // return Err(PlatformError::from("调试".to_string()));
 
             if let Some(adapter) = self.window.borrow().as_ref() {
@@ -195,13 +195,13 @@ impl Platform for Backend {
             };
             // return Err(PlatformError::from("调试1".to_string()));
 
-            // let next_timeout = if adapter.window().has_active_animations() {
-            //     Some(std::time::Duration::from_millis(16))
-            // } else {
-            //     i_slint_core::platform::duration_until_next_timer_update()
-            // };
+            let next_timeout = if adapter.window().has_active_animations() {
+                Some(std::time::Duration::from_millis(16))
+            } else {
+                i_slint_core::platform::duration_until_next_timer_update()
+            };
 
-            let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
+            // let next_timeout = i_slint_core::platform::duration_until_next_timer_update();
 
             event_loop
                 .dispatch(next_timeout, &mut loop_data)
