@@ -196,7 +196,7 @@ impl Platform for Backend {
             // return Err(PlatformError::from("调试1".to_string()));
 
             let next_timeout = if adapter.window().has_active_animations() {
-                Some(std::time::Duration::from_millis(16))
+                Some(std::time::Duration::from_millis(30))
             } else {
                 i_slint_core::platform::duration_until_next_timer_update()
             };
