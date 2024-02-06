@@ -7,7 +7,7 @@ use std::os::raw::c_void;
 use std::sync::Mutex;
 
 
-type TargetPixel = slint::platform::software_renderer::Rgb565Pixel;
+pub type TargetPixel = slint::platform::software_renderer::Rgb565Pixel;
 
 // 用来向C++传数据的合局变量
 pub static FRAME_BUFFER: once_cell::sync::OnceCell<Mutex<Vec<TargetPixel>>> = once_cell::sync::OnceCell::new();
