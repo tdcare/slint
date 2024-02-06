@@ -383,13 +383,15 @@ impl SoftwareRenderer {
                     renderer.compute_dirty_regions(component, *origin);
                 }
                 //测试用
-                return Default::default();
+                // return Default::default();
 
                 let dirty_region = (renderer.dirty_region.to_rect().cast() * factor)
                     .round_out()
                     .intersection(&euclid::rect(0., 0., i16::MAX as f32, i16::MAX as f32))
                     .unwrap_or_default()
                     .cast();
+                //测试用
+                return Default::default();
 
                 let to_draw = self.apply_dirty_region(dirty_region, size);
 
