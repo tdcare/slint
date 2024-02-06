@@ -468,7 +468,7 @@ impl FontCache {
         _primary_font: &LoadedFont,
         _reference_text: &str,
     ) -> Vec<SharedString> {
-        [SharedString::from("DejaVu Sans")]
+        [SharedString::from("SimHei")]
             .iter()
             .filter(|family_name| self.is_known_family(&family_name))
             .cloned()

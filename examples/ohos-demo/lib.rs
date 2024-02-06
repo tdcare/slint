@@ -1,5 +1,7 @@
 #![deny(clippy::all)]
 
+pub mod ohos_sw;
+
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 use std::rc::Rc;

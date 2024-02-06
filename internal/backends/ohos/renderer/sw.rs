@@ -78,11 +78,11 @@
 //                     | (pixel.blue as u32);
 //             }
 //         } else {
-//             struct FrameBuffer<'a> {
+//             struct FRAME_BUFFER<'a> {
 //                 buffer: &'a mut [u32],
 //                 line: Vec<i_slint_core::software_renderer::Rgb565Pixel>,
 //             }
-//             impl<'a> i_slint_core::software_renderer::LineBufferProvider for FrameBuffer<'a> {
+//             impl<'a> i_slint_core::software_renderer::LineBufferProvider for FRAME_BUFFER<'a> {
 //                 type TargetPixel = i_slint_core::software_renderer::Rgb565Pixel;
 //                 fn process_line(
 //                     &mut self,
@@ -100,7 +100,7 @@
 //                     }
 //                 }
 //             }
-//             self.renderer.render_by_line(FrameBuffer {
+//             self.renderer.render_by_line(FRAME_BUFFER {
 //                 buffer: &mut target_buffer,
 //                 line: vec![Default::default(); width.get() as usize],
 //             });
