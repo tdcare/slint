@@ -281,6 +281,8 @@ pub fn init_memory(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i
         0
     }
 }
+
+
 // 软实现方案，取数据
 #[no_mangle]
 pub fn slint_buffer(buffer: *mut c_void, message:*mut c_char) ->i32 {
@@ -319,4 +321,41 @@ pub fn slint_buffer(buffer: *mut c_void, message:*mut c_char) ->i32 {
     } else {
         0
     }
+}
+
+#[no_mangle]
+pub fn init_sw_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
+    slint::slint!(import { Demo } from "demo.slint";);
+
+    let mut errored=false;
+    let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
+    hilog_debug!("hello world1");
+
+    // let p=Backend::new(ohos_widows, w, h).unwrap();
+    let p=crate::ohos_sw::Backend::new(ohos_widows, w, h).unwrap();
+
+    slint::platform::set_platform(Box::new(p)).unwrap();
+    let demo=Demo::new().unwrap();
+
+    demo.set_firmware_vendor(format!("提灯医疗").into());
+    demo.set_firmware_version(
+        format!("v1.0.0").into()
+    );
+    demo.set_uefi_version(format!("12455").into());
+    demo.set_secure_boot(false);
+
+
+    demo.run().unwrap();
+
+
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+
+    return if errored {
+        -1
+    } else {
+        0
+    }
+
 }

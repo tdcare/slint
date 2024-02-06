@@ -13,7 +13,7 @@ pub type TargetPixel = slint::platform::software_renderer::Rgb565Pixel;
 pub static FRAME_BUFFER: once_cell::sync::OnceCell<Mutex<Vec<TargetPixel>>> = once_cell::sync::OnceCell::new();
 
 
-struct Backend {
+pub struct Backend {
     ohos_windows: *mut c_void,
     ohos_buffer: *mut c_void,
     width: u32,
@@ -21,7 +21,7 @@ struct Backend {
     window: Rc<software_renderer::MinimalSoftwareWindow>,
 }
 
-impl  Backend {
+ impl  Backend {
     pub fn new(ohos_windows: *mut c_void,ohos_buffer: *mut c_void, width: u32, height: u32, ) -> Result<Self, PlatformError> {
         Ok(Backend {
             ohos_windows,
