@@ -378,8 +378,8 @@ impl SoftwareRenderer {
             self.force_dirty.take(),
             buffer_renderer,
         );
-        //测试用 no
-        return Default::default();
+        //测试用 Ok
+        // return Default::default();
         window_inner
             .draw_contents(|components| {
                 // //测试用
