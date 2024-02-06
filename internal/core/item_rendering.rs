@@ -463,7 +463,7 @@ impl<'a, T> PartialRenderer<'a, T> {
                 let mut borrowed = self.cache.borrow_mut();
                 let item_rc = ItemRc::new(component.clone(), index);
                 //测试用 no
-                return;
+                return ();
 
                 match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
                     Some(CachedGraphicsData {
