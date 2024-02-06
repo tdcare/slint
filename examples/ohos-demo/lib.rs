@@ -290,9 +290,12 @@ pub fn slint_buffer(buffer: &mut c_void, message:*mut c_char) ->i32 {
        Some(slint_buffer) => {
            match slint_buffer.lock(){
                Ok(data)=>{
-                   buffer=data;
+                   unsafe {
+                       libc::strcpy(buffer, data.as_ptr());
+                   }
+
                },
-               Err(e){
+               Err(e)=>{
                    errored=true;
                    message_c_string=CString::new(format!("读取数组失败{}",e)).expect("Failed to create CString");
                }
