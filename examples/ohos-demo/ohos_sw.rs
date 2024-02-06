@@ -45,9 +45,9 @@ impl slint::platform::Platform for Backend {
 
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         // 用来接收显示图像的临时数组
-        let mut fb = Vec::<TargetPixel>::with_capacity(self.width*self.height);
+        let mut fb = Vec::<TargetPixel>::with_capacity((self.width*self.height).try_into().unwrap());
         FRAME_BUFFER.get_or_init(||{
-            let buffer=Vec::<TargetPixel>::with_capacity(self.width*self.height);
+            let buffer=Vec::<TargetPixel>::with_capacity((self.width*self.height).try_into().unwrap());
             Mutex::new(buffer)
         });
 
