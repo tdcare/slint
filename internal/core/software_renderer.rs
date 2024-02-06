@@ -383,7 +383,7 @@ impl SoftwareRenderer {
         window_inner
             .draw_contents(|components| {
                 // //测试用ok
-                return Default::default();
+                // return Default::default();
                 for (component, origin) in components {
                     // renderer.compute_dirty_regions(component, *origin);
                 }
