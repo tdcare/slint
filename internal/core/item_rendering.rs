@@ -536,7 +536,8 @@ impl<'a, T> PartialRenderer<'a, T> {
                             geom
                         });
                         self.mark_dirty_rect(geom, state.offset, &state.clipped);
-                        ItemVisitorResult::Continue(new_state)
+                        ItemVisitorResult::Abort
+                        // ItemVisitorResult::Continue(new_state)
                     }
                 }
             },
