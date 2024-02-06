@@ -385,7 +385,7 @@ impl SoftwareRenderer {
                 // //测试用ok
                 // return Default::default();
                 for (component, origin) in components {
-                    // renderer.compute_dirty_regions(component, *origin);
+                    renderer.compute_dirty_regions(component, *origin);
                 }
                 //测试用 no
                 return Default::default();
