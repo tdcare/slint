@@ -15,17 +15,17 @@ pub static FRAME_BUFFER: once_cell::sync::OnceCell<Mutex<Vec<TargetPixel>>> = on
 
 pub struct Backend {
     ohos_windows: *mut c_void,
-    ohos_buffer: *mut c_void,
+
     width: u32,
     height: u32,
     window: Rc<software_renderer::MinimalSoftwareWindow>,
 }
 
  impl  Backend {
-    pub fn new(ohos_windows: *mut c_void,ohos_buffer: *mut c_void, width: u32, height: u32, ) -> Result<Self, PlatformError> {
+    pub fn new(ohos_windows: *mut c_void, width: u32, height: u32, ) -> Result<Self, PlatformError> {
         Ok(Backend {
             ohos_windows,
-            ohos_buffer,
+
             width,
             height,
             window: software_renderer::MinimalSoftwareWindow::new(
