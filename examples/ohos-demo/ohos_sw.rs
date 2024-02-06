@@ -59,7 +59,7 @@ impl slint::platform::Platform for Backend {
         loop {
             slint::platform::update_timers_and_animations();
             self.window.draw_if_needed(|renderer| {
-                renderer.render(&mut fb, self.width);
+                renderer.render(&mut fb, self.width.try_into().unwrap());
 
                 // SAFETY: SlintBltPixel is a repr(transparent) BltPixel so it is safe to transform.
                 // let blt_fb =
