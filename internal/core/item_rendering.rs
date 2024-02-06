@@ -465,9 +465,9 @@ impl<'a, T> PartialRenderer<'a, T> {
 
                 let mut borrowed = self.cache.borrow_mut();
                 let item_rc = ItemRc::new(component.clone(), index);
-                //测试用 no
-                 ItemVisitorResult::Abort
-                // match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
+                //测试用 ok
+                //  ItemVisitorResult::Abort
+                match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
                 //     Some(CachedGraphicsData {
                 //         data: cached_geom,
                 //         dependency_tracker: Some(tr),
@@ -521,24 +521,24 @@ impl<'a, T> PartialRenderer<'a, T> {
                 //             ItemVisitorResult::Continue(new_state)
                 //         }
                 //     }
-                //     _ => {
-                //         drop(borrowed);
-                //         let geom = crate::properties::evaluate_no_tracking(|| {
-                //             let geom = item_rc.geometry();
-                //             new_state.offset += geom.origin.to_vector();
-                //             new_state.old_offset += geom.origin.to_vector();
-                //             if is_clipping_item(item) {
-                //                 new_state.clipped = new_state
-                //                     .clipped
-                //                     .intersection(&geom.translate(state.offset))
-                //                     .unwrap_or_default();
-                //             }
-                //             geom
-                //         });
-                //         self.mark_dirty_rect(geom, state.offset, &state.clipped);
-                //         ItemVisitorResult::Continue(new_state)
-                //     }
-                // }
+                    _ => {
+                        drop(borrowed);
+                        let geom = crate::properties::evaluate_no_tracking(|| {
+                            let geom = item_rc.geometry();
+                            new_state.offset += geom.origin.to_vector();
+                            new_state.old_offset += geom.origin.to_vector();
+                            if is_clipping_item(item) {
+                                new_state.clipped = new_state
+                                    .clipped
+                                    .intersection(&geom.translate(state.offset))
+                                    .unwrap_or_default();
+                            }
+                            geom
+                        });
+                        self.mark_dirty_rect(geom, state.offset, &state.clipped);
+                        ItemVisitorResult::Continue(new_state)
+                    }
+                }
             },
             ComputeDirtyRegionState {
                 offset: origin.to_vector(),
