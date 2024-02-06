@@ -356,15 +356,15 @@ impl SoftwareRenderer {
         }
         //测试用 ok
         // return Default::default();
-        assert!(
-            if rotation.is_transpose() {
-                pixel_stride >= size.height as usize && buffer.len() >= (size.width as usize * pixel_stride + size.height as usize) - pixel_stride
-            } else {
-                pixel_stride >= size.width as usize && buffer.len() >= (size.height as usize * pixel_stride + size.width as usize) - pixel_stride
-            },
-            "buffer of size {} with stride {pixel_stride} is too small to handle a window of size {size:?}", buffer.len()
-        );
-        //测试用 ok
+        // assert!(
+        //     if rotation.is_transpose() {
+        //         pixel_stride >= size.height as usize && buffer.len() >= (size.width as usize * pixel_stride + size.height as usize) - pixel_stride
+        //     } else {
+        //         pixel_stride >= size.width as usize && buffer.len() >= (size.height as usize * pixel_stride + size.width as usize) - pixel_stride
+        //     },
+        //     "buffer of size {} with stride {pixel_stride} is too small to handle a window of size {size:?}", buffer.len()
+        // );
+        //测试用 no
         return Default::default();
         let buffer_renderer = SceneBuilder::new(
             size,
