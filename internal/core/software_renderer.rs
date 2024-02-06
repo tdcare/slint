@@ -336,8 +336,7 @@ impl SoftwareRenderer {
         let window_inner = WindowInner::from_pub(window.window());
         let factor = ScaleFactor::new(window_inner.scale_factor());
         let rotation = self.rotation.get();
-        //测试用
-        return Default::default();
+
         let (size, background) = if let Some(window_item) =
             window_inner.window_item().as_ref().map(|item| item.as_pin_ref())
         {
@@ -363,6 +362,7 @@ impl SoftwareRenderer {
             },
             "buffer of size {} with stride {pixel_stride} is too small to handle a window of size {size:?}", buffer.len()
         );
+
         let buffer_renderer = SceneBuilder::new(
             size,
             factor,
@@ -375,7 +375,8 @@ impl SoftwareRenderer {
             self.force_dirty.take(),
             buffer_renderer,
         );
-
+        //测试用
+        return Default::default();
         window_inner
             .draw_contents(|components| {
                 for (component, origin) in components {
