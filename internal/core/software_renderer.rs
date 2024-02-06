@@ -364,8 +364,8 @@ impl SoftwareRenderer {
         //     },
         //     "buffer of size {} with stride {pixel_stride} is too small to handle a window of size {size:?}", buffer.len()
         // );
-        //测试用 no
-        return Default::default();
+        //测试用no 这里判断会出错
+        // return Default::default();
         let buffer_renderer = SceneBuilder::new(
             size,
             factor,
@@ -379,7 +379,7 @@ impl SoftwareRenderer {
             buffer_renderer,
         );
         //测试用 no
-        // return Default::default();
+        return Default::default();
         window_inner
             .draw_contents(|components| {
                 // //测试用
