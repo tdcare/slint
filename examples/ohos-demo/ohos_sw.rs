@@ -15,7 +15,6 @@ pub static FRAME_BUFFER: once_cell::sync::OnceCell<Mutex<Vec<TargetPixel>>> = on
 
 pub struct Backend {
     ohos_windows: *mut c_void,
-
     width: u32,
     height: u32,
     window: Rc<software_renderer::MinimalSoftwareWindow>,
@@ -25,7 +24,6 @@ pub struct Backend {
     pub fn new(ohos_windows: *mut c_void, width: u32, height: u32, ) -> Result<Self, PlatformError> {
         Ok(Backend {
             ohos_windows,
-
             width,
             height,
             window: software_renderer::MinimalSoftwareWindow::new(
@@ -47,9 +45,9 @@ impl slint::platform::Platform for Backend {
 
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         // 用来接收显示图像的临时数组
-        let mut fb = Vec::<TargetPixel>::with_capacity(1024*768);
+        let mut fb = Vec::<TargetPixel>::with_capacity(self.width*self.height*1024);
         FRAME_BUFFER.get_or_init(||{
-            let buffer=Vec::<TargetPixel>::with_capacity(1024*768);
+            let buffer=Vec::<TargetPixel>::with_capacity(self.width*self.height*1024);
             Mutex::new(buffer)
         });
 
@@ -60,7 +58,6 @@ impl slint::platform::Platform for Backend {
 
         loop {
             slint::platform::update_timers_and_animations();
-
             self.window.draw_if_needed(|renderer| {
                 renderer.render(&mut fb, 1024);
 
