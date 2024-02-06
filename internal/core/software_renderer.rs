@@ -354,6 +354,8 @@ impl SoftwareRenderer {
         if size.is_empty() {
             return Default::default();
         }
+        //测试用 ok
+        return Default::default();
         assert!(
             if rotation.is_transpose() {
                 pixel_stride >= size.height as usize && buffer.len() >= (size.width as usize * pixel_stride + size.height as usize) - pixel_stride
@@ -375,8 +377,8 @@ impl SoftwareRenderer {
             self.force_dirty.take(),
             buffer_renderer,
         );
-        //测试用 ok
-        return Default::default();
+        //测试用 no
+        // return Default::default();
         window_inner
             .draw_contents(|components| {
                 // //测试用
