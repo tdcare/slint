@@ -462,10 +462,10 @@ impl<'a, T> PartialRenderer<'a, T> {
                 let mut new_state = *state;
                 ItemVisitorResult::Continue(new_state)
 
-                let mut borrowed = self.cache.borrow_mut();
-                let item_rc = ItemRc::new(component.clone(), index);
+                // let mut borrowed = self.cache.borrow_mut();
+                // let item_rc = ItemRc::new(component.clone(), index);
                 //测试用 no
-                ItemVisitorResult::Continue(new_state)
+                // ItemVisitorResult::Continue(new_state)
                 // match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
                 //     Some(CachedGraphicsData {
                 //         data: cached_geom,
