@@ -76,7 +76,7 @@ impl slint::platform::Platform for Backend {
 
             });
             if !self.window.has_active_animations() {
-                wait_for_input(slint::platform::duration_until_next_timer_update());
+               slint::platform::duration_until_next_timer_update();
             }
         }
     }
