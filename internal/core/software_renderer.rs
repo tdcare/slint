@@ -379,6 +379,8 @@ impl SoftwareRenderer {
         // return Default::default();
         window_inner
             .draw_contents(|components| {
+                //测试用
+                return Default::default();
                 for (component, origin) in components {
                     renderer.compute_dirty_regions(component, *origin);
                 }
@@ -390,8 +392,8 @@ impl SoftwareRenderer {
                     .intersection(&euclid::rect(0., 0., i16::MAX as f32, i16::MAX as f32))
                     .unwrap_or_default()
                     .cast();
-                //测试用
-                return Default::default();
+                // //测试用
+                // return Default::default();
 
                 let to_draw = self.apply_dirty_region(dirty_region, size);
 
