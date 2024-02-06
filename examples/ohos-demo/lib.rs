@@ -292,7 +292,7 @@ pub fn slint_buffer(buffer: *mut c_void, message:*mut c_char) ->i32 {
            match slint_buffer.lock(){
                Ok(data)=>{
                    unsafe {
-                       core::ptr::write(buffer as *mut Vec<TargetPixel>,data.deref());
+                       core::ptr::write(buffer as *mut Vec<TargetPixel>,*data.deref());
                        // libc::strcpy(buffer, data.as_ptr());
                    }
 
