@@ -463,79 +463,79 @@ impl<'a, T> PartialRenderer<'a, T> {
                 let mut borrowed = self.cache.borrow_mut();
                 let item_rc = ItemRc::new(component.clone(), index);
                 //测试用 no
-
-                match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
-                    // Some(CachedGraphicsData {
-                    //     data: cached_geom,
-                    //     dependency_tracker: Some(tr),
-                    // }) => {
-                    //     if tr.is_dirty() {
-                    //         let old_geom = *cached_geom;
-                    //         drop(borrowed);
-                    //         let geom =
-                    //             crate::properties::evaluate_no_tracking(|| item_rc.geometry());
-                    //
-                    //         self.mark_dirty_rect(old_geom, state.old_offset, &state.clipped);
-                    //         self.mark_dirty_rect(geom, state.offset, &state.clipped);
-                    //
-                    //         new_state.offset += geom.origin.to_vector();
-                    //         new_state.old_offset += old_geom.origin.to_vector();
-                    //         if ItemRef::downcast_pin::<Clip>(item).is_some()
-                    //             || ItemRef::downcast_pin::<Opacity>(item).is_some()
-                    //         {
-                    //             // When the opacity or the clip change, this will impact all the children, including
-                    //             // the ones outside the element, regardless if they are themselves dirty or not.
-                    //             new_state.must_refresh_children = true;
-                    //         }
-                    //
-                    //         ItemVisitorResult::Continue(new_state)
-                    //     } else {
-                    //         tr.as_ref().register_as_dependency_to_current_binding();
-                    //
-                    //         if state.must_refresh_children
-                    //             || new_state.offset != new_state.old_offset
-                    //         {
-                    //             self.mark_dirty_rect(
-                    //                 *cached_geom,
-                    //                 state.old_offset,
-                    //                 &state.clipped,
-                    //             );
-                    //             self.mark_dirty_rect(*cached_geom, state.offset, &state.clipped);
-                    //         }
-                    //
-                    //         new_state.offset += cached_geom.origin.to_vector();
-                    //         new_state.old_offset += cached_geom.origin.to_vector();
-                    //         if crate::properties::evaluate_no_tracking(|| is_clipping_item(item)) {
-                    //             new_state.clipped = new_state
-                    //                 .clipped
-                    //                 .intersection(
-                    //                     &cached_geom
-                    //                         .translate(state.offset)
-                    //                         .union(&cached_geom.translate(state.old_offset)),
-                    //                 )
-                    //                 .unwrap_or_default();
-                    //         }
-                    //         ItemVisitorResult::Continue(new_state)
-                    //     }
-                    // }
-                    _ => {
-                        drop(borrowed);
-                        let geom = crate::properties::evaluate_no_tracking(|| {
-                            let geom = item_rc.geometry();
-                            new_state.offset += geom.origin.to_vector();
-                            new_state.old_offset += geom.origin.to_vector();
-                            if is_clipping_item(item) {
-                                new_state.clipped = new_state
-                                    .clipped
-                                    .intersection(&geom.translate(state.offset))
-                                    .unwrap_or_default();
-                            }
-                            geom
-                        });
-                        self.mark_dirty_rect(geom, state.offset, &state.clipped);
-                        ItemVisitorResult::Continue(new_state)
-                    }
-                }
+                ItemVisitorResult::Continue(new_state)
+                // match item.cached_rendering_data_offset().get_entry(&mut borrowed) {
+                //     Some(CachedGraphicsData {
+                //         data: cached_geom,
+                //         dependency_tracker: Some(tr),
+                //     }) => {
+                //         if tr.is_dirty() {
+                //             let old_geom = *cached_geom;
+                //             drop(borrowed);
+                //             let geom =
+                //                 crate::properties::evaluate_no_tracking(|| item_rc.geometry());
+                //
+                //             self.mark_dirty_rect(old_geom, state.old_offset, &state.clipped);
+                //             self.mark_dirty_rect(geom, state.offset, &state.clipped);
+                //
+                //             new_state.offset += geom.origin.to_vector();
+                //             new_state.old_offset += old_geom.origin.to_vector();
+                //             if ItemRef::downcast_pin::<Clip>(item).is_some()
+                //                 || ItemRef::downcast_pin::<Opacity>(item).is_some()
+                //             {
+                //                 // When the opacity or the clip change, this will impact all the children, including
+                //                 // the ones outside the element, regardless if they are themselves dirty or not.
+                //                 new_state.must_refresh_children = true;
+                //             }
+                //
+                //             ItemVisitorResult::Continue(new_state)
+                //         } else {
+                //             tr.as_ref().register_as_dependency_to_current_binding();
+                //
+                //             if state.must_refresh_children
+                //                 || new_state.offset != new_state.old_offset
+                //             {
+                //                 self.mark_dirty_rect(
+                //                     *cached_geom,
+                //                     state.old_offset,
+                //                     &state.clipped,
+                //                 );
+                //                 self.mark_dirty_rect(*cached_geom, state.offset, &state.clipped);
+                //             }
+                //
+                //             new_state.offset += cached_geom.origin.to_vector();
+                //             new_state.old_offset += cached_geom.origin.to_vector();
+                //             if crate::properties::evaluate_no_tracking(|| is_clipping_item(item)) {
+                //                 new_state.clipped = new_state
+                //                     .clipped
+                //                     .intersection(
+                //                         &cached_geom
+                //                             .translate(state.offset)
+                //                             .union(&cached_geom.translate(state.old_offset)),
+                //                     )
+                //                     .unwrap_or_default();
+                //             }
+                //             ItemVisitorResult::Continue(new_state)
+                //         }
+                //     }
+                //     _ => {
+                //         drop(borrowed);
+                //         let geom = crate::properties::evaluate_no_tracking(|| {
+                //             let geom = item_rc.geometry();
+                //             new_state.offset += geom.origin.to_vector();
+                //             new_state.old_offset += geom.origin.to_vector();
+                //             if is_clipping_item(item) {
+                //                 new_state.clipped = new_state
+                //                     .clipped
+                //                     .intersection(&geom.translate(state.offset))
+                //                     .unwrap_or_default();
+                //             }
+                //             geom
+                //         });
+                //         self.mark_dirty_rect(geom, state.offset, &state.clipped);
+                //         ItemVisitorResult::Continue(new_state)
+                //     }
+                // }
             },
             ComputeDirtyRegionState {
                 offset: origin.to_vector(),
