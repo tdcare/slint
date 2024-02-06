@@ -69,7 +69,7 @@ impl slint::platform::Platform for Backend {
                 //     unsafe { slice::from_raw_parts(fb.as_ptr() as *const BltPixel, fb.len()) };
                 // 在这里想办法将fb 数组的内容传以ohos
                 if let Some(ohos_buffer)= FRAME_BUFFER.get(){
-                  if let mut Ok(data)= ohos_buffer.lock(){
+                  if let Ok(mut data)= ohos_buffer.lock(){
                       data.clone_from(&fb);
                   }
                 }
