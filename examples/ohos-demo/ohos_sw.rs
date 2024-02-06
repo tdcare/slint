@@ -23,7 +23,7 @@ struct Backend {
 
 impl  Backend {
     pub fn new(ohos_windows: *mut c_void,ohos_buffer: *mut c_void, width: u32, height: u32, ) -> Result<Self, PlatformError> {
-        Ok(Platform {
+        Ok(Backend {
             ohos_windows,
             ohos_buffer,
             width,
