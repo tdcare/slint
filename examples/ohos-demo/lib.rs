@@ -283,7 +283,7 @@ pub fn init_memory(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i
 }
 // 软实现方案，取数据
 #[no_mangle]
-pub fn slint_buffer(buffer: &mut c_void, message:*mut c_char) ->i32 {
+pub fn slint_buffer(buffer: *mut c_char, message:*mut c_char) ->i32 {
     let mut errored=false;
     let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
    match   FRAME_BUFFER.get(){
