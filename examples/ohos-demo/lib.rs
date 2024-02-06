@@ -345,7 +345,7 @@ pub fn init_sw_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> 
     demo.set_secure_boot(false);
 
 
-    demo.run().unwrap();
+    // demo.run().unwrap();
 
 
     unsafe {
