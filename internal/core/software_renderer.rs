@@ -375,12 +375,12 @@ impl SoftwareRenderer {
             self.force_dirty.take(),
             buffer_renderer,
         );
-        //测试用
-        // return Default::default();
+        //测试用 ok
+        return Default::default();
         window_inner
             .draw_contents(|components| {
-                //测试用
-                return Default::default();
+                // //测试用
+                // return Default::default();
                 for (component, origin) in components {
                     renderer.compute_dirty_regions(component, *origin);
                 }
