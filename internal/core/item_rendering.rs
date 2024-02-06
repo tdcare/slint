@@ -460,6 +460,8 @@ impl<'a, T> PartialRenderer<'a, T> {
             crate::item_tree::TraversalOrder::BackToFront,
             |component, item, index, state| {
                 let mut new_state = *state;
+                ItemVisitorResult::Continue(new_state)
+
                 let mut borrowed = self.cache.borrow_mut();
                 let item_rc = ItemRc::new(component.clone(), index);
                 //测试用 no
