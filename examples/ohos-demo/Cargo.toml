@@ -38,7 +38,7 @@ rand = "0.8"
 webrtc = "0.9.0"
 lazy_static = "1"
 tokio = { version = "1.32.0", features = ["full"] }
-napi-ohos        = { version = "*" }
+napi-ohos        = { version = "*",features=["ohos","async"] }
 napi-derive-ohos = { version = "*" }
 
 #OpenHarmony 日志库

@@ -22,7 +22,7 @@ use napi_derive_ohos::napi;
 
 // use hilog_binding::hilog_debug;
 
-// use napi::bindgen_prelude::*;
+use napi_ohos::bindgen_prelude::*;
 // use i_slint_core::api::EventLoopError;
 // use i_slint_core::string::format;
 // use PlatformError::NoPlatform;
