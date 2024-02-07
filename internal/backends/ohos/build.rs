@@ -6,12 +6,12 @@ use std::path::PathBuf;
 
 use cfg_aliases::cfg_aliases;
 use gl_generator::{Api, Fallbacks, Profile, Registry, StructGenerator};
-use napi_build_ohos;
+use napi_build;
 
 
 fn main() {
   // napi_build::setup();
-    napi_build_ohos::setup();
+    napi_build::setup();
   // slint_build::compile_with_config(
   //   "demo.slint",
   //   slint_build::CompilerConfiguration::new()
