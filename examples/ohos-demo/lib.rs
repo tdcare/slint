@@ -19,11 +19,11 @@ use slint::SharedString;
 
 // #[macro_use]
 // extern crate napi_derive;
-use napi_derive_ohos::napi;
+use napi_derive::napi;
 
 // use hilog_binding::hilog_debug;
 
-use napi_ohos::bindgen_prelude::*;
+use napi::bindgen_prelude::*;
 // use i_slint_core::api::EventLoopError;
 // use i_slint_core::string::format;
 // use PlatformError::NoPlatform;

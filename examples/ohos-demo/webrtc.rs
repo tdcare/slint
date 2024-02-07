@@ -19,8 +19,8 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
 
-use napi_derive_ohos::napi;
-use napi_ohos::bindgen_prelude::*;
+use napi_derive::napi;
+use napi::bindgen_prelude::*;
 
 
 
