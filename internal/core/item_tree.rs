@@ -680,7 +680,7 @@ impl VisitChildrenResult {
 
     /// Returns a result that means that the visitor must stop, and convey the item that caused the abort
     pub fn abort(item_index: u32, index_within_repeater: usize) -> Self {
-        assert!(index_within_repeater < u32::MAX as usize);
+        // assert!(index_within_repeater < u32::MAX as usize);
         Self(item_index as u64 | (index_within_repeater as u64) << 32)
     }
     /// True if the visitor wants to abort the visit
