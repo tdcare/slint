@@ -2,6 +2,7 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
+use lazy_static::lazy_static;
 
 use tokio::sync::Mutex;
 use tokio::time::Duration;
@@ -18,17 +19,19 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
 
-#[macro_use]
-extern crate lazy_static;
+use napi_derive_ohos::napi;
+use napi_ohos::bindgen_prelude::*;
 
-lazy_static! {
+
+
+lazy_static::lazy_static! {
     static ref PEER_CONNECTION_MUTEX: Arc<Mutex<Option<Arc<RTCPeerConnection>>>> =
         Arc::new(Mutex::new(None));
 }
 
 
-#[tokio::main]
-pub async  fn main() {
+#[napi]
+pub async  fn web_rtc_test() {
     // let main_window = Demo::new().unwrap();
     // main_window.run().unwrap();
     let pc = {
@@ -41,7 +44,7 @@ pub async  fn main() {
 
             match m.register_default_codecs() {
                 Ok(_) => {}
-                Err(err) => panic!("{}", err),
+                Err(err) => panic!("注册MediaEngine出错了"),
             };
 
             // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
@@ -53,7 +56,7 @@ pub async  fn main() {
             // Use the default set of Interceptors
             registry = match register_default_interceptors(registry, &mut m) {
                 Ok(r) => r,
-                Err(err) => panic!("{}", err),
+                Err(err) => panic!("注册Interceptors出错了",),
             };
 
             // Create the API object with the MediaEngine
@@ -65,7 +68,7 @@ pub async  fn main() {
             // Create a new RTCPeerConnection
             let pc = match api.new_peer_connection(RTCConfiguration::default()).await {
                 Ok(p) => p,
-                Err(err) => panic!("{}", err),
+                Err(err) => panic!("创那家RTCPeerConnection出错了"),
             };
             let pc = Arc::new(pc);
 
