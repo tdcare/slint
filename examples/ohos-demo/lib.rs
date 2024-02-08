@@ -30,7 +30,7 @@ use i_slint_backend_ohos::calloop_backend::Backend;
 use i_slint_backend_ohos::calloop_backend::input::{GLOBAL_PROXY, OHOS_EVENT_SENDER};
 use i_slint_backend_ohos::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
 use hilog_binding::hilog_debug;
-use crate::ohos_sw::{FRAME_BUFFER, TargetPixel};
+// use crate::ohos_sw::{FRAME_BUFFER, TargetPixel};
 
 #[napi]
 pub fn sum(a: i32, b: i32) -> i32 {
