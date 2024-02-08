@@ -1,7 +1,6 @@
 #![deny(clippy::all)]
 
 pub mod ohos_sw;
-pub mod webrtc;
 
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
