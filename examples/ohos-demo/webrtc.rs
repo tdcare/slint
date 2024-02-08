@@ -30,7 +30,7 @@ lazy_static::lazy_static! {
 }
 
 
-#[napi]
+// #[napi]
 pub async  fn web_rtc_test() {
     // let main_window = Demo::new().unwrap();
     // main_window.run().unwrap();

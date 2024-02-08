@@ -22,7 +22,6 @@ use slint::SharedString;
 use napi_derive::napi;
 
 // use hilog_binding::hilog_debug;
-
 use napi::bindgen_prelude::*;
 // use i_slint_core::api::EventLoopError;
 // use i_slint_core::string::format;
@@ -47,18 +46,18 @@ pub fn sum(a: i32, b: i32) -> i32 {
     a + b + 200
 }
 
-#[napi]
-pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
-    let v = p.await?;
-    hilog_debug!(
-        "test",
-        LogOptions {
-          tag: Some("testTag"),
-          domain: None
-      }
-    );
-    Ok(v + 210)
-}
+// #[napi]
+// pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
+//     let v = p.await?;
+//     hilog_debug!(
+//         "test",
+//         LogOptions {
+//           tag: Some("testTag"),
+//           domain: None
+//       }
+//     );
+//     Ok(v + 210)
+// }
 
 
 // slint::include_modules!();
