@@ -286,45 +286,45 @@ pub fn init_memory(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i
 
 
 // 软实现方案，取数据
-// #[no_mangle]
-// pub fn slint_buffer(buffer: *mut c_void, message:*mut c_char) ->i32 {
-//     use std::ops::Deref;
-//     let mut errored=false;
-//     let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
-//    match   FRAME_BUFFER.get(){
-//        Some(slint_buffer) => {
-//            match slint_buffer.lock(){
-//                Ok(data)=>{
-//                    unsafe {
-//                        core::ptr::write(buffer as *mut Vec<TargetPixel>,(*data.deref().clone()).to_vec());
-//                        // libc::strcpy(buffer, data.as_ptr());
-//                    }
-//
-//                },
-//                Err(e)=>{
-//                    errored=true;
-//                    message_c_string=CString::new(format!("读取数组失败{}",e)).expect("Failed to create CString");
-//                }
-//            }
-//        },
-//        None=>{
-//            errored=true;
-//            message_c_string=CString::new(format!("读取缓存失败")).expect("Failed to create CString");
-//        }
-//    }
-//
-//
-//     unsafe {
-//         libc::strcpy(message, message_c_string.as_ptr());
-//     }
-//
-//     return if errored {
-//         -1
-//     } else {
-//         0
-//     }
-// }
-//
+#[no_mangle]
+pub fn slint_buffer(buffer: *mut c_void, message:*mut c_char) ->i32 {
+    use std::ops::Deref;
+    let mut errored=false;
+    let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
+   match   FRAME_BUFFER.get(){
+       Some(slint_buffer) => {
+           match slint_buffer.lock(){
+               Ok(data)=>{
+                   unsafe {
+                       core::ptr::write(buffer as *mut Vec<TargetPixel>,(*data.deref().clone()).to_vec());
+                       // libc::strcpy(buffer, data.as_ptr());
+                   }
+
+               },
+               Err(e)=>{
+                   errored=true;
+                   message_c_string=CString::new(format!("读取数组失败{}",e)).expect("Failed to create CString");
+               }
+           }
+       },
+       None=>{
+           errored=true;
+           message_c_string=CString::new(format!("读取缓存失败")).expect("Failed to create CString");
+       }
+   }
+
+
+    unsafe {
+        libc::strcpy(message, message_c_string.as_ptr());
+    }
+
+    return if errored {
+        -1
+    } else {
+        0
+    }
+}
+
 #[no_mangle]
 pub fn init_sw_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i32 {
     slint::slint!(import { Demo } from "demo.slint";);
