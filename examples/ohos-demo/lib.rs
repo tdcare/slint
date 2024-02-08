@@ -19,7 +19,7 @@ use slint::SharedString;
 // #[macro_use]
 // extern crate napi_derive;
 use napi_derive_ohos::napi;
-// use napi_ohos::bindgen_prelude::*;
+use napi_ohos::bindgen_prelude::*;
 
 // use hilog_binding::hilog_debug;
 // use i_slint_core::api::EventLoopError;
@@ -45,18 +45,18 @@ pub fn sum(a: i32, b: i32) -> i32 {
     a + b + 200
 }
 
-// #[napi]
-// pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
-//     let v = p.await?;
-//     hilog_debug!(
-//         "test",
-//         LogOptions {
-//           tag: Some("testTag"),
-//           domain: None
-//       }
-//     );
-//     Ok(v + 210)
-// }
+#[napi]
+pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
+    let v = p.await?;
+    // hilog_debug!(
+    //     "test",
+    //     LogOptions {
+    //       tag: Some("testTag"),
+    //       domain: None
+    //   }
+    // );
+    Ok(v + 210)
+}
 
 
 // slint::include_modules!();
