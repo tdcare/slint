@@ -33,7 +33,6 @@ use i_slint_backend_ohos::calloop_backend::Backend;
 use i_slint_backend_ohos::calloop_backend::input::{GLOBAL_PROXY, OHOS_EVENT_SENDER};
 use i_slint_backend_ohos::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent, OH_NativeXComponent_TouchEvent, OH_NativeXComponent_TouchEventType, OH_NativeXComponent_TouchPoint, OHOS_Input_Event};
 // use hilog_binding::hilog_debug;
-// use crate::ohos_sw::{FRAME_BUFFER, TargetPixel};
 
 #[napi]
 pub fn sum(a: i32, b: i32) -> i32 {
@@ -289,6 +288,7 @@ pub fn init_memory(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> i
 #[no_mangle]
 pub fn slint_buffer(buffer: *mut c_void, message:*mut c_char) ->i32 {
     use std::ops::Deref;
+    use crate::ohos_sw::{FRAME_BUFFER, TargetPixel};
     let mut errored=false;
     let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
    match   FRAME_BUFFER.get(){
