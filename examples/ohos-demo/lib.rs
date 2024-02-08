@@ -331,7 +331,7 @@ pub fn init_sw_demo(ohos_widows: *mut c_void,w:u32,h:u32,message:*mut c_char)-> 
 
     let mut errored=false;
     let mut message_c_string=CString::new(format!("Running ")).expect("Failed to create CString");
-    hilog_debug!("hello world1");
+    // hilog_debug!("hello world1");
 
     // let p=Backend::new(ohos_widows, w, h).unwrap();
     let p=crate::ohos_sw::Backend::new(ohos_widows, w, h).unwrap();
