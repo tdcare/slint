@@ -21,7 +21,7 @@ use crate::items::{InputType, ItemRef, MouseCursor};
 use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, SizeLengths};
 use crate::properties::{Property, PropertyTracker};
 use crate::renderer::Renderer;
-use crate::{Callback, Coord, SharedString, GLOBAL_CONTEXT};
+use crate::{Callback, Coord, SharedString};
 use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
 use core::cell::{Cell, RefCell};
@@ -314,7 +314,7 @@ impl crate::properties::PropertyDirtyHandler for WindowRedrawTracker {
 /// This enum describes the different ways a popup can be rendered by the back-end.
 enum PopupWindowLocation {
     /// The popup is rendered in its own top-level window that is know to the windowing system.
-    TopLevel { _adapter: Rc<dyn WindowAdapter> },
+    TopLevel(Rc<dyn WindowAdapter>),
     /// The popup is rendered as an embedded child window at the given position.
     ChildWindow(LogicalPoint),
 }
@@ -372,6 +372,7 @@ pub struct WindowInner {
     had_popup_on_press: Cell<bool>,
     close_requested: Callback<(), CloseRequestResponse>,
     click_state: ClickState,
+    pub(crate) ctx: once_cell::unsync::Lazy<crate::SlintContext>,
 }
 
 impl Drop for WindowInner {
@@ -431,6 +432,11 @@ impl WindowInner {
             close_requested: Default::default(),
             click_state: ClickState::default(),
             prevent_focus_change: Default::default(),
+            // The ctx is lazy so that a Window can be initialized before the backend.
+            // (for example in test_empty_window)
+            ctx: once_cell::unsync::Lazy::new(|| {
+                crate::context::GLOBAL_CONTEXT.with(|ctx| ctx.get().unwrap().clone())
+            }),
         }
     }
 
@@ -456,6 +462,9 @@ impl WindowInner {
                 default_font_size_prop.set(window_adapter.renderer().default_font_size());
             }
         }
+        self.set_window_item_geometry(
+            window_adapter.size().to_logical(self.scale_factor()).to_euclid(),
+        );
         window_adapter.request_redraw();
         let weak = Rc::downgrade(&window_adapter);
         crate::timers::Timer::single_shot(Default::default(), move || {
@@ -487,7 +496,7 @@ impl WindowInner {
         crate::animations::update_animations();
 
         // handle multiple press release
-        event = self.click_state.check_repeat(event);
+        event = self.click_state.check_repeat(event, self.ctx.0.platform.click_interval());
 
         let pressed_event = matches!(event, MouseEvent::Pressed { .. });
         let released_event = matches!(event, MouseEvent::Released { .. });
@@ -558,7 +567,7 @@ impl WindowInner {
 
         if last_top_item != mouse_input_state.top_item() {
             self.click_state.reset();
-            self.click_state.check_repeat(event);
+            self.click_state.check_repeat(event, self.ctx.0.platform.click_interval());
         }
 
         self.mouse_input_state.set(mouse_input_state);
@@ -799,7 +808,7 @@ impl WindowInner {
 
             let popup_component =
                 self.active_popup.borrow().as_ref().and_then(|popup| match popup.location {
-                    PopupWindowLocation::TopLevel { .. } => None,
+                    PopupWindowLocation::TopLevel(..) => None,
                     PopupWindowLocation::ChildWindow(coordinates) => {
                         Some((popup.component.clone(), coordinates))
                     }
@@ -828,11 +837,7 @@ impl WindowInner {
         if let Some(component) = self.try_component() {
             let was_visible = self.strong_component_ref.replace(Some(component)).is_some();
             if !was_visible {
-                GLOBAL_CONTEXT.with(|ctx| {
-                    if let Some(ctx) = ctx.get() {
-                        *(ctx.window_count.borrow_mut()) += 1;
-                    }
-                });
+                *(self.ctx.0.window_count.borrow_mut()) += 1;
             }
         }
 
@@ -851,16 +856,12 @@ impl WindowInner {
         let result = self.window_adapter().set_visible(false);
         let was_visible = self.strong_component_ref.borrow_mut().take().is_some();
         if was_visible {
-            GLOBAL_CONTEXT.with(|ctx| {
-                if let Some(ctx) = ctx.get() {
-                    let mut count = ctx.window_count.borrow_mut();
-                    *count -= 1;
-                    if *count <= 0 {
-                        drop(count);
-                        let _ = crate::api::quit_event_loop();
-                    }
-                }
-            });
+            let mut count = self.ctx.0.window_count.borrow_mut();
+            *count -= 1;
+            if *count <= 0 {
+                drop(count);
+                let _ = self.ctx.event_loop_proxy().and_then(|p| p.quit_event_loop().ok());
+            }
         }
         result
     }
@@ -931,7 +932,7 @@ impl WindowInner {
 
             Some(window_adapter) => {
                 WindowInner::from_pub(window_adapter.window()).set_component(popup_componentrc);
-                PopupWindowLocation::TopLevel { _adapter: window_adapter }
+                PopupWindowLocation::TopLevel(window_adapter)
             }
         };
 
@@ -946,18 +947,23 @@ impl WindowInner {
     /// TODO: this function should take a component ref as parameter, to close a specific popup - i.e. when popup menus create a hierarchy of popups.
     pub fn close_popup(&self) {
         if let Some(current_popup) = self.active_popup.replace(None) {
-            if let PopupWindowLocation::ChildWindow(offset) = current_popup.location {
-                // Refresh the area that was previously covered by the popup.
-                let popup_region = crate::properties::evaluate_no_tracking(|| {
-                    let popup_component = ItemTreeRc::borrow_pin(&current_popup.component);
-                    popup_component.as_ref().item_geometry(0)
-                })
-                .translate(offset.to_vector());
+            match current_popup.location {
+                PopupWindowLocation::ChildWindow(offset) => {
+                    // Refresh the area that was previously covered by the popup.
+                    let popup_region = crate::properties::evaluate_no_tracking(|| {
+                        let popup_component = ItemTreeRc::borrow_pin(&current_popup.component);
+                        popup_component.as_ref().item_geometry(0)
+                    })
+                    .translate(offset.to_vector());
 
-                if !popup_region.is_empty() {
-                    let window_adapter = self.window_adapter();
-                    window_adapter.renderer().mark_dirty_region(popup_region.to_box2d());
-                    window_adapter.request_redraw();
+                    if !popup_region.is_empty() {
+                        let window_adapter = self.window_adapter();
+                        window_adapter.renderer().mark_dirty_region(popup_region.to_box2d());
+                        window_adapter.request_redraw();
+                    }
+                }
+                PopupWindowLocation::TopLevel(adapter) => {
+                    let _ = adapter.set_visible(false);
                 }
             }
         }

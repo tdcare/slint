@@ -71,11 +71,11 @@ build = "build.rs"
 edition = "2021"
 
 [dependencies]
-slint = "1.3.0"
+slint = "1.4.0"
 ...
 
 [build-dependencies]
-slint-build = "1.3.0"
+slint-build = "1.4.0"
 ```
 
 Use the API of the slint-build crate in the `build.rs` file:
@@ -209,6 +209,7 @@ pub use i_slint_core::api::*;
 pub use i_slint_core::component_factory::ComponentFactory;
 #[cfg(not(target_arch = "wasm32"))]
 pub use i_slint_core::graphics::{BorrowedOpenGLTextureBuilder, BorrowedOpenGLTextureOrigin};
+// keep in sync with internal/interpreter/api.rs
 pub use i_slint_core::graphics::{
     Brush, Color, Image, LoadImageError, Rgb8Pixel, Rgba8Pixel, RgbaColor, SharedPixelBuffer,
 };
@@ -320,7 +321,7 @@ pub mod platform {
 /// Helper type that helps checking that the generated code is generated for the right version
 #[doc(hidden)]
 #[allow(non_camel_case_types)]
-pub struct VersionCheck_1_4_0;
+pub struct VersionCheck_1_4_1;
 
 #[cfg(doctest)]
 mod compile_fail_tests;

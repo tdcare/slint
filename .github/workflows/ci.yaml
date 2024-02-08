@@ -28,12 +28,12 @@ jobs:
         rust_version: [stable, "1.70"]
         include:
           - os: windows-2022
-            extra_args: "--exclude ffmpeg"
+            extra_args: "--exclude ffmpeg --exclude gstreamer-player"
           - os: macos-11
-            extra_args: "--exclude ffmpeg"
+            extra_args: "--exclude ffmpeg --exclude gstreamer-player"
           - os: windows-2022
             rust_version: "beta"
-            extra_args: "--exclude ffmpeg"
+            extra_args: "--exclude ffmpeg --exclude gstreamer-player"
         exclude:
           - os: macos-11
             rust_version: "1.70"
@@ -41,7 +41,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
     - name: Install Qt
       if: runner.os != 'Windows'
@@ -53,32 +53,22 @@ jobs:
     - name: Install ffmpeg and alsa (Linux)
       if: runner.os == 'Linux'
       run: sudo apt-get install clang libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libavdevice-dev libasound2-dev pkg-config
+    - name: Install gstreamer and libunwind (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get install libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
     - name: Setup headless display
       uses: pyvista/setup-headless-display-action@v1
-    - name: Set default style
-      if: matrix.os != 'windows-2022'
-      run: |
-          echo "SLINT_STYLE=native" >> $GITHUB_ENV
-    - name: Set default style
-      if: matrix.os == 'windows-2022'
-      run: |
-          echo "SLINT_STYLE=fluent" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "SLINT_NO_QT=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     - uses: ./.github/actions/setup-rust
       with:
         toolchain: ${{ matrix.rust_version }}
         key: x-v2
-    # - name: Pin dependencies to make it build with our MSRV
-    #   if: matrix.rust_version == '1.66'
-    #   shell: bash
-    #   run: |
-    #     if [ ! -f ./Cargo.lock ]; then
-    #       cargo update -p half --precise 2.2.1
-    #       cargo update -p codemap-diagnostic --precise 0.1.1
-    #       cargo update -p clap --precise 4.3.24
-    #       cargo update -p clap_builder --precise 4.3.24
-    #       cargo update -p clap_lex --precise 0.5.0
-    #     fi
+    - name: Pin dependencies to make it build with our MSRV
+      if: matrix.rust_version == '1.70'
+      shell: bash
+      run: |
+        if [ ! -f ./Cargo.lock ]; then
+          cargo update -p clap --precise 4.4.18
+        fi
     - name: Run tests
       run: DYLD_FRAMEWORK_PATH=$Qt5_DIR/lib cargo test --verbose --all-features --workspace ${{ matrix.extra_args }} --exclude slint-node --exclude pyslint --exclude test-driver-node --exclude slint-node --exclude test-driver-nodejs --exclude test-driver-cpp --exclude mcu-board-support --exclude printerdemo_mcu --exclude uefi-demo --exclude slint-cpp
       env:
@@ -86,7 +76,7 @@ jobs:
       shell: bash
     - name: Archive screenshots after failed tests
       if: ${{ failure() }}
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
           name: screenshots-${{matrix.os}}
           path: |
@@ -107,7 +97,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
     - name: Install Qt
       if: runner.os != 'Windows'
@@ -118,15 +108,6 @@ jobs:
         cache: true
     - name: Setup headless display
       uses: pyvista/setup-headless-display-action@v1
-    - name: Set default style
-      if: matrix.os != 'windows-2022'
-      run: |
-          echo "SLINT_STYLE=native" >> $GITHUB_ENV
-    - name: Set default style
-      if: matrix.os == 'windows-2022'
-      run: |
-          echo "SLINT_STYLE=fluent" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "SLINT_NO_QT=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     - uses: ./.github/actions/install-nodejs
       id: node-install
     - uses: ./.github/actions/setup-rust
@@ -159,10 +140,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
     - name: Install Qt
-      if: runner.os != 'Windows'
+      if: runner.os == 'Linux'
       uses: jurplel/install-qt-action@v3
       with:
         version: '5.15.2'
@@ -170,15 +151,6 @@ jobs:
         cache: true
     - name: Setup headless display
       uses: pyvista/setup-headless-display-action@v1
-    - name: Set default style
-      if: matrix.os != 'windows-2022'
-      run: |
-          echo "SLINT_STYLE=native" >> $GITHUB_ENV
-    - name: Set default style
-      if: matrix.os == 'windows-2022'
-      run: |
-          echo "SLINT_STYLE=fluent" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "SLINT_NO_QT=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     - uses: ./.github/actions/setup-rust
       with:
         key: x-napi-v2-${{ steps.node-install.outputs.node-version }} # the cache key consists of a manually bumpable version and the node version, as the cached rustc artifacts contain linking information where to find node.lib, which is in a versioned directory.
@@ -204,7 +176,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
       with:
         force-gcc-10: true
@@ -240,18 +212,11 @@ jobs:
         os: [ubuntu-22.04, macos-12, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
       with:
         force-gcc-10: true
-    - name: Install Qt (Ubuntu)
-      uses: jurplel/install-qt-action@v3
-      if: matrix.os == 'ubuntu-22.04'
-      with:
-        version: 5.15.2
-        cache: true
-    - name: Install Qt (cached)
-      if: matrix.os != 'ubuntu-22.04'
+    - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
         version: 6.5.1
@@ -272,7 +237,7 @@ jobs:
       with:
         cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
         cmakeListsTxtPath: CMakeLists.txt
-        cmakeAppendedArgs: '-DSLINT_BUILD_TESTING=ON -DSLINT_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Debug -DSLINT_FEATURE_RENDERER_SKIA=ON'
+        cmakeAppendedArgs: '-DSLINT_BUILD_TESTING=ON -DSLINT_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Debug -DSLINT_FEATURE_RENDERER_SKIA=ON -DSLINT_FEATURE_BACKEND_QT=ON'
         buildDirectory: ${{ runner.workspace }}/cppbuild
         buildWithCMakeArgs: '--config Debug'
     - name: ctest
@@ -282,7 +247,7 @@ jobs:
       working-directory: ${{ runner.workspace }}/cppbuild
       run: cmake --build . --config Debug --target package
     - name: "Create C++ packages artifact"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
           name: cpp_bin-${{ matrix.os }}
           path: ${{ runner.workspace }}/cppbuild/Slint-cpp-*
@@ -291,21 +256,20 @@ jobs:
     needs: [cpp_cmake]
     runs-on: ubuntu-22.04
     env:
-      DYLD_FRAMEWORK_PATH: /Users/runner/work/slint/Qt/6.5.1/clang_64/lib
       QT_QPA_PLATFORM: offscreen
       CARGO_INCREMENTAL: false
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
       with:
         force-gcc-10: true
     - name: Install Qt (Ubuntu)
       uses: jurplel/install-qt-action@v3
       with:
-        version: 5.15.2
+        version: 6.5.1
         cache: true
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v4
       with:
         name: cpp_bin-ubuntu-22.04
         path: cpp-package
@@ -340,7 +304,7 @@ jobs:
           - feature: stm32h735g
             target: thumbv7em-none-eabihf
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-rust
       with:
         target: ${{matrix.target}}
@@ -350,7 +314,7 @@ jobs:
   mcu_esp:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: esp-rs/xtensa-toolchain@v1.5
       with:
@@ -366,11 +330,11 @@ jobs:
   ffi_32bit_build:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-rust
       with:
         target: armv7-unknown-linux-gnueabihf
-    - uses: baptiste0928/cargo-install@v2
+    - uses: baptiste0928/cargo-install@v3
       with:
         crate: cross
     - name: Check
@@ -381,7 +345,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-rust
       with:
         toolchain: stable
@@ -401,7 +365,7 @@ jobs:
   tree-sitter:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
     - uses: robinraju/release-downloader@v1.7
@@ -442,7 +406,7 @@ jobs:
         from_version: ['0.3.0']
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         fetch-depth: 0
     - uses: ./.github/actions/install-linux-dependencies
@@ -505,14 +469,14 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/install-linux-dependencies
     - uses: ./.github/actions/setup-rust
     - name: run the formatter
       run: |
-        cargo run -p slint-fmt -- -i tests/cases/*/*.slint
-        cargo run -p slint-fmt -- -i examples/*/*.slint
-        cargo run -p slint-fmt -- -i examples/*/*/*.slint
+        cargo run -p slint-lsp -- format -i tests/cases/*/*.slint
+        cargo run -p slint-lsp -- format -i examples/*/*.slint
+        cargo run -p slint-lsp -- format -i examples/*/*/*.slint
     - name: Show the diff
       run: git diff
     - name: Run the intepreter test to make sure that the test are passing after format
@@ -522,7 +486,7 @@ jobs:
     runs-on: ubuntu-22.04
     container: espressif/idf:release-v5.2
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: esp-rs/xtensa-toolchain@v1.5
         with:
@@ -557,7 +521,7 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install Android API level 30
         run: ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-30"
       - name: Cache cargo-apk

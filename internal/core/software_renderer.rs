@@ -13,12 +13,14 @@ mod fonts;
 use self::fonts::GlyphRenderer;
 use crate::api::Window;
 use crate::graphics::rendering_metrics_collector::{RefreshMode, RenderingMetricsCollector};
-use crate::graphics::{IntRect, PixelFormat, SharedImageBuffer, SharedPixelBuffer};
-use crate::item_rendering::ItemRenderer;
-use crate::items::{ImageFit, ItemRc, TextOverflow};
+use crate::graphics::{BorderRadius, PixelFormat, SharedImageBuffer, SharedPixelBuffer};
+use crate::item_rendering::{
+    CachedRenderingData, ItemRenderer, RenderBorderRectangle, RenderImage,
+};
+use crate::items::{ItemRc, TextOverflow};
 use crate::lengths::{
-    LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector, PhysicalPx, PointLengths,
-    RectLengths, ScaleFactor, SizeLengths,
+    LogicalBorderRadius, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector,
+    PhysicalPx, PointLengths, RectLengths, ScaleFactor, SizeLengths,
 };
 use crate::renderer::{Renderer, RendererSealed};
 use crate::textlayout::{AbstractFont, FontMetrics, TextParagraphLayout};
@@ -40,6 +42,7 @@ type PhysicalLength = euclid::Length<i16, PhysicalPx>;
 type PhysicalRect = euclid::Rect<i16, PhysicalPx>;
 type PhysicalSize = euclid::Size2D<i16, PhysicalPx>;
 type PhysicalPoint = euclid::Point2D<i16, PhysicalPx>;
+type PhysicalBorderRadius = BorderRadius<i16, PhysicalPx>;
 
 type DirtyRegion = PhysicalRect;
 
@@ -75,11 +78,11 @@ mod internal {
         /// No rotation
         #[default]
         NoRotation,
-        /// Rotate 90° to the left
+        /// Rotate 90° to the right
         Rotate90,
         /// 180° rotation (upside-down)
         Rotate180,
-        /// Rotate 90° to the right
+        /// Rotate 90° to the left
         Rotate270,
     }
 }
@@ -94,10 +97,10 @@ impl RenderingRotation {
         matches!(self, Self::Rotate90 | Self::Rotate270)
     }
     fn mirror_width(self) -> bool {
-        matches!(self, Self::Rotate90 | Self::Rotate180)
+        matches!(self, Self::Rotate270 | Self::Rotate180)
     }
     fn mirror_height(self) -> bool {
-        matches!(self, Self::Rotate270 | Self::Rotate180)
+        matches!(self, Self::Rotate90 | Self::Rotate180)
     }
     /// Angle of the rotation in degrees
     fn angle(self) -> f32 {
@@ -159,6 +162,23 @@ impl<T: Copy + NumCast + core::ops::Sub<Output = T>> Transform for euclid::Rect<
             origin.x = origin.x - (size.width - one);
         }
         Self::new(origin, size)
+    }
+}
+
+impl<T: Copy> Transform for BorderRadius<T, PhysicalPx> {
+    fn transformed(self, info: RotationInfo) -> Self {
+        match info.orientation {
+            RenderingRotation::NoRotation => self,
+            RenderingRotation::Rotate90 => {
+                Self::new(self.bottom_left, self.top_left, self.top_right, self.bottom_right)
+            }
+            RenderingRotation::Rotate180 => {
+                Self::new(self.bottom_right, self.bottom_left, self.top_left, self.top_right)
+            }
+            RenderingRotation::Rotate270 => {
+                Self::new(self.top_right, self.bottom_right, self.bottom_left, self.top_left)
+            }
+        }
     }
 }
 
@@ -402,7 +422,7 @@ impl SoftwareRenderer {
 
                 renderer.combine_clip(
                     (to_draw.cast() / factor).cast(),
-                    LogicalLength::zero(),
+                    LogicalBorderRadius::zero(),
                     LogicalLength::zero(),
                 );
 
@@ -1078,7 +1098,7 @@ impl SharedBufferCommand {
 
 #[derive(Debug)]
 struct RoundedRectangle {
-    radius: PhysicalLength,
+    radius: PhysicalBorderRadius,
     /// the border's width
     width: PhysicalLength,
     border_color: PremultipliedRgbaColor,
@@ -1144,7 +1164,7 @@ fn prepare_scene(
 
         renderer.combine_clip(
             (dirty_region.cast() / factor).cast(),
-            LogicalLength::zero(),
+            LogicalBorderRadius::zero(),
             LogicalLength::zero(),
         );
         for (component, origin) in components {
@@ -1345,53 +1365,25 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
 
     fn draw_image_impl(
         &mut self,
-        geom: LogicalRect,
         source: &crate::graphics::Image,
-        mut source_rect: IntRect,
-        image_fit: ImageFit,
+        crate::graphics::FitResult {
+            clip_rect: source_rect,
+            source_to_target_x,
+            source_to_target_y,
+            size: fit_size,
+            offset: image_fit_offset,
+        }: crate::graphics::FitResult,
         colorize: Color,
     ) {
         let global_alpha_u16 = (self.current_state.alpha * 255.) as u16;
         let image_inner: &ImageInner = source.into();
-        let size: euclid::default::Size2D<u32> = source_rect.size.cast();
-        let phys_size = geom.size_length().cast() * self.scale_factor;
-        let source_to_target_x = phys_size.width / (size.width as f32);
-        let source_to_target_y = phys_size.height / (size.height as f32);
-        let mut image_fit_offset = euclid::Vector2D::default();
-        let (source_to_target_x, source_to_target_y) = match image_fit {
-            ImageFit::Fill => (source_to_target_x, source_to_target_y),
-            ImageFit::Cover => {
-                let ratio = f32::max(source_to_target_x, source_to_target_y);
-                if size.width as f32 > phys_size.width / ratio {
-                    let diff = (size.width as f32 - phys_size.width / ratio) as i32;
-                    source_rect.origin.x += diff / 2;
-                    source_rect.size.width -= diff;
-                }
-                if size.height as f32 > phys_size.height / ratio {
-                    let diff = (size.height as f32 - phys_size.height / ratio) as i32;
-                    source_rect.origin.y += diff / 2;
-                    source_rect.size.height -= diff;
-                }
-                (ratio, ratio)
-            }
-            ImageFit::Contain => {
-                let ratio = f32::min(source_to_target_x, source_to_target_y);
-                if (size.width as f32) < phys_size.width / ratio {
-                    image_fit_offset.x = (phys_size.width - size.width as f32 * ratio) / 2.;
-                }
-                if (size.height as f32) < phys_size.height / ratio {
-                    image_fit_offset.y = (phys_size.height - size.height as f32 * ratio) / 2.;
-                }
-                (ratio, ratio)
-            }
-        };
-
-        let offset =
-            self.current_state.offset.to_vector().cast() * self.scale_factor + image_fit_offset;
+        let offset = (self.current_state.offset.cast() * self.scale_factor
+            + image_fit_offset.to_vector())
+        .cast();
 
         let renderer_clip_in_source_rect_space = (self.current_state.clip.cast()
             * self.scale_factor)
-            .translate(-image_fit_offset)
+            .translate(-image_fit_offset.to_vector())
             .scale(1. / source_to_target_x, 1. / source_to_target_y);
         match image_inner {
             ImageInner::None => (),
@@ -1410,7 +1402,7 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
                     {
                         let target_rect = clipped_relative_source_rect
                             .scale(source_to_target_x, source_to_target_y)
-                            .translate(offset)
+                            .translate(offset.to_vector())
                             .round();
 
                         if target_rect.is_empty() {
@@ -1450,9 +1442,7 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
             }
             _ => {
                 let img_src_size = source.size();
-                if let Some(buffer) = image_inner.render_to_buffer(Some(
-                    crate::graphics::fit_size(image_fit, phys_size, img_src_size).cast(),
-                )) {
+                if let Some(buffer) = image_inner.render_to_buffer(Some(fit_size.cast())) {
                     if let Some(clipped_relative_source_rect) = renderer_clip_in_source_rect_space
                         .intersection(&euclid::rect(
                             0.,
@@ -1463,7 +1453,7 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
                     {
                         let target_rect = clipped_relative_source_rect
                             .scale(source_to_target_x, source_to_target_y)
-                            .translate(offset)
+                            .translate(offset.to_vector())
                             .round();
                         let buf_size = buffer.size().cast::<f32>();
 
@@ -1550,18 +1540,25 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
 
                         if let Some(clipped_src) = src_rect.intersection(&physical_clip) {
                             let geometry = clipped_src.translate(offset).round();
-                            if geometry.is_empty() {
-                                continue;
-                            }
                             let origin = (geometry.origin - offset.round()).round().cast::<usize>();
                             let actual_x = origin.x - src_rect.origin.x as usize;
                             let actual_y = origin.y - src_rect.origin.y as usize;
                             let pixel_stride = glyph.width.get() as u16;
-                            let source_size = geometry.size.cast();
+                            let mut geometry = geometry.cast();
+                            if geometry.size.width > glyph.width.get() - (actual_x as i16) {
+                                geometry.size.width = glyph.width.get() - (actual_x as i16)
+                            }
+                            if geometry.size.height > glyph.height.get() - (actual_y as i16) {
+                                geometry.size.height = glyph.height.get() - (actual_y as i16)
+                            }
+                            let source_size = geometry.size;
+                            if source_size.is_empty() {
+                                continue;
+                            }
                             match &glyph.alpha_map {
                                 fonts::GlyphAlphaMap::Static(data) => {
                                     self.processor.process_texture(
-                                        geometry.cast().transformed(self.rotation),
+                                        geometry.transformed(self.rotation),
                                         SceneTexture {
                                             data: &data
                                                 [actual_x + actual_y * pixel_stride as usize..],
@@ -1577,7 +1574,7 @@ impl<'a, T: ProcessScene> SceneBuilder<'a, T> {
                                 }
                                 fonts::GlyphAlphaMap::Shared(data) => {
                                     self.processor.process_shared_image_buffer(
-                                        geometry.cast().transformed(self.rotation),
+                                        geometry.transformed(self.rotation),
                                         SharedBufferCommand {
                                             buffer: SharedBufferData::AlphaMap {
                                                 data: data.clone(),
@@ -1656,7 +1653,8 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
                     .round()
                     .cast()
                     .transformed(self.rotation);
-                let angle = g.angle() - self.rotation.orientation.angle();
+                let axis_angle = (360. - self.rotation.orientation.angle()) % 360.;
+                let angle = g.angle() - axis_angle;
                 let tan = angle.to_radians().tan().abs();
                 let start = if !tan.is_finite() {
                     255.
@@ -1761,9 +1759,10 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
     #[allow(clippy::unnecessary_cast)] // Coord
     fn draw_border_rectangle(
         &mut self,
-        rect: Pin<&crate::items::BorderRectangle>,
+        rect: Pin<&dyn RenderBorderRectangle>,
         _: &ItemRc,
         size: LogicalSize,
+        _: &CachedRenderingData,
     ) {
         let geom = LogicalRect::from(size);
         if self.should_draw(&geom) {
@@ -1801,10 +1800,10 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
                 }
             }
 
-            if radius.get() > 0 as _ {
+            if !radius.is_zero() {
                 let radius = radius
-                    .min(geom.width_length() / 2 as Coord)
-                    .min(geom.height_length() / 2 as Coord);
+                    .min(LogicalBorderRadius::from_length(geom.width_length() / 2 as Coord))
+                    .min(LogicalBorderRadius::from_length(geom.height_length() / 2 as Coord));
                 if let Some(clipped) = geom.intersection(&self.current_state.clip) {
                     let geom2 = (geom.cast() * self.scale_factor).transformed(self.rotation);
                     let clipped2 = (clipped.cast() * self.scale_factor).transformed(self.rotation);
@@ -1814,13 +1813,15 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
                             .round()
                             .cast()
                             .transformed(self.rotation);
+                    let radius =
+                        (radius.cast() * self.scale_factor).cast().transformed(self.rotation);
                     // Add a small value to make sure that the clip is always positive despite floating point shenanigans
                     const E: f32 = 0.00001;
 
                     self.processor.process_rounded_rectangle(
                         geometry,
                         RoundedRectangle {
-                            radius: (radius.cast() * self.scale_factor).cast(),
+                            radius,
                             width: (border.cast() * self.scale_factor).cast(),
                             border_color,
                             inner_color: color,
@@ -1877,50 +1878,30 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
         }
     }
 
-    fn draw_image(&mut self, image: Pin<&crate::items::ImageItem>, _: &ItemRc, size: LogicalSize) {
-        let geom = LogicalRect::from(size);
-        if self.should_draw(&geom) {
-            let source = image.source();
-            self.draw_image_impl(
-                geom,
-                &source,
-                euclid::Rect::new(Default::default(), source.size().cast()),
-                image.image_fit(),
-                image.colorize().color(),
-            );
-        }
-    }
-
-    fn draw_clipped_image(
+    fn draw_image(
         &mut self,
-        image: Pin<&crate::items::ClippedImage>,
+        image: Pin<&dyn RenderImage>,
         _: &ItemRc,
         size: LogicalSize,
+        _: &CachedRenderingData,
     ) {
         let geom = LogicalRect::from(size);
         if self.should_draw(&geom) {
             let source = image.source();
 
-            let source_clip_x = image.source_clip_x();
-            let source_clip_y = image.source_clip_y();
-            let source_size = source.size();
-            let mut source_clip_width = image.source_clip_width();
-            // when the source_clip size is empty, make it full
-            if source_clip_width == 0 {
-                source_clip_width = source_size.width as i32 - source_clip_x;
-            }
-            let mut source_clip_height = image.source_clip_height();
-            if source_clip_height == 0 {
-                source_clip_height = source_size.height as i32 - source_clip_y;
-            }
+            let source_clip = image
+                .source_clip()
+                .unwrap_or_else(|| euclid::Rect::new(Default::default(), source.size().cast()));
 
-            self.draw_image_impl(
-                geom,
-                &source,
-                euclid::rect(source_clip_x, source_clip_y, source_clip_width, source_clip_height),
+            let phys_size = geom.size_length().cast() * self.scale_factor;
+            let fit = crate::graphics::fit(
                 image.image_fit(),
-                image.colorize().color(),
+                phys_size,
+                source_clip,
+                self.scale_factor,
+                image.alignment(),
             );
+            self.draw_image_impl(&source, fit, image.colorize().color());
         }
     }
 
@@ -2104,7 +2085,7 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
     fn combine_clip(
         &mut self,
         other: LogicalRect,
-        _radius: LogicalLength,
+        _radius: LogicalBorderRadius,
         _border_width: LogicalLength,
     ) -> bool {
         match self.current_state.clip.intersection(&other) {
@@ -2165,7 +2146,7 @@ impl<'a, T: ProcessScene> crate::item_rendering::ItemRenderer for SceneBuilder<'
 
             if let Some(clipped_src) = src_rect.intersection(&physical_clip) {
                 let offset = self.current_state.offset.to_vector().cast() * self.scale_factor;
-                let geometry = clipped_src.translate(offset).round();
+                let geometry = clipped_src.translate(offset).round_in();
                 let origin = (geometry.origin - offset.round()).cast::<usize>();
                 let actual_x = origin.x - src_rect.origin.x as usize;
                 let actual_y = origin.y - src_rect.origin.y as usize;

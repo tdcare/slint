@@ -24,7 +24,7 @@ use crate::platform::Clipboard;
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
 use crate::window::{InputMethodProperties, InputMethodRequest, WindowAdapter, WindowInner};
-use crate::{Callback, Coord, Property, SharedString};
+use crate::{Callback, Coord, Property, SharedString, SharedVector};
 use alloc::rc::Rc;
 use alloc::string::String;
 use const_field_offset::FieldOffsets;
@@ -223,6 +223,23 @@ impl PreEditSelection {
     }
 }
 
+#[repr(C)]
+#[derive(Clone)]
+enum UndoItemKind {
+    TextInsert,
+    TextRemove,
+}
+
+#[repr(C)]
+#[derive(Clone)]
+struct UndoItem {
+    pos: usize,
+    text: SharedString,
+    cursor: usize,
+    anchor: usize,
+    kind: UndoItemKind,
+}
+
 /// The implementation of the `TextInput` element
 #[repr(C)]
 #[derive(FieldOffsets, Default, SlintElement)]
@@ -263,6 +280,8 @@ pub struct TextInput {
     preferred_x_pos: Cell<Coord>,
     /// 0 = not pressed, 1 = single press, 2 = double clicked+press , ...
     pressed: Cell<u8>,
+    undo_items: Cell<SharedVector<UndoItem>>,
+    redo_items: Cell<SharedVector<UndoItem>>,
 }
 
 impl Item for TextInput {
@@ -361,7 +380,7 @@ impl Item for TextInput {
             }
             MouseEvent::Released { button: PointerEventButton::Left, .. } => {
                 self.as_ref().pressed.set(0);
-                self.copy_clipboard(Clipboard::SelectionClipboard);
+                self.copy_clipboard(window_adapter, Clipboard::SelectionClipboard);
                 #[cfg(target_os = "android")]
                 self.ensure_focus_and_ime(window_adapter, self_rc);
             }
@@ -506,6 +525,14 @@ impl Item for TextInput {
                         StandardShortcut::Paste | StandardShortcut::Cut => {
                             return KeyEventResult::EventIgnored;
                         }
+                        StandardShortcut::Undo => {
+                            self.undo(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
+                        StandardShortcut::Redo => {
+                            self.redo(window_adapter, self_rc);
+                            return KeyEventResult::EventAccepted;
+                        }
                         _ => (),
                     }
                 }
@@ -527,13 +554,28 @@ impl Item for TextInput {
                 if self.read_only() || event.modifiers.control {
                     return KeyEventResult::EventIgnored;
                 }
-                self.delete_selection(window_adapter, self_rc);
+
+                // save real anchor/cursor for undo/redo
+                let (real_cursor, real_anchor) = {
+                    let text = self.text();
+                    (self.cursor_position(&text), self.anchor_position(&text))
+                };
+
+                self.delete_selection(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
 
                 let mut text: String = self.text().into();
 
                 // FIXME: respect grapheme boundaries
                 let insert_pos = self.selection_anchor_and_cursor().1;
                 text.insert_str(insert_pos, &event.text);
+
+                self.add_undo_item(UndoItem {
+                    pos: insert_pos,
+                    text: event.text.clone(),
+                    cursor: real_cursor,
+                    anchor: real_anchor,
+                    kind: UndoItemKind::TextInsert,
+                });
 
                 self.as_ref().text.set(text.into());
                 let new_cursor_pos = (insert_pos + event.text.len()) as i32;
@@ -685,6 +727,16 @@ impl From<KeyboardModifiers> for AnchorMode {
             Self::MoveAnchor
         }
     }
+}
+
+/// Argument to [`TextInput::delete_selection`] that determines whether to trigger the
+/// `edited` and cursor position callbacks and issue an input method request update.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum TextChangeNotify {
+    /// Trigger the callbacks.
+    TriggerCallbacks,
+    /// Skip triggering the callbacks, as a subsequent operation will trigger them.
+    SkipCallbacks,
 }
 
 fn safe_byte_offset(unsafe_byte_offset: i32, text: &str) -> usize {
@@ -940,13 +992,14 @@ impl TextInput {
         if !self.has_selection() {
             self.move_cursor(step, AnchorMode::KeepAnchor, window_adapter, self_rc);
         }
-        self.delete_selection(window_adapter, self_rc);
+        self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
     }
 
     pub fn delete_selection(
         self: Pin<&Self>,
         window_adapter: &Rc<dyn WindowAdapter>,
         self_rc: &ItemRc,
+        trigger_callbacks: TextChangeNotify,
     ) {
         let text: String = self.text().into();
         if text.is_empty() {
@@ -958,11 +1011,31 @@ impl TextInput {
             return;
         }
 
+        let removed_text: SharedString = text[anchor..cursor].into();
+        // save real anchor/cursor for undo/redo
+        let (real_cursor, real_anchor) = {
+            let text = self.text();
+            (self.cursor_position(&text), self.anchor_position(&text))
+        };
+
         let text = [text.split_at(anchor).0, text.split_at(cursor).1].concat();
         self.text.set(text.into());
         self.anchor_position_byte_offset.set(anchor as i32);
-        self.set_cursor_position(anchor as i32, true, window_adapter, self_rc);
-        Self::FIELD_OFFSETS.edited.apply_pin(self).call(&());
+
+        self.add_undo_item(UndoItem {
+            pos: anchor as usize,
+            text: removed_text,
+            cursor: real_cursor,
+            anchor: real_anchor,
+            kind: UndoItemKind::TextRemove,
+        });
+
+        if trigger_callbacks == TextChangeNotify::TriggerCallbacks {
+            self.set_cursor_position(anchor as i32, true, window_adapter, self_rc);
+            Self::FIELD_OFFSETS.edited.apply_pin(self).call(&());
+        } else {
+            self.cursor_position_byte_offset.set(anchor as i32);
+        }
     }
 
     pub fn anchor_position(self: Pin<&Self>, text: &str) -> usize {
@@ -1027,14 +1100,31 @@ impl TextInput {
         if text_to_insert.is_empty() {
             return;
         }
-        self.delete_selection(window_adapter, self_rc);
+
+        let (real_cursor, real_anchor) = {
+            let text = self.text();
+            (self.cursor_position(&text), self.anchor_position(&text))
+        };
+
+        self.delete_selection(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
         let mut text: String = self.text().into();
         let cursor_pos = self.selection_anchor_and_cursor().1;
+        let mut inserted_text: SharedString = text_to_insert.into();
         if text_to_insert.contains('\n') && self.single_line() {
-            text.insert_str(cursor_pos, &text_to_insert.replace('\n', " "));
+            inserted_text = text_to_insert.replace('\n', " ").into();
+            text.insert_str(cursor_pos, &inserted_text);
         } else {
             text.insert_str(cursor_pos, text_to_insert);
         }
+
+        self.add_undo_item(UndoItem {
+            pos: cursor_pos as usize,
+            text: inserted_text,
+            cursor: real_cursor,
+            anchor: real_anchor,
+            kind: UndoItemKind::TextInsert,
+        });
+
         let cursor_pos = cursor_pos + text_to_insert.len();
         self.text.set(text.into());
         self.anchor_position_byte_offset.set(cursor_pos as i32);
@@ -1044,7 +1134,7 @@ impl TextInput {
 
     pub fn cut(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
         self.copy(window_adapter, self_rc);
-        self.delete_selection(window_adapter, self_rc);
+        self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
     }
 
     pub fn set_selection_offsets(
@@ -1111,21 +1201,26 @@ impl TextInput {
         self.set_cursor_position(new_c as i32, true, window_adapter, self_rc);
     }
 
-    pub fn copy(self: Pin<&Self>, _: &Rc<dyn WindowAdapter>, _: &ItemRc) {
-        self.copy_clipboard(Clipboard::DefaultClipboard);
+    pub fn copy(self: Pin<&Self>, w: &Rc<dyn WindowAdapter>, _: &ItemRc) {
+        self.copy_clipboard(w, Clipboard::DefaultClipboard);
     }
 
-    fn copy_clipboard(self: Pin<&Self>, clipboard: Clipboard) {
+    fn copy_clipboard(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        clipboard: Clipboard,
+    ) {
         let (anchor, cursor) = self.selection_anchor_and_cursor();
         if anchor == cursor {
             return;
         }
         let text = self.text();
-        crate::GLOBAL_CONTEXT.with(|p| {
-            if let Some(ctx) = p.get() {
-                ctx.platform.set_clipboard_text(&text[anchor..cursor], clipboard);
-            }
-        });
+
+        WindowInner::from_pub(window_adapter.window())
+            .ctx
+            .0
+            .platform
+            .set_clipboard_text(&text[anchor..cursor], clipboard);
     }
 
     pub fn paste(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
@@ -1138,8 +1233,8 @@ impl TextInput {
         self_rc: &ItemRc,
         clipboard: Clipboard,
     ) {
-        if let Some(text) = crate::GLOBAL_CONTEXT
-            .with(|p| p.get().and_then(|p| p.platform.clipboard_text(clipboard)))
+        if let Some(text) =
+            WindowInner::from_pub(window_adapter.window()).ctx.0.platform.clipboard_text(clipboard)
         {
             self.preedit_text.set(Default::default());
             self.insert(&text, window_adapter, self_rc);
@@ -1267,6 +1362,109 @@ impl TextInput {
                 ));
             }
         }
+    }
+
+    fn add_undo_item(self: Pin<&Self>, item: UndoItem) {
+        let mut items = self.undo_items.take();
+        // try to merge with the last item
+        if let Some(last) = items.make_mut_slice().last_mut() {
+            match (&item.kind, &last.kind) {
+                (UndoItemKind::TextInsert, UndoItemKind::TextInsert) => {
+                    let is_new_line = item.text == "\n";
+                    let last_is_new_line = last.text == "\n";
+                    // if the last item or current item is a new_line
+                    // we insert it as a standalone item, no merging
+                    if item.pos == last.pos + last.text.len() && !is_new_line && !last_is_new_line {
+                        last.text += &item.text;
+                    } else {
+                        items.push(item);
+                    }
+                }
+                (UndoItemKind::TextRemove, UndoItemKind::TextRemove) => {
+                    if item.pos + item.text.len() == last.pos {
+                        last.pos = item.pos;
+                        let old_text = last.text.clone();
+                        last.text = item.text;
+                        last.text += &old_text;
+                        // prepend
+                    } else {
+                        items.push(item);
+                    }
+                }
+                _ => {
+                    items.push(item);
+                }
+            }
+        } else {
+            items.push(item);
+        }
+
+        self.undo_items.set(items);
+    }
+
+    fn undo(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        let mut items = self.undo_items.take();
+        let Some(last) = items.pop() else {
+            return;
+        };
+
+        match last.kind {
+            UndoItemKind::TextInsert => {
+                let text: String = self.text().into();
+                let text = [text.split_at(last.pos).0, text.split_at(last.pos + last.text.len()).1]
+                    .concat();
+                self.text.set(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+            }
+            UndoItemKind::TextRemove => {
+                let mut text: String = self.text().into();
+                text.insert_str(last.pos, &last.text);
+                self.text.set(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+            }
+        }
+        self.undo_items.set(items);
+
+        let mut redo = self.redo_items.take();
+        redo.push(last);
+        self.redo_items.set(redo);
+    }
+
+    fn redo(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+        let mut items = self.redo_items.take();
+        let Some(last) = items.pop() else {
+            return;
+        };
+
+        match last.kind {
+            UndoItemKind::TextInsert => {
+                let mut text: String = self.text().into();
+                text.insert_str(last.pos, &last.text);
+                self.text.set(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+            }
+            UndoItemKind::TextRemove => {
+                let text: String = self.text().into();
+                let text = [text.split_at(last.pos).0, text.split_at(last.pos + last.text.len()).1]
+                    .concat();
+                self.text.set(text.into());
+
+                self.anchor_position_byte_offset.set(last.anchor as i32);
+                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+            }
+        }
+
+        self.redo_items.set(items);
+
+        let mut undo_items = self.undo_items.take();
+        undo_items.push(last);
+        self.undo_items.set(undo_items);
     }
 }
 

@@ -16,7 +16,7 @@ on:
         type: string
         description: features to enable for build
         # Keep in sync with features in nightly_snapshot.yaml, cpp_package.yaml, and api/node/Cargo.toml
-        default: "backend-winit,renderer-femtovg,renderer-skia,renderer-software"
+        default: "backend-linuxkms-noseat,backend-winit,renderer-femtovg,renderer-skia,renderer-software"
       codesign:
         type: boolean
         description: Sign binaries on macOS (false for manual builds)
@@ -31,7 +31,7 @@ on:
         type: string
         description: features to enable for build
         # Keep in sync with features in nightly_snapshot.yaml, cpp_package.yaml, and api/node/Cargo.toml
-        default: "backend-winit,renderer-femtovg,renderer-skia,renderer-software"
+        default: "backend-linuxkms-noseat,backend-winit,renderer-femtovg,renderer-skia,renderer-software"
       codesign:
         type: boolean
         description: Sign binaries on macOS
@@ -57,7 +57,7 @@ jobs:
   build_windows:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
         with:
           target: x86_64-pc-windows-msvc
@@ -66,7 +66,7 @@ jobs:
         with:
           version: 6.5.1
           cache: true
-      - uses: baptiste0928/cargo-install@v2
+      - uses: baptiste0928/cargo-install@v3
         with:
           crate: cargo-about
       - name: Build
@@ -84,7 +84,7 @@ jobs:
             bash -x ../../scripts/prepare_binary_package.sh ..\..\pkg\slint-${{ github.event.inputs.program || inputs.program }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
             name: slint-${{ github.event.inputs.program || inputs.program }}-windows
             path: |
@@ -93,7 +93,10 @@ jobs:
   build_linux:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-linux-dependencies
+        with:
+          old-ubuntu: true
       - uses: ./.github/actions/setup-rust
         with:
           target: x86_64-unknown-linux-gnu
@@ -102,7 +105,7 @@ jobs:
         with:
           version: 5.15.2
           cache: true
-      - uses: baptiste0928/cargo-install@v2
+      - uses: baptiste0928/cargo-install@v3
         with:
           crate: cargo-about
       - name: Build
@@ -116,7 +119,7 @@ jobs:
       - name: Tar artifacts to preserve permissions
         run: tar czvf slint-${{ github.event.inputs.program || inputs.program }}-linux.tar.gz slint-${{ github.event.inputs.program || inputs.program }}
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
             name: slint-${{ github.event.inputs.program || inputs.program }}-linux
             path: slint-${{ github.event.inputs.program || inputs.program }}-linux.tar.gz
@@ -124,14 +127,14 @@ jobs:
   build_macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
         with:
           target: x86_64-apple-darwin
       - uses: ./.github/actions/setup-rust
         with:
           target: aarch64-apple-darwin
-      - uses: baptiste0928/cargo-install@v2
+      - uses: baptiste0928/cargo-install@v3
         with:
           crate: cargo-about
       - name: Build x86_64
@@ -158,7 +161,7 @@ jobs:
       - name: Tar artifacts to preserve permissions
         run: tar czvf slint-${{ github.event.inputs.program || inputs.program }}-macos.tar.gz slint-${{ github.event.inputs.program || inputs.program }}
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
             name: slint-${{ github.event.inputs.program || inputs.program }}-macos
             path: slint-${{ github.event.inputs.program || inputs.program }}-macos.tar.gz

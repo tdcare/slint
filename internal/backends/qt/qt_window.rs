@@ -4,14 +4,16 @@
 // cSpell: ignore frameless qbrush qpointf qreal qwidgetsize svgz
 
 use cpp::*;
-use euclid::approxeq::ApproxEq;
-use i_slint_core::graphics::euclid::num::Zero;
 use i_slint_core::graphics::rendering_metrics_collector::{
     RenderingMetrics, RenderingMetricsCollector,
 };
-use i_slint_core::graphics::{euclid, Brush, Color, FontRequest, Image, Point, SharedImageBuffer};
+use i_slint_core::graphics::{
+    euclid, Brush, Color, FontRequest, IntRect, Point, SharedImageBuffer,
+};
 use i_slint_core::input::{KeyEvent, KeyEventType, MouseEvent};
-use i_slint_core::item_rendering::{ItemCache, ItemRenderer};
+use i_slint_core::item_rendering::{
+    CachedRenderingData, ItemCache, ItemRenderer, RenderBorderRectangle, RenderImage,
+};
 use i_slint_core::item_tree::{ItemTreeRc, ItemTreeRef};
 use i_slint_core::items::{
     self, FillRule, ImageRendering, ItemRc, ItemRef, Layer, MouseCursor, Opacity,
@@ -19,12 +21,13 @@ use i_slint_core::items::{
 };
 use i_slint_core::layout::Orientation;
 use i_slint_core::lengths::{
-    LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector, PhysicalPx, ScaleFactor,
+    LogicalBorderRadius, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector,
+    PhysicalPx, ScaleFactor,
 };
 use i_slint_core::platform::{PlatformError, WindowEvent};
 use i_slint_core::window::{WindowAdapter, WindowAdapterInternal, WindowInner};
 use i_slint_core::{ImageInner, Property, SharedString};
-use items::{ImageFit, TextHorizontalAlignment, TextVerticalAlignment};
+use items::{TextHorizontalAlignment, TextVerticalAlignment};
 
 use std::cell::RefCell;
 use std::pin::Pin;
@@ -99,6 +102,8 @@ cpp! {{
         }
 
         void paintEvent(QPaintEvent *) override {
+            if (!rust_window)
+                return;
             auto painter = std::unique_ptr<QPainter>(new QPainter(this));
             painter->setClipRect(rect());
             painter->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
@@ -109,6 +114,8 @@ cpp! {{
         }
 
         void resizeEvent(QResizeEvent *event) override {
+            if (!rust_window)
+                return;
             QSize size = event->size();
             rust!(Slint_resizeEvent [rust_window: &QtWindow as "void*", size: qttypes::QSize as "QSize"] {
                 rust_window.resize_event(size)
@@ -116,6 +123,8 @@ cpp! {{
         }
 
         void mousePressEvent(QMouseEvent *event) override {
+            if (!rust_window)
+                return;
             isMouseButtonDown = true;
             QPoint pos = event->pos();
             int button = event->button();
@@ -126,6 +135,8 @@ cpp! {{
             });
         }
         void mouseReleaseEvent(QMouseEvent *event) override {
+            if (!rust_window)
+                return;
             // HACK: Qt on windows is a bit special when clicking on the window
             //       close button and when the resulting close event is ignored.
             //       In that case a release event that was not preceded by
@@ -166,6 +177,8 @@ cpp! {{
             }
         }
         void mouseMoveEvent(QMouseEvent *event) override {
+            if (!rust_window)
+                return;
             QPoint pos = event->pos();
             rust!(Slint_mouseMoveEvent [rust_window: &QtWindow as "void*", pos: qttypes::QPoint as "QPoint"] {
                 let position = LogicalPoint::new(pos.x as _, pos.y as _);
@@ -173,6 +186,8 @@ cpp! {{
             });
         }
         void wheelEvent(QWheelEvent *event) override {
+            if (!rust_window)
+                return;
             QPointF pos = event->position();
             QPoint delta = event->pixelDelta();
             if (delta.isNull()) {
@@ -184,12 +199,16 @@ cpp! {{
             });
         }
         void leaveEvent(QEvent *) override {
+            if (!rust_window)
+                return;
             rust!(Slint_mouseLeaveEvent [rust_window: &QtWindow as "void*"] {
                 rust_window.mouse_event(MouseEvent::Exit)
             });
         }
 
         void keyPressEvent(QKeyEvent *event) override {
+            if (!rust_window)
+                return;
             QString text =  event->text();
             int key = event->key();
             bool repeat = event->isAutoRepeat();
@@ -198,6 +217,8 @@ cpp! {{
             });
         }
         void keyReleaseEvent(QKeyEvent *event) override {
+            if (!rust_window)
+                return;
             // Qt sends repeated releases together with presses for auto-repeat events, but Slint only sends presses in that case.
             // This matches the behavior of at least winit, Web and Android.
             if (event->isAutoRepeat())
@@ -211,6 +232,8 @@ cpp! {{
         }
 
         void changeEvent(QEvent *event) override {
+            if (!rust_window)
+                return;
             if (event->type() == QEvent::ActivationChange) {
                 bool active = isActiveWindow();
                 rust!(Slint_updateWindowActivation [rust_window: &QtWindow as "void*", active: bool as "bool"] {
@@ -228,6 +251,8 @@ cpp! {{
         }
 
         void closeEvent(QCloseEvent *event) override {
+            if (!rust_window)
+                return;
             rust!(Slint_requestClose [rust_window: &QtWindow as "void*"] {
                 rust_window.window.dispatch_event(WindowEvent::CloseRequested);
             });
@@ -235,6 +260,8 @@ cpp! {{
         }
 
         QSize sizeHint() const override {
+            if (!rust_window)
+                return {};
             auto preferred_size = rust!(Slint_sizeHint [rust_window: &QtWindow as "void*"] -> qttypes::QSize as "QSize" {
                 let component_rc = WindowInner::from_pub(&rust_window.window).component();
                 let component = ItemTreeRc::borrow_pin(&component_rc);
@@ -267,6 +294,8 @@ cpp! {{
         }
 
         void inputMethodEvent(QInputMethodEvent *event) override {
+            if (!rust_window)
+                return;
             QString commit_string = event->commitString();
             QString preedit_string = event->preeditString();
             int replacement_start = event->replacementStart();
@@ -344,6 +373,55 @@ cpp! {{
         }
         return -1;
     }
+
+    QPainterPath to_painter_path(const QRectF &rect, qreal top_left_radius, qreal top_right_radius, qreal bottom_right_radius, qreal bottom_left_radius) {
+        QPainterPath path;
+        if (qFuzzyCompare(top_left_radius, top_right_radius) && qFuzzyCompare(top_left_radius, bottom_right_radius) && qFuzzyCompare(top_left_radius, bottom_left_radius)) {
+            path.addRoundedRect(rect, top_left_radius, top_left_radius);
+        } else {
+            QSizeF half = rect.size() / 2.0;
+
+            qreal tl_rx = qMin(top_left_radius, half.width());
+            qreal tl_ry = qMin(top_left_radius, half.height());
+            QRectF top_left(rect.left(), rect.top(), 2 * tl_rx, 2 * tl_ry);
+
+            qreal tr_rx = qMin(top_right_radius, half.width());
+            qreal tr_ry = qMin(top_right_radius, half.height());
+            QRectF top_right(rect.right() - 2 * tr_rx, rect.top(), 2 * tr_rx, 2 * tr_ry);
+
+            qreal br_rx = qMin(bottom_right_radius, half.width());
+            qreal br_ry = qMin(bottom_right_radius, half.height());
+            QRectF bottom_right(rect.right() - 2 * br_rx, rect.bottom() - 2 * br_ry, 2 * br_rx, 2 * br_ry);
+
+            qreal bl_rx = qMin(bottom_left_radius, half.width());
+            qreal bl_ry = qMin(bottom_left_radius, half.height());
+            QRectF bottom_left(rect.left(), rect.bottom() - 2 * bl_ry, 2 * bl_rx, 2 * bl_ry);
+
+            if (top_left.isNull()) {
+                path.moveTo(rect.topLeft());
+            } else {
+                path.arcMoveTo(top_left, 180);
+                path.arcTo(top_left, 180, -90);
+            }
+            if (top_right.isNull()) {
+                path.lineTo(rect.topRight());
+            } else {
+                path.arcTo(top_right, 90, -90);
+            }
+            if (bottom_right.isNull()) {
+                path.lineTo(rect.bottomRight());
+            } else {
+                path.arcTo(bottom_right, 0, -90);
+            }
+            if (bottom_left.isNull()) {
+                path.lineTo(rect.bottomLeft());
+            } else {
+                path.arcTo(bottom_left, -90, -90);
+            }
+            path.closeSubpath();
+        }
+        return path;
+    };
 }}
 
 cpp_class!(
@@ -537,9 +615,10 @@ impl ItemRenderer for QtItemRenderer<'_> {
 
     fn draw_border_rectangle(
         &mut self,
-        rect: std::pin::Pin<&items::BorderRectangle>,
+        rect: std::pin::Pin<&dyn RenderBorderRectangle>,
         _: &ItemRc,
         size: LogicalSize,
+        _: &CachedRenderingData,
     ) {
         Self::draw_rectangle_impl(
             &mut self.painter,
@@ -547,49 +626,18 @@ impl ItemRenderer for QtItemRenderer<'_> {
             rect.background(),
             rect.border_color(),
             rect.border_width().get(),
-            rect.border_radius().get(),
+            rect.border_radius(),
         );
     }
 
-    fn draw_image(&mut self, image: Pin<&items::ImageItem>, item_rc: &ItemRc, size: LogicalSize) {
-        let dest_rect: qttypes::QRectF = check_geometry!(size);
-        self.draw_image_impl(
-            item_rc,
-            items::ImageItem::FIELD_OFFSETS.source.apply_pin(image),
-            dest_rect,
-            None,
-            items::ImageItem::FIELD_OFFSETS.width.apply_pin(image),
-            items::ImageItem::FIELD_OFFSETS.height.apply_pin(image),
-            image.image_fit(),
-            image.image_rendering(),
-            items::ImageItem::FIELD_OFFSETS.colorize.apply_pin(image),
-        );
-    }
-
-    fn draw_clipped_image(
+    fn draw_image(
         &mut self,
-        image: Pin<&items::ClippedImage>,
+        image: Pin<&dyn RenderImage>,
         item_rc: &ItemRc,
         size: LogicalSize,
+        _: &CachedRenderingData,
     ) {
-        let dest_rect: qttypes::QRectF = check_geometry!(size);
-        let source_rect = qttypes::QRectF {
-            x: image.source_clip_x() as _,
-            y: image.source_clip_y() as _,
-            width: image.source_clip_width() as _,
-            height: image.source_clip_height() as _,
-        };
-        self.draw_image_impl(
-            item_rc,
-            items::ClippedImage::FIELD_OFFSETS.source.apply_pin(image),
-            dest_rect,
-            Some(source_rect),
-            items::ClippedImage::FIELD_OFFSETS.width.apply_pin(image),
-            items::ClippedImage::FIELD_OFFSETS.height.apply_pin(image),
-            image.image_fit(),
-            image.image_rendering(),
-            items::ClippedImage::FIELD_OFFSETS.colorize.apply_pin(image),
-        );
+        self.draw_image_impl(item_rc, size, image);
     }
 
     fn draw_text(&mut self, text: std::pin::Pin<&items::Text>, _: &ItemRc, size: LogicalSize) {
@@ -886,7 +934,7 @@ impl ItemRenderer for QtItemRenderer<'_> {
                     Brush::SolidColor(box_shadow.color()),
                     Brush::default(),
                     0.,
-                    box_shadow.border_radius().get(),
+                    LogicalBorderRadius::new_uniform(box_shadow.border_radius().get()),
                 );
 
                 drop(painter_);
@@ -981,7 +1029,7 @@ impl ItemRenderer for QtItemRenderer<'_> {
     fn combine_clip(
         &mut self,
         rect: LogicalRect,
-        radius: LogicalLength,
+        radius: LogicalBorderRadius,
         border_width: LogicalLength,
     ) -> bool {
         let mut border_width: f32 = border_width.get();
@@ -993,12 +1041,21 @@ impl ItemRenderer for QtItemRenderer<'_> {
         };
         adjust_rect_and_border_for_inner_drawing(&mut clip_rect, &mut border_width);
         let painter: &mut QPainterPtr = &mut self.painter;
-        cpp! { unsafe [painter as "QPainterPtr*", clip_rect as "QRectF", radius as "float"] -> bool as "bool" {
-            if (radius <= 0) {
+        let top_left_radius = radius.top_left;
+        let top_right_radius = radius.top_right;
+        let bottom_left_radius = radius.bottom_left;
+        let bottom_right_radius = radius.bottom_right;
+        cpp! { unsafe [
+                painter as "QPainterPtr*",
+                clip_rect as "QRectF",
+                top_left_radius as "float",
+                top_right_radius as "float",
+                bottom_right_radius as "float",
+                bottom_left_radius as "float"] -> bool as "bool" {
+            if (top_left_radius <= 0 && top_right_radius <= 0 && bottom_right_radius <= 0 && bottom_left_radius <= 0) {
                 (*painter)->setClipRect(clip_rect, Qt::IntersectClip);
             } else {
-                QPainterPath path;
-                path.addRoundedRect(clip_rect, radius, radius);
+                QPainterPath path = to_painter_path(clip_rect, top_left_radius, top_right_radius, bottom_right_radius, bottom_left_radius);
                 (*painter)->setClipPath(path, Qt::IntersectClip);
             }
             return !(*painter)->clipBoundingRect().isEmpty();
@@ -1127,84 +1184,48 @@ pub(crate) fn image_to_pixmap(
     shared_image_buffer_to_pixmap(&image.render_to_buffer(source_size)?)
 }
 
-/// Changes the source or the destination rectangle to respect the image fit
-fn adjust_to_image_fit(
-    image_fit: ImageFit,
-    source_rect: &mut qttypes::QRectF,
-    dest_rect: &mut qttypes::QRectF,
-) {
-    match image_fit {
-        i_slint_core::items::ImageFit::Fill => (),
-        i_slint_core::items::ImageFit::Cover => {
-            let ratio = qttypes::qreal::max(
-                dest_rect.width / source_rect.width,
-                dest_rect.height / source_rect.height,
-            );
-            if source_rect.width > dest_rect.width / ratio {
-                source_rect.x += (source_rect.width - dest_rect.width / ratio) / 2.;
-                source_rect.width = dest_rect.width / ratio;
-            }
-            if source_rect.height > dest_rect.height / ratio {
-                source_rect.y += (source_rect.height - dest_rect.height / ratio) / 2.;
-                source_rect.height = dest_rect.height / ratio;
-            }
-        }
-        i_slint_core::items::ImageFit::Contain => {
-            let ratio = qttypes::qreal::min(
-                dest_rect.width / source_rect.width,
-                dest_rect.height / source_rect.height,
-            );
-            if dest_rect.width > source_rect.width * ratio {
-                dest_rect.x += (dest_rect.width - source_rect.width * ratio) / 2.;
-                dest_rect.width = source_rect.width * ratio;
-            }
-            if dest_rect.height > source_rect.height * ratio {
-                dest_rect.y += (dest_rect.height - source_rect.height * ratio) / 2.;
-                dest_rect.height = source_rect.height * ratio;
-            }
-        }
-    };
-}
-
 impl QtItemRenderer<'_> {
     fn draw_image_impl(
         &mut self,
         item_rc: &ItemRc,
-        source_property: Pin<&Property<Image>>,
-        dest_rect: qttypes::QRectF,
-        source_rect: Option<qttypes::QRectF>,
-        target_width: std::pin::Pin<&Property<LogicalLength>>,
-        target_height: std::pin::Pin<&Property<LogicalLength>>,
-        image_fit: ImageFit,
-        rendering: ImageRendering,
-        colorize_property: Pin<&Property<Brush>>,
+        size: LogicalSize,
+        image: Pin<&dyn i_slint_core::item_rendering::RenderImage>,
     ) {
-        // Caller ensured that zero/negative width/height resulted in an early return via get_geometry!.
-        debug_assert!(target_width.get() > LogicalLength::zero());
-        debug_assert!(target_height.get() > LogicalLength::zero());
+        let dest_rect: qttypes::QRectF = check_geometry!(size);
+
+        let source_rect = image.source_clip();
 
         let pixmap: qttypes::QPixmap = self.cache.get_or_update_cache_entry(item_rc, || {
-            let source = source_property.get();
+            let source = image.source();
             let origin = source.size();
             let source: &ImageInner = (&source).into();
 
             // Query target_width/height here again to ensure that changes will invalidate the item rendering cache.
-            let t =
-                euclid::size2(target_width.get().get(), target_height.get().get()).cast::<f64>();
+            let scale_factor = ScaleFactor::new(self.scale_factor());
+            let t = (image.target_size() * scale_factor).cast();
 
             let source_size = if source.is_svg() {
                 let has_source_clipping = source_rect.map_or(false, |rect| {
-                    rect.is_valid()
-                        && (rect.x != 0.
-                            || rect.y != 0.
-                            || !rect.width.approx_eq(&t.width)
-                            || !rect.height.approx_eq(&t.height))
+                    rect.origin.x != 0
+                        || rect.origin.y != 0
+                        || !rect.size.width != t.width
+                        || !rect.size.height != t.height
                 });
                 if has_source_clipping {
                     // Source size & clipping is not implemented yet
                     None
                 } else {
-                    Some(i_slint_core::graphics::fit_size(image_fit, t.cast(), origin).cast())
+                    Some(
+                        i_slint_core::graphics::fit(
+                            image.image_fit(),
+                            t.cast(),
+                            IntRect::from_size(origin.cast()),
+                            scale_factor,
+                            Default::default(), // We only care about the size, so alignments don't matter
+                        )
+                        .size
+                        .cast(),
+                    )
                 }
             } else {
                 None
@@ -1213,7 +1234,7 @@ impl QtItemRenderer<'_> {
             image_to_pixmap(source, source_size).map_or_else(
                 Default::default,
                 |mut pixmap: qttypes::QPixmap| {
-                    let colorize = colorize_property.get();
+                    let colorize = image.colorize();
                     if !colorize.is_transparent() {
                         let brush: qttypes::QBrush =
                             into_qbrush(colorize, dest_rect.width, dest_rect.height);
@@ -1229,16 +1250,32 @@ impl QtItemRenderer<'_> {
         });
 
         let image_size = pixmap.size();
-        let mut source_rect = source_rect.filter(|r| r.is_valid()).unwrap_or(qttypes::QRectF {
-            x: 0.,
-            y: 0.,
-            width: image_size.width as _,
-            height: image_size.height as _,
-        });
-        let mut dest_rect = dest_rect;
-        adjust_to_image_fit(image_fit, &mut source_rect, &mut dest_rect);
+        let source_rect = source_rect
+            .unwrap_or_else(|| euclid::rect(0, 0, image_size.width as _, image_size.height as _));
+        let scale_factor = ScaleFactor::new(self.scale_factor());
+        let fit = i_slint_core::graphics::fit(
+            image.image_fit(),
+            size * scale_factor,
+            source_rect,
+            scale_factor,
+            image.alignment(),
+        );
+
+        let dest_rect = qttypes::QRectF {
+            x: fit.offset.x as _,
+            y: fit.offset.y as _,
+            width: fit.size.width as _,
+            height: fit.size.height as _,
+        };
+        let source_rect = qttypes::QRectF {
+            x: fit.clip_rect.origin.x as _,
+            y: fit.clip_rect.origin.y as _,
+            width: fit.clip_rect.size.width as _,
+            height: fit.clip_rect.size.height as _,
+        };
+
         let painter: &mut QPainterPtr = &mut self.painter;
-        let smooth: bool = rendering == ImageRendering::Smooth;
+        let smooth: bool = image.rendering() == ImageRendering::Smooth;
         cpp! { unsafe [
                 painter as "QPainterPtr*",
                 pixmap as "QPixmap",
@@ -1258,33 +1295,31 @@ impl QtItemRenderer<'_> {
         brush: Brush,
         border_color: Brush,
         mut border_width: f32,
-        border_radius: f32,
+        border_radius: LogicalBorderRadius,
     ) {
         if border_color.is_transparent() {
             border_width = 0.;
         };
         let brush: qttypes::QBrush = into_qbrush(brush, rect.width, rect.height);
         let border_color: qttypes::QBrush = into_qbrush(border_color, rect.width, rect.height);
-        cpp! { unsafe [painter as "QPainterPtr*", brush as "QBrush",  border_color as "QBrush", border_width as "float", border_radius as "float", mut rect as "QRectF"] {
+        let top_left_radius = border_radius.top_left;
+        let top_right_radius = border_radius.top_right;
+        let bottom_left_radius = border_radius.bottom_left;
+        let bottom_right_radius = border_radius.bottom_right;
+        border_width = border_width.min(rect.height.min(rect.width) as f32 / 2.);
+        cpp! { unsafe [
+                painter as "QPainterPtr*",
+                brush as "QBrush",
+                border_color as "QBrush",
+                border_width as "float",
+                top_left_radius as "float",
+                top_right_radius as "float",
+                bottom_left_radius as "float",
+                bottom_right_radius as "float",
+                mut rect as "QRectF"] {
             (*painter)->setBrush(brush);
             QPen pen = border_width > 0 ? QPen(border_color, border_width, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin) : Qt::NoPen;
-            if (border_radius > 0) {
-                if (!border_color.isOpaque() && border_width > 1) {
-                    // See adjustment bellow
-                    float r = qMax(border_width/2, border_radius);
-                    // In case of transparent pen, we want the background to cover the whole rectangle, which Qt doesn't do.
-                    // So first draw the background, then draw the pen over it
-                    (*painter)->setPen(Qt::NoPen);
-                    (*painter)->drawRoundedRect(rect, r, r);
-                    (*painter)->setBrush(QBrush());
-                }
-                // Qt's border radius is in the middle of the border. But we want it to be the radius of the rectangle itself.
-                // This is incorrect if border_radius < border_width/2,  but this can't be fixed. Better to have a radius a bit too big than no radius at all
-                float r = qMax(0.01f, border_radius - border_width / 2);
-                rect.adjust(border_width / 2, border_width / 2, -border_width / 2, -border_width / 2);
-                (*painter)->setPen(pen);
-                (*painter)->drawRoundedRect(rect, r, r);
-            } else {
+            if (top_left_radius <= 0 && top_right_radius <= 0 && bottom_left_radius <= 0 && bottom_right_radius <= 0) {
                 if (!border_color.isOpaque() && border_width > 1) {
                     // In case of transparent pen, we want the background to cover the whole rectangle, which Qt doesn't do.
                     // So first draw the background, then draw the pen over it
@@ -1295,6 +1330,28 @@ impl QtItemRenderer<'_> {
                 rect.adjust(border_width / 2, border_width / 2, -border_width / 2, -border_width / 2);
                 (*painter)->setPen(pen);
                 (*painter)->drawRect(rect);
+            } else {
+                if (!border_color.isOpaque() && border_width > 1) {
+                    // See adjustment below
+                    float tl_r = qFuzzyIsNull(top_left_radius) ? top_left_radius : qMax(border_width/2, top_left_radius);
+                    float tr_r = qFuzzyIsNull(top_right_radius) ? top_right_radius : qMax(border_width/2, top_right_radius);
+                    float br_r = qFuzzyIsNull(bottom_right_radius) ? bottom_right_radius : qMax(border_width/2, bottom_right_radius);
+                    float bl_r = qFuzzyIsNull(bottom_left_radius) ? bottom_left_radius : qMax(border_width/2, bottom_left_radius);
+                    // In case of transparent pen, we want the background to cover the whole rectangle, which Qt doesn't do.
+                    // So first draw the background, then draw the pen over it
+                    (*painter)->setPen(Qt::NoPen);
+                    (*painter)->drawPath(to_painter_path(rect, tl_r, tr_r, br_r, bl_r));
+                    (*painter)->setBrush(QBrush());
+                }
+                // Qt's border radius is in the middle of the border. But we want it to be the radius of the rectangle itself.
+                // This is incorrect if border_radius < border_width/2,  but this can't be fixed. Better to have a radius a bit too big than no radius at all
+                float tl_r = qMax(0.0f, top_left_radius - border_width / 2);
+                float tr_r = qMax(0.0f, top_right_radius - border_width / 2);
+                float br_r = qMax(0.0f, bottom_right_radius - border_width / 2);
+                float bl_r = qMax(0.0f, bottom_left_radius - border_width / 2);
+                rect.adjust(border_width / 2, border_width / 2, -border_width / 2, -border_width / 2);
+                (*painter)->setPen(pen);
+                (*painter)->drawPath(to_painter_path(rect, tl_r, tr_r, br_r, bl_r));
             }
         }}
     }
@@ -1402,6 +1459,16 @@ pub struct QtWindow {
     tree_structure_changed: RefCell<bool>,
 
     dark_color_scheme: OnceCell<Pin<Box<Property<bool>>>>,
+}
+
+impl Drop for QtWindow {
+    fn drop(&mut self) {
+        let widget_ptr = self.widget_ptr();
+        cpp! {unsafe [widget_ptr as "SlintWidget*"]  {
+            // widget_ptr uses deleteLater to destroy the SlintWidget, we must prevent events to still call us
+            widget_ptr->rust_window = nullptr;
+        }};
+    }
 }
 
 impl QtWindow {

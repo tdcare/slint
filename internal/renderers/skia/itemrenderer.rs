@@ -1,20 +1,22 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
+// cSpell: ignore rrect
+
 use std::pin::Pin;
 
-use super::{PhysicalLength, PhysicalPoint, PhysicalRect, PhysicalSize};
+use super::{PhysicalBorderRadius, PhysicalLength, PhysicalPoint, PhysicalRect, PhysicalSize};
 use i_slint_core::graphics::boxshadowcache::BoxShadowCache;
 use i_slint_core::graphics::euclid::num::Zero;
 use i_slint_core::graphics::euclid::{self, Vector2D};
-use i_slint_core::item_rendering::{ItemCache, ItemRenderer};
+use i_slint_core::item_rendering::{CachedRenderingData, ItemCache, ItemRenderer, RenderImage};
 use i_slint_core::items::{ImageFit, ImageRendering, ItemRc, Layer, Opacity, RenderingResult};
 use i_slint_core::lengths::{
-    LogicalLength, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, LogicalVector, PhysicalPx,
-    RectLengths, ScaleFactor, SizeLengths,
+    LogicalBorderRadius, LogicalLength, LogicalPoint, LogicalPx, LogicalRect, LogicalSize,
+    LogicalVector, PhysicalPx, RectLengths, ScaleFactor, SizeLengths,
 };
 use i_slint_core::window::WindowInner;
-use i_slint_core::{items, Brush, Color, Property};
+use i_slint_core::{Brush, Color};
 
 pub type SkiaBoxShadowCache = BoxShadowCache<skia_safe::Image>;
 
@@ -150,27 +152,21 @@ impl<'a> SkiaItemRenderer<'a> {
     fn draw_image_impl(
         &mut self,
         item_rc: &ItemRc,
-        source_property: Pin<&Property<i_slint_core::graphics::Image>>,
-        mut dest_rect: PhysicalRect,
-        source_rect: Option<skia_safe::Rect>,
-        target_width: std::pin::Pin<&Property<LogicalLength>>,
-        target_height: std::pin::Pin<&Property<LogicalLength>>,
-        image_fit: ImageFit,
-        rendering: ImageRendering,
-        colorize_property: Pin<&Property<Brush>>,
+        item: Pin<&dyn RenderImage>,
+        dest_rect: PhysicalRect,
     ) {
         // TODO: avoid doing creating an SkImage multiple times when the same source is used in multiple image elements
         let skia_image = self.image_cache.get_or_update_cache_entry(item_rc, || {
-            let image = source_property.get();
+            let image = item.source();
             super::cached_image::as_skia_image(
                 image,
-                &|| (target_width.get(), target_height.get()),
-                image_fit,
+                &|| item.target_size(),
+                item.image_fit(),
                 self.scale_factor,
                 self.canvas,
             )
             .and_then(|skia_image| {
-                let brush = colorize_property.get();
+                let brush = item.colorize();
                 if !brush.is_transparent() {
                     self.colorize_image(skia_image, brush)
                 } else {
@@ -186,19 +182,27 @@ impl<'a> SkiaItemRenderer<'a> {
 
         self.canvas.save();
 
-        let mut source_rect = source_rect.filter(|r| !r.is_empty()).unwrap_or_else(|| {
-            skia_safe::Rect::from_wh(skia_image.width() as _, skia_image.height() as _)
-        });
-        adjust_to_image_fit(image_fit, &mut source_rect, &mut dest_rect);
+        let fit = i_slint_core::graphics::fit(
+            item.image_fit(),
+            dest_rect.size,
+            item.source_clip()
+                .unwrap_or_else(|| euclid::rect(0, 0, skia_image.width(), skia_image.height())),
+            self.scale_factor,
+            item.alignment(),
+        );
 
-        self.canvas.clip_rect(to_skia_rect(&dest_rect), None, None);
-
-        let transform =
-            skia_safe::Matrix::rect_to_rect(source_rect, to_skia_rect(&dest_rect), None)
-                .unwrap_or_default();
+        let dst = to_skia_rect(&PhysicalRect::new(fit.offset, fit.size));
+        self.canvas.clip_rect(dst, None, None);
+        let src = skia_safe::Rect::from_xywh(
+            fit.clip_rect.origin.cast().x,
+            fit.clip_rect.origin.cast().y,
+            fit.clip_rect.size.cast().width,
+            fit.clip_rect.size.cast().height,
+        );
+        let transform = skia_safe::Matrix::rect_to_rect(src, dst, None).unwrap_or_default();
         self.canvas.concat(&transform);
 
-        let filter_mode: skia_safe::sampling_options::SamplingOptions = match rendering {
+        let filter_mode: skia_safe::sampling_options::SamplingOptions = match item.rendering() {
             ImageRendering::Smooth => skia_safe::sampling_options::FilterMode::Linear,
             ImageRendering::Pixelated => skia_safe::sampling_options::FilterMode::Nearest,
         }
@@ -302,9 +306,10 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
 
     fn draw_border_rectangle(
         &mut self,
-        rect: std::pin::Pin<&i_slint_core::items::BorderRectangle>,
+        rect: std::pin::Pin<&dyn i_slint_core::item_rendering::RenderBorderRectangle>,
         _self_rc: &i_slint_core::items::ItemRc,
         size: LogicalSize,
+        _: &CachedRenderingData,
     ) {
         let mut geometry = PhysicalRect::from(size * self.scale_factor);
         if geometry.is_empty() {
@@ -323,12 +328,8 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
         let mut fill_radius = rect.border_radius() * self.scale_factor;
         // Skia's border radius on stroke is in the middle of the border. But we want it to be the radius of the rectangle itself.
         // This is incorrect if fill_radius < border_width/2, but this can't be fixed. Better to have a radius a bit too big than no radius at all
-        let stroke_border_radius = if fill_radius.get() > 0. {
-            fill_radius = fill_radius.max(border_width / 2. + PhysicalLength::new(0.01));
-            fill_radius - border_width / 2.
-        } else {
-            fill_radius
-        };
+        fill_radius = fill_radius.outer(border_width / 2. + PhysicalLength::new(0.01));
+        let stroke_border_radius = fill_radius.inner(border_width / 2.);
 
         let (background_rect, border_rect) = if opaque_border {
             // In CSS the border is entirely towards the inside of the boundary
@@ -337,19 +338,11 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
             // is adjusted accordingly.
             adjust_rect_and_border_for_inner_drawing(&mut geometry, &mut border_width);
 
-            let rounded_rect = skia_safe::RRect::new_rect_xy(
-                to_skia_rect(&geometry),
-                stroke_border_radius.get(),
-                stroke_border_radius.get(),
-            );
+            let rounded_rect = to_skia_rrect(&geometry, &stroke_border_radius);
 
             (rounded_rect.clone(), rounded_rect)
         } else {
-            let background_rect = skia_safe::RRect::new_rect_xy(
-                to_skia_rect(&geometry),
-                fill_radius.get(),
-                fill_radius.get(),
-            );
+            let background_rect = to_skia_rrect(&geometry, &fill_radius);
 
             // In CSS the border is entirely towards the inside of the boundary
             // geometry, while in femtovg the line with for a stroke is 50% in-
@@ -357,11 +350,7 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
             // is adjusted accordingly.
             adjust_rect_and_border_for_inner_drawing(&mut geometry, &mut border_width);
 
-            let border_rect = skia_safe::RRect::new_rect_xy(
-                to_skia_rect(&geometry),
-                stroke_border_radius.get(),
-                stroke_border_radius.get(),
-            );
+            let border_rect = to_skia_rrect(&geometry, &stroke_border_radius);
 
             (background_rect, border_rect)
         };
@@ -394,57 +383,16 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
 
     fn draw_image(
         &mut self,
-        image: std::pin::Pin<&i_slint_core::items::ImageItem>,
-        self_rc: &i_slint_core::items::ItemRc,
+        image: Pin<&dyn RenderImage>,
+        self_rc: &ItemRc,
         size: LogicalSize,
+        _cache: &CachedRenderingData,
     ) {
         let geometry = PhysicalRect::from(size * self.scale_factor);
         if geometry.is_empty() {
             return;
         }
-
-        self.draw_image_impl(
-            self_rc,
-            i_slint_core::items::ImageItem::FIELD_OFFSETS.source.apply_pin(image),
-            geometry,
-            None,
-            items::ImageItem::FIELD_OFFSETS.width.apply_pin(image),
-            items::ImageItem::FIELD_OFFSETS.height.apply_pin(image),
-            image.image_fit(),
-            image.image_rendering(),
-            items::ImageItem::FIELD_OFFSETS.colorize.apply_pin(image),
-        );
-    }
-
-    fn draw_clipped_image(
-        &mut self,
-        image: std::pin::Pin<&i_slint_core::items::ClippedImage>,
-        self_rc: &i_slint_core::items::ItemRc,
-        size: LogicalSize,
-    ) {
-        let geometry = PhysicalRect::from(size * self.scale_factor);
-        if geometry.is_empty() {
-            return;
-        }
-
-        let source_rect = skia_safe::Rect::from_xywh(
-            image.source_clip_x() as _,
-            image.source_clip_y() as _,
-            image.source_clip_width() as _,
-            image.source_clip_height() as _,
-        );
-
-        self.draw_image_impl(
-            self_rc,
-            i_slint_core::items::ClippedImage::FIELD_OFFSETS.source.apply_pin(image),
-            geometry,
-            Some(source_rect),
-            items::ClippedImage::FIELD_OFFSETS.width.apply_pin(image),
-            items::ClippedImage::FIELD_OFFSETS.height.apply_pin(image),
-            image.image_fit(),
-            image.image_rendering(),
-            items::ClippedImage::FIELD_OFFSETS.colorize.apply_pin(image),
-        );
+        self.draw_image_impl(self_rc, image, geometry);
     }
 
     fn draw_text(
@@ -725,7 +673,7 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
     fn combine_clip(
         &mut self,
         rect: LogicalRect,
-        radius: LogicalLength,
+        radius: LogicalBorderRadius,
         border_width: LogicalLength,
     ) -> bool {
         let mut rect = rect * self.scale_factor;
@@ -737,8 +685,7 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
         adjust_rect_and_border_for_inner_drawing(&mut rect, &mut border_width);
 
         let radius = radius * self.scale_factor;
-        let rounded_rect =
-            skia_safe::RRect::new_rect_xy(to_skia_rect(&rect), radius.get(), radius.get());
+        let rounded_rect = to_skia_rrect(&rect, &radius);
         self.canvas.clip_rrect(rounded_rect, None, true);
         self.canvas.local_clip_bounds().is_some()
     }
@@ -817,10 +764,7 @@ impl<'a> ItemRenderer for SkiaItemRenderer<'a> {
     fn draw_image_direct(&mut self, image: i_slint_core::graphics::Image) {
         let skia_image = super::cached_image::as_skia_image(
             image.clone(),
-            &|| {
-                let size = image.size();
-                (LogicalLength::new(size.width as _), LogicalLength::new(size.height as _))
-            },
+            &|| LogicalSize::from_untyped(image.size().cast()),
             ImageFit::Fill,
             self.scale_factor,
             self.canvas,
@@ -894,6 +838,22 @@ pub fn to_skia_rect(rect: &PhysicalRect) -> skia_safe::Rect {
     skia_safe::Rect::from_xywh(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height)
 }
 
+pub fn to_skia_rrect(rect: &PhysicalRect, radius: &PhysicalBorderRadius) -> skia_safe::RRect {
+    if let Some(radius) = radius.as_uniform() {
+        skia_safe::RRect::new_rect_xy(to_skia_rect(&rect), radius, radius)
+    } else {
+        skia_safe::RRect::new_rect_radii(
+            to_skia_rect(&rect),
+            &[
+                skia_safe::Point::new(radius.top_left, radius.top_left),
+                skia_safe::Point::new(radius.top_right, radius.top_right),
+                skia_safe::Point::new(radius.bottom_right, radius.bottom_right),
+                skia_safe::Point::new(radius.bottom_left, radius.bottom_left),
+            ],
+        )
+    }
+}
+
 pub fn to_skia_point(point: PhysicalPoint) -> skia_safe::Point {
     skia_safe::Point::new(point.x, point.y)
 }
@@ -916,39 +876,4 @@ fn adjust_rect_and_border_for_inner_drawing(
 
     rect.origin += PhysicalSize::from_lengths(*border_width / 2., *border_width / 2.);
     rect.size -= PhysicalSize::from_lengths(*border_width, *border_width);
-}
-
-/// Changes the source or the destination rectangle to respect the image fit
-fn adjust_to_image_fit(
-    image_fit: ImageFit,
-    source_rect: &mut skia_safe::Rect,
-    dest_rect: &mut PhysicalRect,
-) {
-    match image_fit {
-        ImageFit::Fill => (),
-        ImageFit::Cover => {
-            let ratio = (dest_rect.width() / source_rect.width())
-                .max(dest_rect.height() / source_rect.height());
-            if source_rect.width() > dest_rect.width() / ratio {
-                source_rect.left += (source_rect.width() - dest_rect.width() / ratio) / 2.;
-                source_rect.right = source_rect.left + dest_rect.width() / ratio;
-            }
-            if source_rect.height() > dest_rect.height() / ratio {
-                source_rect.top += (source_rect.height() - dest_rect.height() / ratio) / 2.;
-                source_rect.bottom = source_rect.top + dest_rect.height() / ratio;
-            }
-        }
-        ImageFit::Contain => {
-            let ratio = (dest_rect.width() / source_rect.width())
-                .min(dest_rect.height() / source_rect.height());
-            if dest_rect.width() > source_rect.width() * ratio {
-                dest_rect.origin.x += (dest_rect.width() - source_rect.width() * ratio) / 2.;
-                dest_rect.size.width = source_rect.width() * ratio;
-            }
-            if dest_rect.height() > source_rect.height() * ratio {
-                dest_rect.origin.y += (dest_rect.height() - source_rect.height() * ratio) / 2.;
-                dest_rect.size.height = source_rect.height() * ratio;
-            }
-        }
-    };
 }

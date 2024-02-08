@@ -5,13 +5,17 @@
 
 mod completion;
 mod component_catalog;
+mod formatting;
 mod goto;
 mod properties;
 mod semantic_tokens;
 #[cfg(test)]
 mod test;
 
-use crate::common::{LspToPreviewMessage, PreviewComponent, PreviewConfig, Result, VersionedUrl};
+use crate::common::{
+    create_workspace_edit, create_workspace_edit_from_source_file, LspToPreviewMessage,
+    PreviewComponent, PreviewConfig, Result, VersionedUrl,
+};
 use crate::language::properties::find_element_indent;
 use crate::util::{lookup_current_element_type, map_node, map_range, map_token, to_lsp_diag};
 
@@ -29,8 +33,8 @@ use i_slint_compiler::{
 use i_slint_compiler::{typeloader::TypeLoader, typeregister::TypeRegister};
 use lsp_types::request::{
     CodeActionRequest, CodeLensRequest, ColorPresentationRequest, Completion, DocumentColor,
-    DocumentHighlightRequest, DocumentSymbolRequest, ExecuteCommand, GotoDefinition, HoverRequest,
-    PrepareRenameRequest, Rename, SemanticTokensFullRequest,
+    DocumentHighlightRequest, DocumentSymbolRequest, ExecuteCommand, Formatting, GotoDefinition,
+    HoverRequest, PrepareRenameRequest, Rename, SemanticTokensFullRequest,
 };
 use lsp_types::{
     ClientCapabilities, CodeActionOrCommand, CodeActionProviderCapability, CodeLens,
@@ -228,6 +232,7 @@ pub fn server_initialize_result(client_cap: &ClientCapabilities) -> InitializeRe
                     OneOf::Left(true)
                 },
             ),
+            document_formatting_provider: Some(OneOf::Left(true)),
             ..ServerCapabilities::default()
         },
         server_info: Some(ServerInfo {
@@ -397,6 +402,7 @@ pub fn register_request_handlers(rh: &mut RequestHandler) {
             token_descr(&mut document_cache, &uri, &params.text_document_position.position)
         {
             let p = tk.parent();
+            let version = p.source_file.version();
             if let Some(value) = find_element_id_for_highlight(&tk, &tk.parent()) {
                 let edits = value
                     .into_iter()
@@ -405,10 +411,7 @@ pub fn register_request_handlers(rh: &mut RequestHandler) {
                         new_text: params.new_name.clone(),
                     })
                     .collect();
-                return Ok(Some(WorkspaceEdit {
-                    changes: Some(std::iter::once((uri, edits)).collect()),
-                    ..Default::default()
-                }));
+                return Ok(Some(create_workspace_edit(uri, version, edits)));
             }
         };
         Err("This symbol cannot be renamed. (Only element id can be renamed at the moment)".into())
@@ -422,6 +425,10 @@ pub fn register_request_handlers(rh: &mut RequestHandler) {
             }
         };
         Ok(None)
+    });
+    rh.register::<Formatting, _>(|params, ctx| async move {
+        let document_cache = ctx.document_cache.borrow_mut();
+        Ok(formatting::format_document(params, &document_cache))
     });
 }
 
@@ -885,10 +892,7 @@ fn get_code_actions(
         ];
         result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
             title: "Wrap in `@tr()`".into(),
-            edit: Some(WorkspaceEdit {
-                changes: Some(std::iter::once((uri, edits)).collect()),
-                ..Default::default()
-            }),
+            edit: create_workspace_edit_from_source_file(&token.source_file, edits),
             ..Default::default()
         }));
     } else if token.kind() == SyntaxKind::Identifier
@@ -915,10 +919,10 @@ fn get_code_actions(
                     result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
                         title: format!("Add import from \"{file}\""),
                         kind: Some(lsp_types::CodeActionKind::QUICKFIX),
-                        edit: Some(WorkspaceEdit {
-                            changes: Some(std::iter::once((uri.clone(), vec![edit])).collect()),
-                            ..Default::default()
-                        }),
+                        edit: create_workspace_edit_from_source_file(
+                            &token.source_file,
+                            vec![edit],
+                        ),
                         ..Default::default()
                     }))
                 },
@@ -950,10 +954,7 @@ fn get_code_actions(
             result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
                 title: "Wrap in element".into(),
                 kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(std::iter::once((uri.clone(), edits)).collect()),
-                    ..Default::default()
-                }),
+                edit: create_workspace_edit_from_source_file(&token.source_file, edits),
                 ..Default::default()
             }));
 
@@ -1017,10 +1018,7 @@ fn get_code_actions(
                 result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
                     title: "Remove element".into(),
                     kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(std::iter::once((uri.clone(), edits)).collect()),
-                        ..Default::default()
-                    }),
+                    edit: create_workspace_edit_from_source_file(&token.source_file, edits),
                     ..Default::default()
                 }));
             }
@@ -1043,10 +1041,7 @@ fn get_code_actions(
                 result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
                     title: "Repeat element".into(),
                     kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(std::iter::once((uri.clone(), edits)).collect()),
-                        ..Default::default()
-                    }),
+                    edit: create_workspace_edit_from_source_file(&token.source_file, edits),
                     ..Default::default()
                 }));
 
@@ -1057,10 +1052,7 @@ fn get_code_actions(
                 result.push(CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
                     title: "Make conditional".into(),
                     kind: Some(lsp_types::CodeActionKind::REFACTOR),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(std::iter::once((uri.clone(), edits)).collect()),
-                        ..Default::default()
-                    }),
+                    edit: create_workspace_edit_from_source_file(&token.source_file, edits),
                     ..Default::default()
                 }));
             }
@@ -1114,7 +1106,7 @@ fn get_document_symbols(
 
     // DocumentSymbol doesn't implement default and some field depends on features or are deprecated
     let ds: DocumentSymbol = serde_json::from_value(
-        serde_json::json!({ "name" : "", "kind": 255, "range" : lsp_types::Range::default(), "selectionRange": lsp_types::Range::default() })
+        serde_json::json!({ "name" : "", "kind": 255, "range" : lsp_types::Range::default(), "selectionRange" : lsp_types::Range::default() })
     )
     .unwrap();
 
@@ -1715,26 +1707,28 @@ export component TestWindow inherits Window {
             Some(vec![CodeActionOrCommand::CodeAction(lsp_types::CodeAction {
                 title: "Wrap in `@tr()`".into(),
                 edit: Some(WorkspaceEdit {
-                    changes: Some(
-                        std::iter::once((
-                            url.clone(),
-                            vec![
-                                TextEdit::new(
+                    document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                        lsp_types::TextDocumentEdit {
+                            text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                version: Some(42),
+                                uri: url.clone(),
+                            },
+                            edits: vec![
+                                lsp_types::OneOf::Left(TextEdit::new(
                                     lsp_types::Range::new(text_literal.start, text_literal.start),
                                     "@tr(".into()
-                                ),
-                                TextEdit::new(
+                                )),
+                                lsp_types::OneOf::Left(TextEdit::new(
                                     lsp_types::Range::new(text_literal.end, text_literal.end),
                                     ")".into()
-                                )
-                            ]
-                        ))
-                        .collect()
-                    ),
+                                )),
+                            ],
+                        }
+                    ])),
                     ..Default::default()
                 }),
                 ..Default::default()
-            }),])
+            })]),
         );
 
         let text_element = lsp_types::Range::new(Position::new(6, 8), Position::new(9, 9));
@@ -1763,10 +1757,14 @@ export component TestWindow inherits Window {
                         title: "Wrap in element".into(),
                         kind: Some(lsp_types::CodeActionKind::REFACTOR),
                         edit: Some(WorkspaceEdit {
-                            changes: Some(
-                                std::iter::once((
-                                    url.clone(),
-                                    vec![TextEdit::new(
+                            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                                lsp_types::TextDocumentEdit {
+                                    text_document:
+                                        lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                            version: Some(42),
+                                            uri: url.clone(),
+                                        },
+                                    edits: vec![lsp_types::OneOf::Left(TextEdit::new(
                                         text_element,
                                         r#"${0:element} {
             Text {
@@ -1775,10 +1773,9 @@ export component TestWindow inherits Window {
             }
 }"#
                                         .into()
-                                    )]
-                                ))
-                                .collect()
-                            ),
+                                    ))],
+                                },
+                            ])),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -1787,19 +1784,22 @@ export component TestWindow inherits Window {
                         title: "Repeat element".into(),
                         kind: Some(lsp_types::CodeActionKind::REFACTOR),
                         edit: Some(WorkspaceEdit {
-                            changes: Some(
-                                std::iter::once((
-                                    url.clone(),
-                                    vec![TextEdit::new(
+                            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                                lsp_types::TextDocumentEdit {
+                                    text_document:
+                                        lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                            version: Some(42),
+                                            uri: url.clone(),
+                                        },
+                                    edits: vec![lsp_types::OneOf::Left(TextEdit::new(
                                         lsp_types::Range::new(
                                             text_element.start,
                                             text_element.start
                                         ),
                                         r#"for ${1:name}[index] in ${0:model} : "#.into()
-                                    )]
-                                ))
-                                .collect()
-                            ),
+                                    ))],
+                                }
+                            ])),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -1808,19 +1808,22 @@ export component TestWindow inherits Window {
                         title: "Make conditional".into(),
                         kind: Some(lsp_types::CodeActionKind::REFACTOR),
                         edit: Some(WorkspaceEdit {
-                            changes: Some(
-                                std::iter::once((
-                                    url.clone(),
-                                    vec![TextEdit::new(
+                            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                                lsp_types::TextDocumentEdit {
+                                    text_document:
+                                        lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                            version: Some(42),
+                                            uri: url.clone(),
+                                        },
+                                    edits: vec![lsp_types::OneOf::Left(TextEdit::new(
                                         lsp_types::Range::new(
                                             text_element.start,
                                             text_element.start
                                         ),
                                         r#"if ${0:condition} : "#.into()
-                                    )]
-                                ))
-                                .collect()
-                            ),
+                                    ))],
+                                }
+                            ])),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -1847,10 +1850,13 @@ export component TestWindow inherits Window {
                     title: "Wrap in element".into(),
                     kind: Some(lsp_types::CodeActionKind::REFACTOR),
                     edit: Some(WorkspaceEdit {
-                        changes: Some(
-                            std::iter::once((
-                                url.clone(),
-                                vec![TextEdit::new(
+                        document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                            lsp_types::TextDocumentEdit {
+                                text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                    version: Some(42),
+                                    uri: url.clone(),
+                                },
+                                edits: vec![lsp_types::OneOf::Left(TextEdit::new(
                                     horizontal_box,
                                     r#"${0:element} {
             HorizontalBox {
@@ -1865,10 +1871,9 @@ export component TestWindow inherits Window {
             }
 }"#
                                     .into()
-                                )]
-                            ))
-                            .collect()
-                        ),
+                                ))]
+                            }
+                        ])),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -1877,10 +1882,13 @@ export component TestWindow inherits Window {
                     title: "Remove element".into(),
                     kind: Some(lsp_types::CodeActionKind::REFACTOR),
                     edit: Some(WorkspaceEdit {
-                        changes: Some(
-                            std::iter::once((
-                                url.clone(),
-                                vec![TextEdit::new(
+                        document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                            lsp_types::TextDocumentEdit {
+                                text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                    version: Some(42),
+                                    uri: url.clone(),
+                                },
+                                edits: vec![lsp_types::OneOf::Left(TextEdit::new(
                                     horizontal_box,
                                     r#"Button { text: "Cancel"; }
 
@@ -1889,14 +1897,13 @@ export component TestWindow inherits Window {
             primary: true;
         }"#
                                     .into()
-                                )]
-                            ))
-                            .collect()
-                        ),
+                                ))]
+                            }
+                        ])),
                         ..Default::default()
                     }),
                     ..Default::default()
-                })
+                }),
             ])
         );
 
@@ -1913,20 +1920,22 @@ export component TestWindow inherits Window {
                 title: "Add import from \"std-widgets.slint\"".into(),
                 kind: Some(lsp_types::CodeActionKind::QUICKFIX),
                 edit: Some(WorkspaceEdit {
-                    changes: Some(
-                        std::iter::once((
-                            url.clone(),
-                            vec![TextEdit::new(
+                    document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
+                        lsp_types::TextDocumentEdit {
+                            text_document: lsp_types::OptionalVersionedTextDocumentIdentifier {
+                                version: Some(42),
+                                uri: url.clone(),
+                            },
+                            edits: vec![lsp_types::OneOf::Left(TextEdit::new(
                                 lsp_types::Range::new(import_pos, import_pos),
                                 ", LineEdit".into()
-                            )]
-                        ))
-                        .collect()
-                    ),
+                            ))]
+                        }
+                    ])),
                     ..Default::default()
                 }),
                 ..Default::default()
-            })])
+            }),])
         );
     }
 }
