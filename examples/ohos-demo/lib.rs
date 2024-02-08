@@ -18,7 +18,7 @@ use slint::SharedString;
 
 // #[macro_use]
 // extern crate napi_derive;
-use napi_derive_ohos::napi;
+// use napi_derive_ohos::napi;
 // use napi_ohos::bindgen_prelude::*;
 
 // use hilog_binding::hilog_debug;
@@ -32,18 +32,18 @@ use i_slint_backend_ohos::calloop_backend::ohos::{OH_NativeXComponent_MouseEvent
 use hilog_binding::hilog_debug;
 // use crate::ohos_sw::{FRAME_BUFFER, TargetPixel};
 
-#[napi]
-pub fn sum(a: i32, b: i32) -> i32 {
-    hilog_debug!("hello world!");
-    hilog_debug!(
-        "tdcare",
-        LogOptions {
-          tag: Some("testTag"),
-          domain: None
-      }
-    );
-    a + b + 200
-}
+// // #[napi]
+// pub fn sum(a: i32, b: i32) -> i32 {
+//     hilog_debug!("hello world!");
+//     hilog_debug!(
+//         "tdcare",
+//         LogOptions {
+//           tag: Some("testTag"),
+//           domain: None
+//       }
+//     );
+//     a + b + 200
+// }
 
 // #[napi]
 // pub async fn async_plus_100(p: Promise<u32>) -> Result<u32> {
