@@ -45,7 +45,7 @@ napi-derive = { version = "*" }
 #napi-derive-ohos = { version = "*" }
 
 #OpenHarmony 日志库
-#hilog-binding = { git="https://gitee.com/tdcare/ohos-native-bindings.git"}
+hilog-binding = { git="https://gitee.com/tdcare/ohos-native-bindings.git"}
 
 once_cell = "1.5"
 
