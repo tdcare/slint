@@ -90,9 +90,9 @@ impl i_slint_core::window::WindowAdapterInternal for OhosWindowAdapter {
 
     }
 
-    fn dark_color_scheme(&self) -> bool {
-        self.dark_color_scheme.as_ref().get()
-    }
+    // fn dark_color_scheme(&self) -> bool {
+    //     self.dark_color_scheme.as_ref().get()
+    // }
 }
 impl OhosWindowAdapter {
     pub fn new(renderer: Box<dyn OhosRenderer>,
