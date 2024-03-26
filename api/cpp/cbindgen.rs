@@ -3,7 +3,6 @@
 
 use anyhow::Context;
 use std::io::{BufWriter, Write};
-use std::iter::Extend;
 use std::path::{Path, PathBuf};
 
 // cSpell: ignore compat constexpr corelib deps sharedvector pathdata
@@ -354,6 +353,7 @@ fn gen_corelib(
         "slint_image_load_from_embedded_data",
         "slint_image_from_embedded_textures",
         "slint_image_compare_equal",
+        "slint_image_set_nine_slice_edges",
         "slint_timer_start",
         "slint_timer_singleshot",
         "slint_timer_destroy",
@@ -463,6 +463,7 @@ fn gen_corelib(
                 "slint_image_load_from_embedded_data",
                 "slint_image_from_embedded_textures",
                 "slint_image_compare_equal",
+                "slint_image_set_nine_slice_edges",
                 "SharedPixelBuffer",
                 "SharedImageBuffer",
                 "StaticTextures",
@@ -470,7 +471,7 @@ fn gen_corelib(
             ],
             vec!["Color"],
             "slint_image_internal.h",
-            "namespace slint::cbindgen_private { struct ParsedSVG{}; struct HTMLImage{}; using namespace vtable; }",
+            "namespace slint::cbindgen_private { struct ParsedSVG{}; struct HTMLImage{}; using namespace vtable; namespace types{ struct NineSliceImage{}; } }",
         ),
         (
             vec!["Color", "slint_color_brighter", "slint_color_darker",
@@ -522,10 +523,16 @@ fn gen_corelib(
             "slint_windowrc_size",
             "slint_windowrc_set_logical_size",
             "slint_windowrc_set_physical_size",
-            "slint_windowrc_dark_color_scheme",
+            "slint_windowrc_color_scheme",
             "slint_windowrc_dispatch_pointer_event",
             "slint_windowrc_dispatch_key_event",
             "slint_windowrc_dispatch_event",
+            "slint_windowrc_set_fullscreen",
+            "slint_windowrc_set_minimized",
+            "slint_windowrc_set_maximized",
+            "slint_windowrc_is_fullscreen",
+            "slint_windowrc_is_minimized",
+            "slint_windowrc_is_maximized",
             "slint_new_path_elements",
             "slint_new_path_events",
             "slint_color_brighter",
@@ -537,6 +544,7 @@ fn gen_corelib(
             "slint_image_path",
             "slint_image_load_from_path",
             "slint_image_load_from_embedded_data",
+            "slint_image_set_nine_slice_edges",
             "slint_image_from_embedded_textures",
             "slint_image_compare_equal",
         ]

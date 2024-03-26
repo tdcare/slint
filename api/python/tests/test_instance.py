@@ -3,7 +3,12 @@
 
 import pytest
 from slint import slint as native
-from slint.slint import ValueType;
+from slint.slint import ValueType, PyImage
+import os
+
+Color = native.PyColor
+Brush = native.PyBrush
+
 
 def test_property_access():
     compiler = native.ComponentCompiler()
@@ -25,17 +30,18 @@ def test_property_access():
             in property <float> floatprop: 100;
             in property <bool> boolprop: true;
             in property <image> imgprop;
-            in property <brush> brushprop;
-            in property <color> colprop;
+            in property <brush> brushprop: Colors.rgb(255, 0, 255);
+            in property <color> colprop: Colors.rgb(0, 255, 0);
             in property <[string]> modelprop;
             in property <MyStruct> structprop: {
                 title: "builtin",
                 finished: true,
             };
+            in property <image> imageprop: @image-url("../../../examples/printerdemo/ui/images/cat.jpg");
 
             callback test-callback();
         }
-    """, "")
+    """, os.path.join(os.path.dirname(__file__), "main.slint"))
     assert compdef != None
 
     instance = compdef.create()
@@ -72,10 +78,37 @@ def test_property_access():
     assert isinstance(structval, dict)
     assert structval == {'title': 'builtin', 'finished': True}
     instance.set_property("structprop", {'title': 'new', 'finished': False})
-    assert instance.get_property("structprop") == {'title': 'new', 'finished': False}
+    assert instance.get_property("structprop") == {
+        'title': 'new', 'finished': False}
+
+    imageval = instance.get_property("imageprop")
+    assert imageval.width == 320
+    assert imageval.height == 480
+    assert "cat.jpg" in imageval.path
+
+    with pytest.raises(RuntimeError, match="The image cannot be loaded"):
+        PyImage.load_from_path("non-existent.png")
+
+    instance.set_property("imageprop", PyImage.load_from_path(os.path.join(
+        os.path.dirname(__file__), "../../../examples/iot-dashboard/images/humidity.png")))
+    imageval = instance.get_property("imageprop")
+    assert imageval.size == (36, 36)
+    assert "humidity.png" in imageval.path
 
     with pytest.raises(TypeError, match="'int' object cannot be converted to 'PyString'"):
         instance.set_property("structprop", {42: 'wrong'})
+
+    brushval = instance.get_property("brushprop")
+    assert str(brushval.color) == "argb(255, 255, 0, 255)"
+    instance.set_property("brushprop", Brush(Color("rgb(128, 128, 128)")))
+    brushval = instance.get_property("brushprop")
+    assert str(brushval.color) == "argb(255, 128, 128, 128)"
+
+    brushval = instance.get_property("colprop")
+    assert str(brushval.color) == "argb(255, 0, 255, 0)"
+    instance.set_property("colprop", Color("rgb(128, 128, 128)"))
+    brushval = instance.get_property("colprop")
+    assert str(brushval.color) == "argb(255, 128, 128, 128)"
 
     with pytest.raises(ValueError, match="no such property"):
         instance.set_global_property("nonexistent", "theglobalprop", 42)
@@ -85,6 +118,7 @@ def test_property_access():
     assert instance.get_global_property("TestGlobal", "theglobalprop") == "Hey"
     instance.set_global_property("TestGlobal", "theglobalprop", "Ok")
     assert instance.get_global_property("TestGlobal", "theglobalprop") == "Ok"
+
 
 def test_callbacks():
     compiler = native.ComponentCompiler()
@@ -112,7 +146,8 @@ def test_callbacks():
 
     assert instance.invoke("test-callback", "foo") == "local foo"
 
-    assert instance.invoke_global("TestGlobal", "globallogic", "foo") == "global foo"
+    assert instance.invoke_global(
+        "TestGlobal", "globallogic", "foo") == "global foo"
 
     with pytest.raises(RuntimeError, match="no such callback"):
         instance.set_callback("non-existent", lambda x: x)
@@ -123,15 +158,20 @@ def test_callbacks():
     with pytest.raises(RuntimeError, match="no such callback"):
         instance.set_global_callback("TestGlobal", "non-existent", lambda x: x)
 
-    instance.set_global_callback("TestGlobal", "globallogic", lambda x: "python global " + x)
-    assert instance.invoke_global("TestGlobal", "globallogic", "foo") == "python global foo"
+    instance.set_global_callback(
+        "TestGlobal", "globallogic", lambda x: "python global " + x)
+    assert instance.invoke_global(
+        "TestGlobal", "globallogic", "foo") == "python global foo"
 
-    instance.set_callback("void-callback", lambda : None)
+    instance.set_callback("void-callback", lambda: None)
     instance.invoke("void-callback")
 
 
 if __name__ == "__main__":
     import slint
-    instance = slint.load_file("../../examples/printerdemo/ui/printerdemo.slint")
-    instance.set_global_callback("PrinterQueue", "start-job", lambda title: print(f"new print job {title}"))
+    module = slint.load_file(
+        "../../examples/printerdemo/ui/printerdemo.slint")
+    instance = module.MainWindow()
+    instance.PrinterQueue.start_job = lambda title: print(
+        f"new print job {title}")
     instance.run()

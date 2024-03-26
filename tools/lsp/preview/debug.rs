@@ -133,7 +133,7 @@ pub fn as_dot(element: &ElementRc, mark_up: Option<ElementRc>) -> ElementMap {
     );
     i_slint_core::debug_log!("{}", state.generate(connections));
 
-    let map: HashMap<_, _> = state.elements.iter().map(|(k, v)| (k.clone(), v.node_id())).collect();
+    let map: HashMap<_, _> = state.elements.iter().map(|(k, v)| (*k, v.node_id())).collect();
     ElementMap(map)
 }
 
@@ -168,7 +168,7 @@ fn recurse_into_element(state: &mut State, element: &ElementRc) -> (usize, Vec<S
 
 fn add_element_node(state: &mut State, element: &ElementRc, node_number: usize) {
     let e = element.borrow();
-    let layout = if e.layout.is_some() { ",shape = box" } else { "" };
+    let layout = if e.debug.iter().any(|d| d.1.is_some()) { ",shape = box" } else { "" };
     let repeated = if e.repeated.is_some() { ",color = blue" } else { "" };
     let component = if matches!(e.base_type, i_slint_compiler::langtype::ElementType::Component(_))
     {

@@ -11,6 +11,7 @@
 pub type FieldOffset<T, U> = const_field_offset::FieldOffset<T, U, const_field_offset::AllowPin>;
 use crate::items::PropertyAnimation;
 use alloc::rc::Rc;
+#[cfg(not(feature = "std"))]
 use core::convert::{TryFrom, TryInto};
 use core::pin::Pin;
 
@@ -194,15 +195,14 @@ where
         animation: AnimatedBindingKind,
     ) -> Result<(), ()> {
         // Put in a function that does not depends on Item to avoid code bloat
-        fn set_binding_impl<T: Clone + 'static, Value: 'static>(
+        fn set_binding_impl<T, Value>(
             p: Pin<&crate::Property<T>>,
             binding: Box<dyn Fn() -> Value>,
             animation: AnimatedBindingKind,
         ) -> Result<(), ()>
         where
-            Value: TryInto<T>,
-            T: TryInto<Value>,
-            T: crate::properties::InterpolatedPropertyValue,
+            T: Clone + TryInto<Value> + crate::properties::InterpolatedPropertyValue + 'static,
+            Value: TryInto<T> + 'static,
         {
             match animation {
                 AnimatedBindingKind::NotAnimated => {

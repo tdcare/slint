@@ -46,7 +46,7 @@ pub async fn embed_images(
 
             // Map URLs (async -- well, not really):
             for i in urls.iter_mut() {
-                *i.1 = (*mapper)(&i.0).await;
+                *i.1 = (*mapper)(i.0).await;
             }
         }
 
@@ -86,7 +86,7 @@ fn embed_images_from_expression(
     scale_factor: f64,
     diag: &mut BuildDiagnostics,
 ) {
-    if let Expression::ImageReference { ref mut resource_ref, source_location } = e {
+    if let Expression::ImageReference { ref mut resource_ref, source_location, nine_slice: _ } = e {
         match resource_ref {
             ImageReference::AbsolutePath(path) => {
                 // used mapped path:
@@ -100,7 +100,7 @@ fn embed_images_from_expression(
                     *resource_ref = embed_image(
                         global_embedded_resources,
                         embed_files,
-                        &path,
+                        path,
                         scale_factor,
                         diag,
                         source_location,
@@ -362,30 +362,29 @@ fn load_image(
 ) -> image::ImageResult<(image::RgbaImage, SourceFormat, Size)> {
     use resvg::{tiny_skia, usvg};
     use std::ffi::OsStr;
-    use usvg::{TreeParsing, TreePostProc as _};
     if file.canon_path.extension() == Some(OsStr::new("svg"))
         || file.canon_path.extension() == Some(OsStr::new("svgz"))
     {
         let options = usvg::Options::default();
-        let mut tree = match file.builtin_contents {
-            Some(data) => usvg::Tree::from_data(data, &options),
-            None => usvg::Tree::from_data(
-                std::fs::read(&file.canon_path).map_err(image::ImageError::IoError)?.as_slice(),
-                &options,
-            ),
-        }
-        .map_err(|e| {
-            image::ImageError::Decoding(image::error::DecodingError::new(
-                image::error::ImageFormatHint::Name("svg".into()),
-                e,
-            ))
+        let tree = i_slint_common::sharedfontdb::FONT_DB.with(|db| {
+            match file.builtin_contents {
+                Some(data) => usvg::Tree::from_data(data, &options, &db.borrow()),
+                None => usvg::Tree::from_data(
+                    std::fs::read(&file.canon_path).map_err(image::ImageError::IoError)?.as_slice(),
+                    &options,
+                    &db.borrow(),
+                ),
+            }
+            .map_err(|e| {
+                image::ImageError::Decoding(image::error::DecodingError::new(
+                    image::error::ImageFormatHint::Name("svg".into()),
+                    e,
+                ))
+            })
         })?;
-        i_slint_common::sharedfontdb::FONT_DB.with(|db| {
-            tree.postprocess(Default::default(), &db.borrow());
-        });
         let scale_factor = scale_factor as f32;
         // TODO: ideally we should find the size used for that `Image`
-        let original_size = tree.size;
+        let original_size = tree.size();
         let width = original_size.width() * scale_factor;
         let height = original_size.height() * scale_factor;
 

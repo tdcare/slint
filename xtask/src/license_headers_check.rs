@@ -403,9 +403,9 @@ lazy_static! {
         ("^\\.clang-format$", LicenseLocation::NoLicense),
         ("^\\.github/.*\\.md$", LicenseLocation::NoLicense),
         ("^\\.mailmap$", LicenseLocation::NoLicense),
+        ("^\\.prettierrc$", LicenseLocation::Tag(LicenseTagStyle::shell_comment_style())),
         ("^\\.pre-commit-config\\.yaml$", LicenseLocation::NoLicense),
         ("^\\.reuse/dep5$", LicenseLocation::NoLicense), // .reuse files have no license headers
-        ("^api/cpp/docs/Pipfile$", LicenseLocation::NoLicense),
         ("^api/cpp/docs/conf\\.py$", LicenseLocation::NoLicense),
         ("^docs/reference/Pipfile$", LicenseLocation::NoLicense),
         ("^docs/reference/conf\\.py$", LicenseLocation::NoLicense),
@@ -426,6 +426,7 @@ lazy_static! {
         ("(^|/)webpack\\..+\\.js$", LicenseLocation::NoLicense),
         ("(^|/)partitions\\.csv$", LicenseLocation::NoLicense),
         ("(^|/)sdkconfig", LicenseLocation::NoLicense), // auto-generated
+        ("(^|/)Pipfile$", LicenseLocation::Tag(LicenseTagStyle::shell_comment_style())),
 
         // Path prefix matches:
         ("^editors/tree-sitter-slint/corpus/", LicenseLocation::NoLicense), // liberal license
@@ -446,6 +447,7 @@ lazy_static! {
         ("\\.css$", LicenseLocation::NoLicense),
         ("\\.gitattributes$", LicenseLocation::NoLicense),
         ("\\.gitignore$", LicenseLocation::NoLicense),
+        ("\\.dockerignore$", LicenseLocation::NoLicense),
         ("\\.dockerignore$", LicenseLocation::NoLicense),
         ("\\.prettierignore$", LicenseLocation::NoLicense),
         ("\\.npmignore$", LicenseLocation::NoLicense),
@@ -618,7 +620,7 @@ impl CargoDependency {
 
 struct CargoToml {
     path: std::path::PathBuf,
-    doc: toml_edit::Document,
+    doc: toml_edit::DocumentMut,
     edited: bool,
 }
 

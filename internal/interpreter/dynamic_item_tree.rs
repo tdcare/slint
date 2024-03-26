@@ -3,15 +3,14 @@
 
 use crate::{api::Value, dynamic_type, eval};
 
-use core::convert::TryInto;
 use core::ptr::NonNull;
 use dynamic_type::{Instance, InstanceBox};
 use i_slint_compiler::diagnostics::SourceFileVersion;
 use i_slint_compiler::expression_tree::{Expression, NamedReference};
 use i_slint_compiler::langtype::{ElementType, Type};
 use i_slint_compiler::object_tree::ElementRc;
-use i_slint_compiler::*;
 use i_slint_compiler::{diagnostics::BuildDiagnostics, object_tree::PropertyDeclaration};
+use i_slint_compiler::{generator, object_tree, parser, CompilerConfiguration};
 use i_slint_core::accessibility::AccessibleStringProperty;
 use i_slint_core::component_factory::ComponentFactory;
 use i_slint_core::item_tree::{
@@ -113,7 +112,7 @@ impl RepeatedItemTree for ErasedItemTreeBox {
     fn update(&self, index: usize, data: Self::Data) {
         generativity::make_guard!(guard);
         let s = self.unerase(guard);
-        s.description.set_property(s.borrow(), "index", index.try_into().unwrap()).unwrap();
+        s.description.set_property(s.borrow(), "index", index.into()).unwrap();
         s.description.set_property(s.borrow(), "model_data", data).unwrap();
     }
 
@@ -380,6 +379,12 @@ pub struct ItemTreeDescription<'id> {
     /// Map of all exported global singletons and their index in the compiled_globals vector. The key
     /// is the normalized name of the global.
     exported_globals_by_name: BTreeMap<String, usize>,
+
+    /// The type loader, which will be available only on the top-most `ItemTreeDescription`.
+    /// All other `ItemTreeDescription`s have `None` here.
+    #[cfg(feature = "highlight")]
+    pub(crate) type_loader:
+        std::cell::OnceCell<std::rc::Rc<i_slint_compiler::typeloader::TypeLoader>>,
 }
 
 fn internal_properties_to_public<'a>(
@@ -782,24 +787,37 @@ pub async fn load(
         }
     }
 
-    let mut diag = BuildDiagnostics::default();
-    let syntax_node = parser::parse(source, Some(path.as_path()), version, &mut diag);
+    let diag = BuildDiagnostics::default();
+    let (path, mut diag, loader) =
+        i_slint_compiler::load_root_file(&path, version, &path, source, diag, compiler_config)
+            .await;
     if diag.has_error() {
-        return (Err(()), diag);
-    }
-    let (doc, mut diag) = compile_syntax_node(syntax_node, diag, compiler_config).await;
-    if diag.has_error() {
-        return (Err(()), diag);
-    }
-    if matches!(
-        doc.root_component.root_element.borrow().base_type,
-        ElementType::Global | ElementType::Error
-    ) {
-        diag.push_error_with_span("No component found".into(), Default::default());
         return (Err(()), diag);
     }
 
-    (Ok(generate_item_tree(&doc.root_component, guard)), diag)
+    let item_tree = {
+        #[allow(unused_mut)]
+        let mut it = {
+            let doc = loader.get_document(&path).unwrap();
+            if matches!(
+                doc.root_component.root_element.borrow().base_type,
+                ElementType::Global | ElementType::Error
+            ) {
+                diag.push_error_with_span("No component found".into(), Default::default());
+                return (Err(()), diag);
+            }
+
+            generate_item_tree(&doc.root_component, guard)
+        };
+
+        #[cfg(feature = "highlight")]
+        {
+            let _ = it.type_loader.set(Rc::new(loader));
+        }
+        it
+    };
+
+    (Ok(item_tree), diag)
 }
 
 pub(crate) fn generate_item_tree<'id>(
@@ -973,10 +991,9 @@ pub(crate) fn generate_item_tree<'id>(
 
     let mut custom_properties = HashMap::new();
     let mut custom_callbacks = HashMap::new();
-    fn property_info<T: PartialEq + Clone + Default + 'static>(
-    ) -> (Box<dyn PropertyInfo<u8, Value>>, dynamic_type::StaticTypeInfo)
+    fn property_info<T>() -> (Box<dyn PropertyInfo<u8, Value>>, dynamic_type::StaticTypeInfo)
     where
-        T: std::convert::TryInto<Value>,
+        T: PartialEq + Clone + Default + std::convert::TryInto<Value> + 'static,
         Value: std::convert::TryInto<T>,
     {
         // Fixme: using u8 in PropertyInfo<> is not sound, we would need to materialize a type for out component
@@ -987,10 +1004,10 @@ pub(crate) fn generate_item_tree<'id>(
             dynamic_type::StaticTypeInfo::new::<Property<T>>(),
         )
     }
-    fn animated_property_info<T: Clone + Default + InterpolatedPropertyValue + 'static>(
+    fn animated_property_info<T>(
     ) -> (Box<dyn PropertyInfo<u8, Value>>, dynamic_type::StaticTypeInfo)
     where
-        T: std::convert::TryInto<Value>,
+        T: Clone + Default + InterpolatedPropertyValue + std::convert::TryInto<Value> + 'static,
         Value: std::convert::TryInto<T>,
     {
         // Fixme: using u8 in PropertyInfo<> is not sound, we would need to materialize a type for out component
@@ -1116,7 +1133,7 @@ pub(crate) fn generate_item_tree<'id>(
 
             if component.visible_in_public_api() {
                 global.extend_public_properties(
-                    component.root_element.borrow().property_declarations.clone().into_iter(),
+                    component.root_element.borrow().property_declarations.clone(),
                 );
 
                 exported_globals_by_name.extend(
@@ -1168,6 +1185,8 @@ pub(crate) fn generate_item_tree<'id>(
         public_properties,
         compiled_globals,
         exported_globals_by_name,
+        #[cfg(feature = "highlight")]
+        type_loader: std::cell::OnceCell::new(),
     };
 
     Rc::new(t)

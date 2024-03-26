@@ -68,7 +68,7 @@ Files: editors/vscode/static/assets/img/nodejs_logo.svg
 Copyright: node.js authors
 License: CC0-1.0
 
-Files: tests/screenshots/references/software/*/*.png
+Files: tests/screenshots/**/*.png
 Copyright: Copyright © SixtyFPS GmbH <info@slint.dev>
 License: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
@@ -108,7 +108,7 @@ Files: internal/backends/linuxkms/mouse-pointer.svg examples/virtual_keyboard/ui
 Copyright: Copyright © 2018 Dave Gandy & Fork Awesome
 License: MIT
 
-Files: examples/energy-monitor/ui/assets/sunny.svg examples/energy-monitor/ui/assets/settings.svg examples/energy-monitor/ui/assets/information.svg examples/energy-monitor/ui/assets/cloudy.svg examples/energy-monitor/ui/assets/cloud.svg examples/energy-monitor/ui/assets/check.svg examples/energy-monitor/ui/assets/arrow-right.svg examples/energy-monitor/ui/assets/arrow-left.svg
+Files: examples/energy-monitor/ui/assets/sunny.svg examples/energy-monitor/ui/assets/settings.svg examples/energy-monitor/ui/assets/information.svg examples/energy-monitor/ui/assets/cloudy.svg examples/energy-monitor/ui/assets/cloud.svg examples/energy-monitor/ui/assets/check.svg examples/energy-monitor/ui/assets/arrow-right.svg examples/energy-monitor/ui/assets/arrow-left.svg examples/energy-monitor/ui/assets/dashboard.svg
 Copyright: Copyright © SixtyFPS GmbH <info@slint.dev>
 License: MIT
 

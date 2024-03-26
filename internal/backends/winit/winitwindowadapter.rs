@@ -22,7 +22,7 @@ use const_field_offset::FieldOffsets;
 use corelib::item_tree::ItemTreeRc;
 #[cfg(enable_accesskit)]
 use corelib::item_tree::ItemTreeRef;
-use corelib::items::MouseCursor;
+use corelib::items::{ColorScheme, MouseCursor};
 #[cfg(enable_accesskit)]
 use corelib::items::{ItemRc, ItemRef};
 
@@ -117,10 +117,13 @@ pub struct WinitWindowAdapter {
     #[cfg(target_arch = "wasm32")]
     self_weak: Weak<Self>,
     pending_redraw: Cell<bool>,
-    dark_color_scheme: OnceCell<Pin<Box<Property<bool>>>>,
+    color_scheme: OnceCell<Pin<Box<Property<ColorScheme>>>>,
     constraints: Cell<corelib::window::LayoutConstraints>,
     shown: Cell<bool>,
     window_level: Cell<winit::window::WindowLevel>,
+    maximized: Cell<bool>,
+    minimized: Cell<bool>,
+    fullscreen: Cell<bool>,
 
     pub(crate) renderer: Box<dyn WinitCompatibleRenderer>,
     /// We cache the size because winit_window.inner_size() can return different value between calls (eg, on X11)
@@ -150,10 +153,13 @@ impl WinitWindowAdapter {
             #[cfg(target_arch = "wasm32")]
             self_weak: self_weak.clone(),
             pending_redraw: Default::default(),
-            dark_color_scheme: Default::default(),
+            color_scheme: Default::default(),
             constraints: Default::default(),
             shown: Default::default(),
             window_level: Default::default(),
+            maximized: Cell::default(),
+            minimized: Cell::default(),
+            fullscreen: Cell::default(),
             winit_window: winit_window.clone(),
             size: Default::default(),
             has_explicit_size: Default::default(),
@@ -299,11 +305,41 @@ impl WinitWindowAdapter {
         Ok(())
     }
 
-    pub fn set_dark_color_scheme(&self, dark_mode: bool) {
-        self.dark_color_scheme
-            .get_or_init(|| Box::pin(Property::new(false)))
+    pub fn set_color_scheme(&self, scheme: ColorScheme) {
+        self.color_scheme
+            .get_or_init(|| Box::pin(Property::new(ColorScheme::Unknown)))
             .as_ref()
-            .set(dark_mode)
+            .set(scheme)
+    }
+
+    pub fn window_state_event(&self) {
+        if let Some(minimized) = self.winit_window.is_minimized() {
+            self.minimized.set(minimized);
+            if minimized != self.window().is_minimized() {
+                self.window().set_minimized(minimized);
+            }
+        }
+
+        // The method winit::Window::is_maximized returns false when the window
+        // is minimized, even if it was previously maximized. We have to ensure
+        // that we only update the internal maximized state when the window is
+        // not minimized. Otherwise, the window would be restored in a
+        // non-maximized state even if it was maximized before being minimized.
+        let maximized = self.winit_window.is_maximized();
+        if !self.window().is_minimized() {
+            self.maximized.set(maximized);
+            if maximized != self.window().is_maximized() {
+                self.window().set_maximized(maximized);
+            }
+        }
+
+        // NOTE: Fullscreen overrides maximized so if both are true then the
+        // window will remain in fullscreen. Fullscreen must be false to switch
+        // to maximized.
+        let fullscreen = self.winit_window.fullscreen().is_some();
+        if fullscreen != self.window().is_fullscreen() {
+            self.window().set_fullscreen(fullscreen);
+        }
     }
 }
 
@@ -374,9 +410,12 @@ impl WindowAdapter for WinitWindowAdapter {
 
             // Make sure the dark color scheme property is up-to-date, as it may have been queried earlier when
             // the window wasn't mapped yet.
-            if let Some(dark_color_scheme_prop) = self.dark_color_scheme.get() {
+            if let Some(color_scheme_prop) = self.color_scheme.get() {
                 if let Some(theme) = winit_window.theme() {
-                    dark_color_scheme_prop.as_ref().set(theme == winit::window::Theme::Dark)
+                    color_scheme_prop.as_ref().set(match theme {
+                        winit::window::Theme::Dark => ColorScheme::Dark,
+                        winit::window::Theme::Light => ColorScheme::Light,
+                    })
                 }
             }
 
@@ -499,19 +538,34 @@ impl WindowAdapter for WinitWindowAdapter {
         }
 
         self.with_window_handle(&mut |winit_window| {
-            if properties.fullscreen() {
-                if winit_window.fullscreen().is_none() {
-                    winit_window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-                }
-            } else {
-                if winit_window.fullscreen().is_some() {
+            let m = properties.is_fullscreen();
+            if m != self.fullscreen.get() {
+                if m {
+                    if winit_window.fullscreen().is_none() {
+                        winit_window
+                            .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                    }
+                } else {
                     winit_window.set_fullscreen(None);
                 }
             }
 
-            // If we're in fullscreen state, don't try to resize the window but maintain the surface
-            // size we've been assigned to from the windowing system. Weston/Wayland don't like it
-            // when we create a surface that's bigger than the screen due to constraints (#532).
+            let m = properties.is_maximized();
+            if m != self.maximized.get() {
+                self.maximized.set(m);
+                winit_window.set_maximized(m);
+            }
+
+            let m = properties.is_minimized();
+            if m != self.minimized.get() {
+                self.minimized.set(m);
+                winit_window.set_minimized(m);
+            }
+
+            // If we're in fullscreen, don't try to resize the window but
+            // maintain the surface size we've been assigned to from the
+            // windowing system. Weston/Wayland don't like it when we create a
+            // surface that's bigger than the screen due to constraints (#532).
             if winit_window.fullscreen().is_some() {
                 return;
             }
@@ -565,6 +619,20 @@ impl WindowAdapter for WinitWindowAdapter {
 
     fn internal(&self, _: corelib::InternalToken) -> Option<&dyn WindowAdapterInternal> {
         Some(self)
+    }
+
+    #[cfg(feature = "raw-window-handle-06")]
+    fn window_handle_06(
+        &self,
+    ) -> Result<raw_window_handle_06::WindowHandle<'_>, raw_window_handle_06::HandleError> {
+        raw_window_handle_06::HasWindowHandle::window_handle(&self.winit_window)
+    }
+
+    #[cfg(feature = "raw-window-handle-06")]
+    fn display_handle_06(
+        &self,
+    ) -> Result<raw_window_handle_06::DisplayHandle<'_>, raw_window_handle_06::HandleError> {
+        raw_window_handle_06::HasDisplayHandle::display_handle(&self.winit_window)
     }
 }
 
@@ -654,13 +722,14 @@ impl WindowAdapterInternal for WinitWindowAdapter {
         self
     }
 
-    fn dark_color_scheme(&self) -> bool {
-        self.dark_color_scheme
+    fn color_scheme(&self) -> ColorScheme {
+        self.color_scheme
             .get_or_init(|| {
                 Box::pin(Property::new({
-                    self.winit_window()
-                        .theme()
-                        .map_or(false, |theme| theme == winit::window::Theme::Dark)
+                    self.winit_window().theme().map_or(ColorScheme::Unknown, |theme| match theme {
+                        winit::window::Theme::Dark => ColorScheme::Dark,
+                        winit::window::Theme::Light => ColorScheme::Light,
+                    })
                 }))
             })
             .as_ref()

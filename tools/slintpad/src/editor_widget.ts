@@ -23,7 +23,6 @@ import { MonacoLanguageClient } from "monaco-languageclient";
 import { createConfiguredEditor } from "vscode/monaco";
 
 import { initialize as initializeMonacoServices } from "vscode/services";
-import { initialize as initializeVscodeExtensions } from "vscode/extensions";
 import getConfigurationServiceOverride from "@codingame/monaco-vscode-configuration-service-override";
 import getEditorServiceOverride, {
     IReference,
@@ -55,9 +54,7 @@ export function initialize(): Promise<void> {
                 ...getSnippetServiceOverride(),
                 ...getStorageServiceOverride(),
             }).then(() => {
-                initializeVscodeExtensions().then(() => {
-                    resolve();
-                });
+                resolve();
             });
         } catch (e) {
             reject(e);
@@ -388,8 +385,9 @@ class EditorPaneWidget extends Widget {
 
     private resize_editor() {
         if (this.#editor != null) {
-            const width = this.contentNode.offsetWidth;
-            const height = this.contentNode.offsetHeight;
+            // This has a 1px wide border all around, so subtract 2px...
+            const width = this.contentNode.offsetWidth - 2;
+            const height = this.contentNode.offsetHeight - 2;
             this.#editor.layout({ width, height });
         }
     }

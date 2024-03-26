@@ -1,104 +1,187 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use i_slint_compiler::langtype::Type;
-use i_slint_core::model::Model;
-use napi::{
-    bindgen_prelude::Object, Env, JsFunction, JsNumber, JsUnknown, NapiRaw, Result, ValueType,
-};
-use slint_interpreter::Value;
+use i_slint_core::model::{Model, ModelNotify, ModelRc};
+use napi::{bindgen_prelude::*, JsSymbol};
+use napi::{Env, JsExternal, JsFunction, JsNumber, JsObject, JsUnknown, Result, ValueType};
 
 use crate::{to_js_unknown, to_value, RefCountedReference};
 
-pub struct JsModel {
-    model: RefCountedReference,
-    env: Env,
-    notify: i_slint_core::model::ModelNotify,
-    data_type: Type,
+#[napi]
+#[derive(Clone, Default)]
+pub struct SharedModelNotify(Rc<ModelNotify>);
+
+impl core::ops::Deref for SharedModelNotify {
+    type Target = Rc<ModelNotify>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-impl JsModel {
-    pub fn new<T: NapiRaw>(env: Env, model: T, data_type: Type) -> napi::Result<Rc<Self>> {
-        let js_model = Rc::new(Self {
-            notify: Default::default(),
-            env,
-            model: RefCountedReference::new(&env, model)?,
-            data_type,
-        });
+pub(crate) fn js_into_rust_model(
+    env: &Env,
+    maybe_js_impl: &JsObject,
+    row_data_type: &Type,
+) -> Result<ModelRc<slint_interpreter::Value>> {
+    let shared_model_notify = maybe_js_impl
+        .get("modelNotify")
+        .and_then(|prop| {
+            prop.ok_or_else(|| {
+                napi::Error::from_reason(
+                    "Could not convert value to slint model: missing modelNotify property",
+                )
+            })
+        })
+        .and_then(|shared_model_notify: JsExternal| {
+            env.get_value_external::<SharedModelNotify>(&shared_model_notify).cloned()
+        })?;
+    Ok(Rc::new(JsModel {
+        shared_model_notify,
+        env: env.clone(),
+        js_impl: RefCountedReference::new(env, maybe_js_impl)?,
+        row_data_type: row_data_type.clone(),
+    })
+    .into())
+}
 
-        let notify = JsSlintModelNotify { model: Rc::downgrade(&js_model) };
+pub(crate) fn rust_into_js_model(
+    model: &ModelRc<slint_interpreter::Value>,
+) -> Option<Result<JsUnknown>> {
+    model.as_any().downcast_ref::<JsModel>().map(|rust_model| rust_model.js_impl.get())
+}
 
-        js_model.model.get::<Object>()?.set("notify", notify)?;
+struct JsModel {
+    shared_model_notify: SharedModelNotify,
+    env: Env,
+    js_impl: RefCountedReference,
+    row_data_type: Type,
+}
 
-        Ok(js_model)
-    }
+#[napi]
+pub fn js_model_notify_new() -> Result<External<SharedModelNotify>> {
+    Ok(External::new(Default::default()))
+}
 
-    pub fn model(&self) -> &RefCountedReference {
-        &self.model
-    }
+#[napi]
+pub fn js_model_notify_row_data_changed(notify: External<SharedModelNotify>, row: u32) {
+    notify.row_changed(row as usize);
+}
+
+#[napi]
+pub fn js_model_notify_row_added(notify: External<SharedModelNotify>, row: u32, count: u32) {
+    notify.row_added(row as usize, count as usize);
+}
+
+#[napi]
+pub fn js_model_notify_row_removed(notify: External<SharedModelNotify>, row: u32, count: u32) {
+    notify.row_removed(row as usize, count as usize);
+}
+
+#[napi]
+pub fn js_model_notify_reset(notify: External<SharedModelNotify>) {
+    notify.reset();
 }
 
 impl Model for JsModel {
     type Data = slint_interpreter::Value;
 
     fn row_count(&self) -> usize {
-        let model: Object = self.model.get().unwrap();
-        model
-            .get::<&str, JsFunction>("rowCount")
-            .ok()
-            .and_then(|callback| {
-                callback.and_then(|callback| callback.call::<JsUnknown>(Some(&model), &[]).ok())
-            })
-            .and_then(|res| res.coerce_to_number().ok())
-            .map(|num| num.get_uint32().ok().map_or(0, |count| count as usize))
-            .unwrap_or_default()
+        let model: Object = self.js_impl.get().unwrap();
+
+        let Ok(row_count_property) = model.get::<&str, JsFunction>("rowCount") else {
+            eprintln!("Node.js: JavaScript Model<T> implementation is missing rowCount property");
+            return 0;
+        };
+
+        let Some(row_count_property_fn) = row_count_property else {
+            eprintln!("Node.js: JavaScript Model<T> implementation's rowCount property is not a callable function");
+            return 0;
+        };
+
+        let Ok(row_count_result) = row_count_property_fn.call_without_args(Some(&model)) else {
+            eprintln!("Node.js: JavaScript Model<T>'s rowCount implementation call failed");
+            return 0;
+        };
+
+        let Ok(row_count_number) = row_count_result.coerce_to_number() else {
+            eprintln!("Node.js: JavaScript Model<T>'s rowCount function returned a value that cannot be coerced to a number");
+            return 0;
+        };
+
+        let Ok(row_count) = row_count_number.get_uint32() else {
+            eprintln!("Node.js: JavaScript Model<T>'s rowCount function returned a number that cannot be mapped to a uint32");
+            return 0;
+        };
+
+        row_count as usize
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data> {
-        let model: Object = self.model.get().unwrap();
-        model
-            .get::<&str, JsFunction>("rowData")
-            .ok()
-            .and_then(|callback| {
-                callback.and_then(|callback| {
-                    callback
-                        .call::<JsNumber>(
-                            Some(&model),
-                            &[self.env.create_double(row as f64).unwrap()],
-                        )
-                        .ok()
-                })
-            })
-            .and_then(|res| {
-                if res.get_type().unwrap() == ValueType::Undefined {
-                    None
-                } else {
-                    to_value(&self.env, res, &self.data_type).ok()
-                }
-            })
-    }
+        let model: Object = self.js_impl.get().unwrap();
+        let Ok(row_data_property) = model.get::<&str, JsFunction>("rowData") else {
+            eprintln!("Node.js: JavaScript Model<T> implementation is missing rowData property");
+            return None;
+        };
 
-    fn model_tracker(&self) -> &dyn i_slint_core::model::ModelTracker {
-        &self.notify
+        let Some(row_data_fn) = row_data_property else {
+            eprintln!("Node.js: Model<T> implementation's rowData property is not a function");
+            return None;
+        };
+
+        let Ok(row_data) = row_data_fn
+            .call::<JsNumber>(Some(&model), &[self.env.create_double(row as f64).unwrap()])
+        else {
+            eprintln!("Node.js: JavaScript Model<T>'s rowData function threw an exception");
+            return None;
+        };
+
+        if row_data.get_type().unwrap() == ValueType::Undefined {
+            debug_assert!(row >= self.row_count());
+            None
+        } else {
+            let Ok(js_value) = to_value(&self.env, row_data, &self.row_data_type) else {
+                eprintln!("Node.js: JavaScript Model<T>'s rowData function returned data type that cannot be represented in Rust");
+                return None;
+            };
+            Some(js_value)
+        }
     }
 
     fn set_row_data(&self, row: usize, data: Self::Data) {
-        let model: Object = self.model.get().unwrap();
-        model.get::<&str, JsFunction>("setRowData").ok().and_then(|callback| {
-            callback.and_then(|callback| {
-                callback
-                    .call::<JsUnknown>(
-                        Some(&model),
-                        &[
-                            to_js_unknown(&self.env, &Value::Number(row as f64)).unwrap(),
-                            to_js_unknown(&self.env, &data).unwrap(),
-                        ],
-                    )
-                    .ok()
-            })
-        });
+        let model: Object = self.js_impl.get().unwrap();
+
+        let Ok(set_row_data_property) = model.get::<&str, JsFunction>("setRowData") else {
+            eprintln!("Node.js: JavaScript Model<T> implementation is missing setRowData property");
+            return;
+        };
+
+        let Some(set_row_data_fn) = set_row_data_property else {
+            eprintln!("Node.js: Model<T> implementation's setRowData property is not a function");
+            return;
+        };
+
+        let Ok(js_data) = to_js_unknown(&self.env, &data) else {
+            eprintln!("Node.js: Model<T>'s set_row_data called by Rust with data type that can't be represented in JavaScript");
+            return;
+        };
+
+        if let Err(exception) = set_row_data_fn.call::<JsUnknown>(
+            Some(&model),
+            &[self.env.create_double(row as f64).unwrap().into_unknown(), js_data],
+        ) {
+            eprintln!(
+                "Node.js: JavaScript Model<T>'s setRowData function threw an exception: {}",
+                exception
+            );
+        }
+    }
+
+    fn model_tracker(&self) -> &dyn i_slint_core::model::ModelTracker {
+        &**self.shared_model_notify
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -106,80 +189,85 @@ impl Model for JsModel {
     }
 }
 
-#[napi(js_name = "SlintModelNotify")]
-pub struct JsSlintModelNotify {
-    model: Weak<JsModel>,
+#[napi]
+pub struct ReadOnlyRustModel(ModelRc<slint_interpreter::Value>);
+
+impl From<ModelRc<slint_interpreter::Value>> for ReadOnlyRustModel {
+    fn from(model: ModelRc<slint_interpreter::Value>) -> Self {
+        Self(model)
+    }
 }
 
-impl JsSlintModelNotify {
-    fn model(&self) -> Result<Rc<JsModel>> {
-        self.model.upgrade().ok_or(napi::Error::from_reason("cannot upgrade model"))
+// Implement minimal Model<T> interface
+#[napi]
+impl ReadOnlyRustModel {
+    #[napi]
+    pub fn row_count(&self, env: Env) -> Result<JsNumber> {
+        env.create_uint32(self.0.row_count() as u32)
+    }
+
+    #[napi]
+    pub fn row_data(&self, env: Env, row: u32) -> Result<JsUnknown> {
+        let Some(data) = self.0.row_data(row as usize) else {
+            return env.get_undefined().map(|v| v.into_unknown());
+        };
+        to_js_unknown(&env, &data)
+    }
+
+    #[napi]
+    pub fn set_row_data(&self, _env: Env, _row: u32, _data: JsUnknown) {
+        eprintln!("setRowData called on a model which does not re-implement this method. This happens when trying to modify a read-only model")
+    }
+
+    pub fn into_js(self, env: &Env) -> Result<JsUnknown> {
+        let model = self.0.clone();
+        let iterator_env = env.clone();
+
+        let mut obj = self.into_instance(*env)?.as_object(*env);
+
+        // Implement Iterator protocol by hand until it's stable in napi-rs
+        let iterator_symbol = env
+            .get_global()
+            .and_then(|global| global.get_named_property::<JsFunction>("Symbol"))
+            .and_then(|symbol_function| symbol_function.coerce_to_object())
+            .and_then(|symbol_obj| symbol_obj.get::<&str, JsSymbol>("iterator"))?
+            .expect("fatal: Unable to find Symbol.iterator");
+
+        obj.set_property(
+            iterator_symbol,
+            env.create_function_from_closure("rust model iterator", move |_| {
+                Ok(ModelIterator { model: model.clone(), row: 0, env: iterator_env }
+                    .into_instance(iterator_env)?
+                    .as_object(iterator_env))
+            })?,
+        )?;
+
+        Ok(obj.into_unknown())
     }
 }
 
 #[napi]
-impl JsSlintModelNotify {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { model: Weak::default() }
-    }
+pub struct ModelIterator {
+    model: ModelRc<slint_interpreter::Value>,
+    row: usize,
+    env: Env,
+}
 
+#[napi]
+impl ModelIterator {
     #[napi]
-    pub fn row_data_changed(&self, row: f64) -> Result<()> {
-        let model = self.model()?;
-
-        if row < 0. && row >= model.row_count() as f64 {
-            return Err(napi::Error::from_reason(
-                "row with value {row} out of bounds.".to_string(),
-            ));
+    pub fn next(&mut self) -> Result<JsUnknown> {
+        let mut result = self.env.create_object()?;
+        if self.row >= self.model.row_count() {
+            result.set_named_property("done", true)?;
+        } else {
+            let row = self.row;
+            self.row += 1;
+            result.set_named_property(
+                "value",
+                self.model.row_data(row).and_then(|value| to_js_unknown(&self.env, &value).ok()),
+            )?
         }
-
-        model.notify.row_changed(row as usize);
-
-        Ok(())
-    }
-
-    #[napi]
-    pub fn row_added(&self, row: f64, count: f64) -> Result<()> {
-        let model = self.model()?;
-
-        if row < 0. && row >= model.row_count() as f64 {
-            return Err(napi::Error::from_reason(
-                "row with value {row} out of bounds.".to_string(),
-            ));
-        }
-
-        if count < 0. {
-            return Err(napi::Error::from_reason("count cannot be negative.".to_string()));
-        }
-
-        model.notify.row_added(row as usize, count as usize);
-
-        Ok(())
-    }
-
-    #[napi]
-    pub fn row_removed(&self, row: f64, count: f64) -> Result<()> {
-        let model = self.model()?;
-
-        if row < 0. && row >= model.row_count() as f64 {
-            return Err(napi::Error::from_reason(
-                "row with value {row} out of bounds.".to_string(),
-            ));
-        }
-
-        if count < 0. {
-            return Err(napi::Error::from_reason("count cannot be negative.".to_string()));
-        }
-
-        model.notify.row_removed(row as usize, count as usize);
-
-        Ok(())
-    }
-
-    #[napi]
-    pub fn reset(&self) -> Result<()> {
-        self.model()?.notify.reset();
-        Ok(())
+        return Ok(result.into_unknown());
     }
 }

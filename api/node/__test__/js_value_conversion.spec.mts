@@ -427,9 +427,12 @@ test('ArrayModel', (t) => {
   let instance = definition!.create();
   t.not(instance, null);
 
+  t.deepEqual(Array.from(new ArrayModel([3, 2, 1])), [3, 2, 1]);
+
   instance!.setProperty("int-model", new ArrayModel([10, 9, 8]));
 
   let intArrayModel = instance!.getProperty("int-model") as ArrayModel<number>;
+  t.deepEqual(intArrayModel.rowCount(), 3);
   t.deepEqual(intArrayModel.values(), new ArrayModel([10, 9, 8]).values());
 
   instance!.setProperty("string-model", new ArrayModel(["Simon", "Olivier", "Auri", "Tobias", "Florian"]));
@@ -606,10 +609,22 @@ test('model from array', (t) => {
   t.not(instance, null);
 
   instance!.setProperty("int-array", [10, 9, 8]);
-  t.deepEqual(instance!.getProperty("int-array"), [10, 9, 8]);
+  let wrapped_int_model = instance!.getProperty("int-array");
+  t.deepEqual(Array.from(wrapped_int_model), [10, 9, 8]);
+  t.deepEqual(wrapped_int_model.rowCount(), 3);
+  t.deepEqual(wrapped_int_model.rowData(0), 10);
+  t.deepEqual(wrapped_int_model.rowData(1), 9);
+  t.deepEqual(wrapped_int_model.rowData(2), 8);
+  t.deepEqual(Array.from(wrapped_int_model), [10, 9, 8]);
 
   instance!.setProperty("string-array", ["Simon", "Olivier", "Auri", "Tobias", "Florian"]);
-  t.deepEqual(instance!.getProperty("string-array"), ["Simon", "Olivier", "Auri", "Tobias", "Florian"]);
+  let wrapped_string_model = instance!.getProperty("string-array");
+  t.deepEqual(wrapped_string_model.rowCount(), 5);
+  t.deepEqual(wrapped_string_model.rowData(0), "Simon");
+  t.deepEqual(wrapped_string_model.rowData(1), "Olivier");
+  t.deepEqual(wrapped_string_model.rowData(2), "Auri");
+  t.deepEqual(wrapped_string_model.rowData(3), "Tobias");
+  t.deepEqual(wrapped_string_model.rowData(4), "Florian");
 })
 
 test('invoke callback', (t) => {

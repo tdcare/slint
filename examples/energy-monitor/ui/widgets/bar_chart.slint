@@ -36,17 +36,20 @@ export component BarChart {
     in property <float> max;
     in property <bool> active;
 
+    cache-rendering-hint: true;
+
     ChartPattern {
         count: model.length / 2;
     }
 
-    HorizontalLayout {
+    layout := HorizontalLayout {
         spacing: 1px;
 
         for value in model : Bar {
             private property <float> display-value;
 
-            height: 100%;
+            min-height: 120px;
+            preferred-height: 100%;
             bar-height: parent.height * (display-value - root.min) / (root.max - root.min);
 
             states [

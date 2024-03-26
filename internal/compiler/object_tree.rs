@@ -538,7 +538,7 @@ impl Clone for PropertyAnimation {
                 property_analysis: e.property_analysis.clone(),
                 enclosing_component: e.enclosing_component.clone(),
                 repeated: None,
-                node: e.node.clone(),
+                debug: e.debug.clone(),
                 ..Default::default()
             }))
         }
@@ -650,22 +650,23 @@ pub struct Element {
     /// How many times the element was inlined
     pub inline_depth: i32,
 
-    /// The AST nodes, if available.
+    /// Debug information about this element.
+    ///
+    /// Contains the AST node if available, as well as wether this element was a layout that had
+    /// been lowered into a rectangle in the lower_layouts pass.
     /// There can be several in case of inlining or optimization (child merged into their parent).
+    ///
     /// The order in the list is first the parent, and then the removed children.
-    pub node: Vec<syntax_nodes::Element>,
-
-    /// This element was a layout that has been lowered to a Rectangle
-    pub layout: Option<crate::layout::Layout>,
+    pub debug: Vec<(syntax_nodes::Element, Option<crate::layout::Layout>)>,
 }
 
 impl Spanned for Element {
     fn span(&self) -> crate::diagnostics::Span {
-        self.node.first().map(|n| n.span()).unwrap_or_default()
+        self.debug.first().map(|n| n.0.span()).unwrap_or_default()
     }
 
     fn source_file(&self) -> Option<&crate::diagnostics::SourceFile> {
-        self.node.first().map(|n| &n.source_file)
+        self.debug.first().map(|n| &n.0.source_file)
     }
 }
 
@@ -899,7 +900,7 @@ impl Element {
         let mut r = Element {
             id,
             base_type,
-            node: vec![node.clone()],
+            debug: vec![(node.clone(), None)],
             is_legacy_syntax,
             ..Default::default()
         };
@@ -1633,9 +1634,9 @@ impl Element {
 
     /// Returns the element's name as specified in the markup, not normalized.
     pub fn original_name(&self) -> String {
-        self.node
+        self.debug
             .first()
-            .and_then(|n| n.child_token(parser::SyntaxKind::Identifier))
+            .and_then(|n| n.0.child_token(parser::SyntaxKind::Identifier))
             .map(|n| n.to_string())
             .unwrap_or_else(|| self.id.clone())
     }
@@ -2035,11 +2036,14 @@ pub fn visit_element_expressions(
         }
     }
 
-    let repeated = std::mem::take(&mut elem.borrow_mut().repeated);
-    if let Some(mut r) = repeated {
-        let is_conditional_element = r.is_conditional_element;
-        vis(&mut r.model, None, &|| if is_conditional_element { Type::Bool } else { Type::Model });
-        elem.borrow_mut().repeated = Some(r)
+    let repeated = elem
+        .borrow_mut()
+        .repeated
+        .as_mut()
+        .map(|r| (std::mem::take(&mut r.model), r.is_conditional_element));
+    if let Some((mut model, is_cond)) = repeated {
+        vis(&mut model, None, &|| if is_cond { Type::Bool } else { Type::Model });
+        elem.borrow_mut().repeated.as_mut().unwrap().model = model;
     }
     visit_element_expressions_simple(elem, &mut vis);
     let mut states = std::mem::take(&mut elem.borrow_mut().states);
@@ -2134,9 +2138,11 @@ pub fn visit_all_named_references_in_element(
     let mut layout_info_prop = std::mem::take(&mut elem.borrow_mut().layout_info_prop);
     layout_info_prop.as_mut().map(|(h, b)| (vis(h), vis(b)));
     elem.borrow_mut().layout_info_prop = layout_info_prop;
-    let mut layout = std::mem::take(&mut elem.borrow_mut().layout);
-    layout.as_mut().map(|l| l.visit_named_references(&mut vis));
-    elem.borrow_mut().layout = layout;
+    let mut debug = std::mem::take(&mut elem.borrow_mut().debug);
+    for d in debug.iter_mut() {
+        d.1.as_mut().map(|l| l.visit_named_references(&mut vis));
+    }
+    elem.borrow_mut().debug = debug;
 
     let mut accessibility_props = std::mem::take(&mut elem.borrow_mut().accessibility_props);
     accessibility_props.0.iter_mut().for_each(|(_, x)| vis(x));
@@ -2520,8 +2526,8 @@ pub fn inject_element_as_repeated_element(repeated_element: &ElementRc, new_root
             "layoutinfo-h",
             crate::layout::layout_info_type(),
         );
-        let expr_h = crate::layout::implicit_layout_info_call(&old_root, Orientation::Horizontal);
-        let expr_v = crate::layout::implicit_layout_info_call(&old_root, Orientation::Vertical);
+        let expr_h = crate::layout::implicit_layout_info_call(old_root, Orientation::Horizontal);
+        let expr_v = crate::layout::implicit_layout_info_call(old_root, Orientation::Vertical);
         let expr_v =
             BindingExpression::new_with_span(expr_v, old_root.borrow().to_source_location());
         li_v.element().borrow_mut().bindings.insert(li_v.name().into(), expr_v.into());
@@ -2557,7 +2563,7 @@ pub fn adjust_geometry_for_injected_parent(injected_parent: &ElementRc, old_elem
     let mut injected_parent_mut = injected_parent.borrow_mut();
     injected_parent_mut.bindings.insert(
         "z".into(),
-        RefCell::new(BindingExpression::new_two_way(NamedReference::new(old_elem, "z".into()))),
+        RefCell::new(BindingExpression::new_two_way(NamedReference::new(old_elem, "z"))),
     );
     // (should be removed by const propagation in the llr)
     injected_parent_mut.property_declarations.insert(

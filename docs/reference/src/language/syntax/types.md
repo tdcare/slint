@@ -66,6 +66,17 @@ draw the outline.
 CSS Color names are only in scope in expressions of type `color` or `brush`. Otherwise, you can access
 colors from the `Colors` namespace.
 
+### Properties
+
+The following properties are exposed:
+
+- **`red`**
+- **`green`**
+- **`blue`**
+- **`alpha`**
+
+All properties are in the range 0-255.
+
 ### Methods
 
 All colors and brushes define the following methods:
@@ -173,6 +184,10 @@ export component Example inherits Window {
     }
 }
 ```
+
+It is also possible to load images supporting [9 slice scaling](https://en.wikipedia.org/wiki/9-slice_scaling) (also called nine patch or border images)
+by adding a  `nine-slice(...)` argument. The argument can have either one, two, or four numbers that specifies the size of the edges.
+The numbers are either `top right bottom left` or `vertical horizontal`, or one number for everything
 
 ## Structs
 

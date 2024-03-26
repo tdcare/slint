@@ -26,6 +26,7 @@ use crate::rtti::*;
 use crate::window::{InputMethodProperties, InputMethodRequest, WindowAdapter, WindowInner};
 use crate::{Callback, Coord, Property, SharedString, SharedVector};
 use alloc::rc::Rc;
+#[cfg(not(feature = "std"))]
 use alloc::string::String;
 use const_field_offset::FieldOffsets;
 use core::cell::Cell;
@@ -366,7 +367,13 @@ impl Item for TextInput {
                 self.ensure_focus_and_ime(window_adapter, self_rc);
 
                 match click_count % 3 {
-                    0 => self.set_cursor_position(clicked_offset, true, window_adapter, self_rc),
+                    0 => self.set_cursor_position(
+                        clicked_offset,
+                        true,
+                        TextChangeNotify::TriggerCallbacks,
+                        window_adapter,
+                        self_rc,
+                    ),
                     1 => self.select_word(window_adapter, self_rc),
                     2 => self.select_paragraph(window_adapter, self_rc),
                     _ => unreachable!(),
@@ -387,7 +394,14 @@ impl Item for TextInput {
             MouseEvent::Released { position, button: PointerEventButton::Middle, .. } => {
                 let clicked_offset = self.byte_offset_for_position(position, window_adapter) as i32;
                 self.as_ref().anchor_position_byte_offset.set(clicked_offset);
-                self.set_cursor_position(clicked_offset, true, window_adapter, self_rc);
+                self.set_cursor_position(
+                    clicked_offset,
+                    true,
+                    // We trigger the callbacks because paste_clipboard might not if there is no clipboard
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
                 self.paste_clipboard(window_adapter, self_rc, Clipboard::SelectionClipboard);
             }
             MouseEvent::Exit => {
@@ -404,8 +418,17 @@ impl Item for TextInput {
                 if pressed > 0 {
                     let clicked_offset =
                         self.byte_offset_for_position(position, window_adapter) as i32;
-
-                    self.set_cursor_position(clicked_offset, true, window_adapter, self_rc);
+                    self.set_cursor_position(
+                        clicked_offset,
+                        true,
+                        if (pressed - 1) % 3 == 0 {
+                            TextChangeNotify::TriggerCallbacks
+                        } else {
+                            TextChangeNotify::SkipCallbacks
+                        },
+                        window_adapter,
+                        self_rc,
+                    );
                     match (pressed - 1) % 3 {
                         0 => (),
                         1 => self.select_word(window_adapter, self_rc),
@@ -438,6 +461,7 @@ impl Item for TextInput {
                                 self,
                                 direction,
                                 event.modifiers.into(),
+                                TextChangeNotify::TriggerCallbacks,
                                 window_adapter,
                                 self_rc,
                             );
@@ -580,7 +604,13 @@ impl Item for TextInput {
                 self.as_ref().text.set(text.into());
                 let new_cursor_pos = (insert_pos + event.text.len()) as i32;
                 self.as_ref().anchor_position_byte_offset.set(new_cursor_pos);
-                self.set_cursor_position(new_cursor_pos, true, window_adapter, self_rc);
+                self.set_cursor_position(
+                    new_cursor_pos,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
 
                 // Keep the cursor visible when inserting text. Blinking should only occur when
                 // nothing is entered or the cursor isn't moved.
@@ -599,11 +629,29 @@ impl Item for TextInput {
                     // Set the selection so the call to insert erases it
                     self.anchor_position_byte_offset.set(cursor.saturating_add(r.start));
                     self.cursor_position_byte_offset.set(cursor.saturating_add(r.end));
+                    if event.text.is_empty() {
+                        self.delete_selection(
+                            window_adapter,
+                            self_rc,
+                            if event.cursor_position.is_none() {
+                                TextChangeNotify::TriggerCallbacks
+                            } else {
+                                // will be updated by the set_cursor_position later
+                                TextChangeNotify::SkipCallbacks
+                            },
+                        );
+                    }
                 }
                 self.insert(&event.text, window_adapter, self_rc);
                 if let Some(cursor) = event.cursor_position {
                     self.anchor_position_byte_offset.set(event.anchor_position.unwrap_or(cursor));
-                    self.set_cursor_position(cursor, true, window_adapter, self_rc);
+                    self.set_cursor_position(
+                        cursor,
+                        true,
+                        TextChangeNotify::TriggerCallbacks,
+                        window_adapter,
+                        self_rc,
+                    );
                 }
                 KeyEventResult::EventAccepted
             }
@@ -774,6 +822,10 @@ pub struct TextInputVisualRepresentation {
     pub selection_range: core::ops::Range<usize>,
     /// The position where to draw the cursor, as byte offset within the text.
     pub cursor_position: Option<usize>,
+    /// The color of the (unselected) text
+    pub text_color: Brush,
+    /// The color of the blinking cursor
+    pub cursor_color: Color,
     text_without_password: Option<String>,
     password_character: char,
 }
@@ -841,6 +893,7 @@ impl TextInput {
         self: Pin<&Self>,
         direction: TextCursorDirection,
         anchor_mode: AnchorMode,
+        trigger_callbacks: TextChangeNotify,
         window_adapter: &Rc<dyn WindowAdapter>,
         self_rc: &ItemRc,
     ) -> bool {
@@ -940,6 +993,7 @@ impl TextInput {
         self.set_cursor_position(
             new_cursor_pos as i32,
             reset_preferred_x_pos,
+            trigger_callbacks,
             window_adapter,
             self_rc,
         );
@@ -951,10 +1005,11 @@ impl TextInput {
         new_cursor_pos != last_cursor_pos
     }
 
-    fn set_cursor_position(
+    pub fn set_cursor_position(
         self: Pin<&Self>,
         new_position: i32,
         reset_preferred_x_pos: bool,
+        trigger_callbacks: TextChangeNotify,
         window_adapter: &Rc<dyn WindowAdapter>,
         self_rc: &ItemRc,
     ) {
@@ -967,8 +1022,10 @@ impl TextInput {
             if reset_preferred_x_pos {
                 self.preferred_x_pos.set(pos.x);
             }
-            Self::FIELD_OFFSETS.cursor_position_changed.apply_pin(self).call(&(pos,));
-            self.update_ime(window_adapter, self_rc);
+            if trigger_callbacks == TextChangeNotify::TriggerCallbacks {
+                Self::FIELD_OFFSETS.cursor_position_changed.apply_pin(self).call(&(pos,));
+                self.update_ime(window_adapter, self_rc);
+            }
         }
     }
 
@@ -990,7 +1047,13 @@ impl TextInput {
         self_rc: &ItemRc,
     ) {
         if !self.has_selection() {
-            self.move_cursor(step, AnchorMode::KeepAnchor, window_adapter, self_rc);
+            self.move_cursor(
+                step,
+                AnchorMode::KeepAnchor,
+                TextChangeNotify::SkipCallbacks,
+                window_adapter,
+                self_rc,
+            );
         }
         self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
     }
@@ -1023,7 +1086,7 @@ impl TextInput {
         self.anchor_position_byte_offset.set(anchor as i32);
 
         self.add_undo_item(UndoItem {
-            pos: anchor as usize,
+            pos: anchor,
             text: removed_text,
             cursor: real_cursor,
             anchor: real_anchor,
@@ -1031,7 +1094,13 @@ impl TextInput {
         });
 
         if trigger_callbacks == TextChangeNotify::TriggerCallbacks {
-            self.set_cursor_position(anchor as i32, true, window_adapter, self_rc);
+            self.set_cursor_position(
+                anchor as i32,
+                true,
+                trigger_callbacks,
+                window_adapter,
+                self_rc,
+            );
             Self::FIELD_OFFSETS.edited.apply_pin(self).call(&());
         } else {
             self.cursor_position_byte_offset.set(anchor as i32);
@@ -1056,9 +1125,16 @@ impl TextInput {
         let cursor_position = self.cursor_position(&text);
         let anchor_position = self.anchor_position(&text);
         let cursor_relative = self.cursor_rect_for_byte_offset(cursor_position, window_adapter);
+        let geometry = self_rc.geometry();
+        let origin = self_rc.map_to_window(geometry.origin).to_vector();
         let cursor_rect_origin =
-            crate::api::LogicalPosition::from_euclid(self_rc.map_to_window(cursor_relative.origin));
+            crate::api::LogicalPosition::from_euclid(cursor_relative.origin + origin);
         let cursor_rect_size = crate::api::LogicalSize::from_euclid(cursor_relative.size);
+        let anchor_point = crate::api::LogicalPosition::from_euclid(
+            self.cursor_rect_for_byte_offset(anchor_position, window_adapter).origin
+                + origin
+                + cursor_relative.size,
+        );
 
         InputMethodProperties {
             text,
@@ -1068,6 +1144,7 @@ impl TextInput {
             preedit_offset: cursor_position,
             cursor_rect_origin,
             cursor_rect_size,
+            anchor_point,
             input_type: self.input_type(),
         }
     }
@@ -1118,7 +1195,7 @@ impl TextInput {
         }
 
         self.add_undo_item(UndoItem {
-            pos: cursor_pos as usize,
+            pos: cursor_pos,
             text: inserted_text,
             cursor: real_cursor,
             anchor: real_anchor,
@@ -1128,7 +1205,13 @@ impl TextInput {
         let cursor_pos = cursor_pos + text_to_insert.len();
         self.text.set(text.into());
         self.anchor_position_byte_offset.set(cursor_pos as i32);
-        self.set_cursor_position(cursor_pos as i32, true, window_adapter, self_rc);
+        self.set_cursor_position(
+            cursor_pos as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
         Self::FIELD_OFFSETS.edited.apply_pin(self).call(&());
     }
 
@@ -1149,19 +1232,27 @@ impl TextInput {
         let safe_end = safe_byte_offset(end, &text);
 
         self.as_ref().anchor_position_byte_offset.set(safe_start as i32);
-        self.set_cursor_position(safe_end as i32, true, window_adapter, self_rc);
+        self.set_cursor_position(
+            safe_end as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
     }
 
     pub fn select_all(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
         self.move_cursor(
             TextCursorDirection::StartOfText,
             AnchorMode::MoveAnchor,
+            TextChangeNotify::SkipCallbacks,
             window_adapter,
             self_rc,
         );
         self.move_cursor(
             TextCursorDirection::EndOfText,
             AnchorMode::KeepAnchor,
+            TextChangeNotify::TriggerCallbacks,
             window_adapter,
             self_rc,
         );
@@ -1171,7 +1262,7 @@ impl TextInput {
         self.as_ref().anchor_position_byte_offset.set(self.as_ref().cursor_position_byte_offset());
     }
 
-    fn select_word(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
+    pub fn select_word(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
         let text = self.text();
         let anchor = self.anchor_position(&text);
         let cursor = self.cursor_position(&text);
@@ -1181,7 +1272,13 @@ impl TextInput {
             (next_word_boundary(&text, anchor), prev_word_boundary(&text, cursor))
         };
         self.as_ref().anchor_position_byte_offset.set(new_a as i32);
-        self.set_cursor_position(new_c as i32, true, window_adapter, self_rc);
+        self.set_cursor_position(
+            new_c as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
     }
 
     fn select_paragraph(
@@ -1198,7 +1295,13 @@ impl TextInput {
             (next_paragraph_boundary(&text, anchor), prev_paragraph_boundary(&text, cursor))
         };
         self.as_ref().anchor_position_byte_offset.set(new_a as i32);
-        self.set_cursor_position(new_c as i32, true, window_adapter, self_rc);
+        self.set_cursor_position(
+            new_c as i32,
+            true,
+            TextChangeNotify::TriggerCallbacks,
+            window_adapter,
+            self_rc,
+        );
     }
 
     pub fn copy(self: Pin<&Self>, w: &Rc<dyn WindowAdapter>, _: &ItemRc) {
@@ -1304,9 +1407,26 @@ impl TextInput {
             let selection_range = selection_anchor_pos..selection_cursor_pos;
             let cursor_position = self.cursor_position(&text);
             let cursor_visible = self.cursor_visible() && self.enabled() && !self.read_only();
-            let cursor_position = if cursor_visible { Some(cursor_position) } else { None };
+            let cursor_position = if cursor_visible && selection_range.is_empty() {
+                Some(cursor_position)
+            } else {
+                None
+            };
             (preedit_range, selection_range, cursor_position)
         };
+
+        let text_color = self.color();
+
+        let cursor_color =
+            if cfg!(any(target_os = "android", target_os = "macos", target_os = "ios")) {
+                if cursor_position.is_some() {
+                    self.selection_background_color().with_alpha(1.)
+                } else {
+                    Default::default()
+                }
+            } else {
+                text_color.color()
+            };
 
         let mut repr = TextInputVisualRepresentation {
             text,
@@ -1315,6 +1435,8 @@ impl TextInput {
             cursor_position,
             text_without_password: None,
             password_character: Default::default(),
+            text_color,
+            cursor_color,
         };
         repr.apply_password_character_substitution(self, password_character_fn);
         repr
@@ -1333,7 +1455,7 @@ impl TextInput {
         )
     }
 
-    fn byte_offset_for_position(
+    pub fn byte_offset_for_position(
         self: Pin<&Self>,
         pos: LogicalPoint,
         window_adapter: &Rc<dyn WindowAdapter>,
@@ -1416,7 +1538,13 @@ impl TextInput {
                 self.text.set(text.into());
 
                 self.anchor_position_byte_offset.set(last.anchor as i32);
-                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
             }
             UndoItemKind::TextRemove => {
                 let mut text: String = self.text().into();
@@ -1424,7 +1552,13 @@ impl TextInput {
                 self.text.set(text.into());
 
                 self.anchor_position_byte_offset.set(last.anchor as i32);
-                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
             }
         }
         self.undo_items.set(items);
@@ -1447,7 +1581,13 @@ impl TextInput {
                 self.text.set(text.into());
 
                 self.anchor_position_byte_offset.set(last.anchor as i32);
-                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
             }
             UndoItemKind::TextRemove => {
                 let text: String = self.text().into();
@@ -1456,7 +1596,13 @@ impl TextInput {
                 self.text.set(text.into());
 
                 self.anchor_position_byte_offset.set(last.anchor as i32);
-                self.set_cursor_position(last.cursor as i32, true, window_adapter, self_rc);
+                self.set_cursor_position(
+                    last.cursor as i32,
+                    true,
+                    TextChangeNotify::TriggerCallbacks,
+                    window_adapter,
+                    self_rc,
+                );
             }
         }
 

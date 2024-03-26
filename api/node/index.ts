@@ -61,6 +61,15 @@ export interface Window {
     /** Gets or sets the physical size of the window on the screen, */
     physicalSize: Size;
 
+    /** Gets or sets the window's fullscreen state **/
+    fullscreen: boolean;
+
+    /** Gets or sets the window's maximized state **/
+    maximized: boolean;
+
+    /** Gets or sets teh window's minimized state **/
+    minimized: boolean;
+
     /**
      * Returns the visibility state of the window. This function can return false even if you previously called show()
      * on it, for example if the user minimized the window.
@@ -78,9 +87,6 @@ export interface Window {
 
     /** Issues a request to the windowing system to re-render the contents of the window. */
     requestRedraw(): void;
-
-    /** Set or unset the window to display fullscreen. */
-    set fullscreen(enable: boolean);
 }
 
 /**
@@ -109,6 +115,31 @@ export interface ImageData {
      *  Returns the height of the image in pixels.
      */
     get height(): number;
+}
+
+class ModelIterator<T> implements Iterator<T> {
+    private row: number;
+    private model: Model<T>;
+
+    constructor(model: Model<T>) {
+        this.model = model;
+        this.row = 0;
+    }
+
+    public next(): IteratorResult<T> {
+        if (this.row < this.model.rowCount()) {
+            let row = this.row;
+            this.row++;
+            return {
+                done: false,
+                value: this.model.rowData(row)
+            }
+        }
+        return {
+            done: true,
+            value: undefined
+        }
+    }
 }
 
 /**
@@ -170,14 +201,14 @@ export interface ImageData {
  *}
  * ```
  */
-export abstract class Model<T> {
+export abstract class Model<T> implements Iterable<T> {
     /**
      * @hidden
      */
-    notify: NullPeer;
+    modelNotify: napi.ExternalObject<napi.SharedModelNotify>;
 
     constructor() {
-        this.notify = new NullPeer();
+        this.modelNotify = napi.jsModelNotifyNew(this);
     }
 
     // /**
@@ -215,12 +246,16 @@ export abstract class Model<T> {
         );
     }
 
+    [Symbol.iterator](): Iterator<T> {
+        return new ModelIterator(this);
+    }
+
     /**
      * Notifies the view that the data of the current row is changed.
      * @param row index of the changed row.
      */
     protected notifyRowDataChanged(row: number): void {
-        this.notify.rowDataChanged(row);
+        napi.jsModelNotifyRowDataChanged(this.modelNotify, row);
     }
 
     /**
@@ -229,7 +264,7 @@ export abstract class Model<T> {
      * @param count the number of added items.
      */
     protected notifyRowAdded(row: number, count: number): void {
-        this.notify.rowAdded(row, count);
+        napi.jsModelNotifyRowAdded(this.modelNotify, row, count);
     }
 
     /**
@@ -238,25 +273,15 @@ export abstract class Model<T> {
      * @param count the number of removed items.
      */
     protected notifyRowRemoved(row: number, count: number): void {
-        this.notify.rowRemoved(row, count);
+        napi.jsModelNotifyRowRemoved(this.modelNotify, row, count);
     }
 
     /**
      * Notifies the view that the complete data must be reload.
      */
     protected notifyReset(): void {
-        this.notify.reset();
+        napi.jsModelNotifyReset(this.modelNotify);
     }
-}
-
-/**
- * @hidden
- */
-class NullPeer {
-    rowDataChanged(row: number): void {}
-    rowAdded(row: number, count: number): void {}
-    rowRemoved(row: number, count: number): void {}
-    reset(): void {}
 }
 
 /**
@@ -321,6 +346,19 @@ export class ArrayModel<T> extends Model<T> {
         let size = this.#array.length;
         Array.prototype.push.apply(this.#array, values);
         this.notifyRowAdded(size, arguments.length);
+    }
+
+    /**
+     * Removes the last element from the array and returns it.
+     * 
+     * @returns The removed element or undefined if the array is empty.
+     */
+    pop(): T | undefined {
+        let last = this.#array.pop();
+        if (last !== undefined) {
+            this.notifyRowRemoved(this.#array.length, 1);
+        }
+        return last;
     }
 
     // FIXME: should this be named splice and have the splice api?
@@ -487,7 +525,6 @@ export class MapModel<T, U> extends Model<U> {
         super();
         this.sourceModel = sourceModel;
         this.#mapFunction = mapFunction;
-        this.notify = this.sourceModel.notify;
     }
 
     /**

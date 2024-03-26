@@ -15,6 +15,7 @@ use crate::lookup::{LookupCtx, LookupObject, LookupResult};
 use crate::object_tree::*;
 use crate::parser::{identifier_text, syntax_nodes, NodeOrToken, SyntaxKind, SyntaxNode};
 use crate::typeregister::TypeRegister;
+use core::num::IntErrorKind;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -88,7 +89,10 @@ pub fn resolve_expressions(
             visit_element_expressions(elem, |expr, property_name, property_type| {
                 if is_repeated {
                     // The first expression is always the model and it needs to be resolved with the parent scope
-                    debug_assert!(elem.borrow().repeated.as_ref().is_none()); // should be none because it is taken by the visit_element_expressions function
+                    debug_assert!(matches!(
+                        elem.borrow().repeated.as_ref().unwrap().model,
+                        Expression::Invalid
+                    )); // should be Invalid because it is taken by the visit_element_expressions function
                     resolve_expression(
                         expr,
                         property_name,
@@ -336,6 +340,7 @@ impl Expression {
             return Expression::ImageReference {
                 resource_ref: ImageReference::None,
                 source_location: Some(node.to_source_location()),
+                nine_slice: None,
             };
         }
 
@@ -360,9 +365,42 @@ impl Expression {
             }
         };
 
+        let nine_slice = node
+            .children_with_tokens()
+            .filter_map(|n| n.into_token())
+            .filter(|t| t.kind() == SyntaxKind::NumberLiteral)
+            .map(|arg| {
+                arg.text().parse().unwrap_or_else(|err: std::num::ParseIntError| {
+                    match err.kind() {
+                        IntErrorKind::PosOverflow | IntErrorKind::NegOverflow => {
+                            ctx.diag.push_error("Number too big".into(), &arg)
+                        }
+                        IntErrorKind::InvalidDigit => ctx.diag.push_error(
+                            "Border widths of a nine-slice can't have units".into(),
+                            &arg,
+                        ),
+                        _ => ctx.diag.push_error("Cannot parse number literal".into(), &arg),
+                    };
+                    0u16
+                })
+            })
+            .collect::<Vec<u16>>();
+
+        let nine_slice = match nine_slice.as_slice() {
+            [x] => Some([*x, *x, *x, *x]),
+            [x, y] => Some([*x, *y, *x, *y]),
+            [x, y, z, w] => Some([*x, *y, *z, *w]),
+            [] => None,
+            _ => {
+                assert!(ctx.diag.has_error());
+                None
+            }
+        };
+
         Expression::ImageReference {
             resource_ref: ImageReference::AbsolutePath(absolute_source_path),
             source_location: Some(node.to_source_location()),
+            nine_slice,
         }
     }
 
@@ -858,6 +896,8 @@ impl Expression {
             (Self::from_expression_node(n.clone(), ctx), Some(NodeOrToken::from((*n).clone())))
         });
 
+        let mut adjust_arg_count = 0;
+
         let function = match function {
             Expression::BuiltinMacroReference(mac, n) => {
                 arguments.extend(sub_expr);
@@ -865,6 +905,7 @@ impl Expression {
             }
             Expression::MemberFunction { base, base_node, member } => {
                 arguments.push((*base, base_node));
+                adjust_arg_count = 1;
                 member
             }
             _ => Box::new(function),
@@ -877,8 +918,8 @@ impl Expression {
                     ctx.diag.push_error(
                         format!(
                             "The callback or function expects {} arguments, but {} are provided",
-                            args.len(),
-                            arguments.len()
+                            args.len() - adjust_arg_count,
+                            arguments.len() - adjust_arg_count,
                         ),
                         &node,
                     );

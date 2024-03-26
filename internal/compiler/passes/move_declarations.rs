@@ -99,19 +99,14 @@ fn do_move_declarations(component: &Rc<Component>) {
 
     recurse_elem(&component.root_element, &(), &mut |elem, _| move_properties(elem));
 
-    component.optimized_elements.borrow().iter().for_each(|e| move_properties(e));
+    component.optimized_elements.borrow().iter().for_each(move_properties);
 
     {
         let mut r = component.root_element.borrow_mut();
         r.property_declarations = decl.property_declarations;
-        r.bindings.extend(new_root_bindings.into_iter());
-        r.property_analysis.borrow_mut().extend(new_root_property_analysis.into_iter());
+        r.bindings.extend(new_root_bindings);
+        r.property_analysis.borrow_mut().extend(new_root_property_analysis);
     }
-
-    // By now, the optimized item should be unused
-    #[cfg(debug_assertions)]
-    assert_optimized_item_unused(component.optimized_elements.borrow().as_slice());
-    core::mem::take(&mut *component.optimized_elements.borrow_mut());
 }
 
 fn fixup_reference(nr: &mut NamedReference) {
@@ -168,17 +163,5 @@ fn simplify_optimized_items(items: &[ElementRc]) {
                 unreachable!("Only builtin items should be optimized")
             }
         })
-    }
-}
-
-/// Check there are no longer references to optimized items
-#[cfg(debug_assertions)]
-fn assert_optimized_item_unused(items: &[ElementRc]) {
-    for e in items {
-        recurse_elem(e, &(), &mut |e, _| {
-            assert_eq!(Rc::strong_count(e), 1);
-            // no longer working because we have weak count in the named reference holder
-            //assert_eq!(Rc::weak_count(e), 0);
-        });
     }
 }

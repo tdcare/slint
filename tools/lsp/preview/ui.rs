@@ -8,7 +8,7 @@ use slint_interpreter::{DiagnosticLevel, PlatformError};
 
 slint::include_modules!();
 
-pub fn create_ui(style: String) -> Result<PreviewUi, PlatformError> {
+pub fn create_ui(style: String, experimental: bool) -> Result<PreviewUi, PlatformError> {
     let ui = PreviewUi::new()?;
 
     // styles:
@@ -32,11 +32,7 @@ pub fn create_ui(style: String) -> Result<PreviewUi, PlatformError> {
 
     ui.set_known_styles(style_model.into());
     ui.set_current_style(style.clone().into());
-    ui.set_experimental(
-        std::env::var_os("SLINT_ENABLE_EXPERIMENTAL_FEATURES")
-            .map(|s| !s.is_empty() && s != "0")
-            .unwrap_or(false),
-    );
+    ui.set_experimental(experimental);
 
     ui.on_style_changed(super::change_style);
     ui.on_show_document(|file, line, column| {
@@ -45,10 +41,13 @@ pub fn create_ui(style: String) -> Result<PreviewUi, PlatformError> {
         super::ask_editor_to_show_document(&file, Range::new(pos, pos))
     });
     ui.on_unselect(super::element_selection::unselect_element);
+    ui.on_reselect(super::element_selection::reselect_element);
     ui.on_select_at(super::element_selection::select_element_at);
     ui.on_select_behind(super::element_selection::select_element_behind);
     ui.on_can_drop(super::can_drop_component);
     ui.on_drop(super::drop_component);
+    ui.on_selected_element_update_geometry(super::change_geometry_of_selected_element);
+    ui.on_selected_element_delete(super::delete_selected_element);
 
     Ok(ui)
 }
@@ -78,17 +77,12 @@ pub fn ui_set_known_components(
     ui: &PreviewUi,
     known_components: &[crate::common::ComponentInformation],
 ) {
-    let mut map: HashMap<String, Vec<ComponentListSubItem>> = Default::default();
+    let mut map: HashMap<String, Vec<slint::SharedString>> = Default::default();
     for ci in known_components {
         if ci.is_global {
             continue;
         }
-        map.entry(ci.category.clone()).or_default().push(ComponentListSubItem {
-            name: ci.name.clone().into(),
-            is_builtin: ci.is_builtin,
-            is_std_widget: ci.is_std_widget,
-            is_exported: ci.is_exported,
-        });
+        map.entry(ci.category.clone()).or_default().push(ci.name.clone().into());
     }
     let mut result = map
         .into_iter()

@@ -29,7 +29,11 @@ pub fn collect_test_cases() -> std::io::Result<Vec<test_driver_lib::TestCase>> {
         }
         if let Some(ext) = absolute_path.extension() {
             if ext == "60" || ext == "slint" {
-                results.push(test_driver_lib::TestCase { absolute_path, relative_path });
+                results.push(test_driver_lib::TestCase {
+                    absolute_path,
+                    relative_path,
+                    requested_style: None,
+                });
             }
         }
     }
@@ -96,6 +100,7 @@ fn main() -> std::io::Result<()> {
                     panic!("Cannot parse {needle} for {}", testcase.relative_path.display())
                 })
         });
+        let skip_clipping = source.contains("SKIP_CLIPPING");
 
         let mut output = BufWriter::new(std::fs::File::create(
             Path::new(&std::env::var_os("OUT_DIR").unwrap()).join(format!("{}.rs", module_name)),
@@ -113,7 +118,7 @@ fn main() -> std::io::Result<()> {
     {scale_factor}
     window.set_size(slint::PhysicalSize::new(64, 64));
     let screenshot = {reference_path};
-    let options = testing::TestCaseOptions {{ rotation_threshold: {rotation_threshold}f32 }};
+    let options = testing::TestCaseOptions {{ rotation_threshold: {rotation_threshold}f32, skip_clipping: {skip_clipping} }};
 
     let instance = TestCase::new().unwrap();
     instance.show().unwrap();
@@ -153,7 +158,7 @@ fn generate_source(
     compiler_config.embed_resources = EmbedResourcesKind::EmbedTextures;
     compiler_config.enable_component_containers = true;
     compiler_config.style = Some("fluent".to_string());
-    let (root_component, diag) =
+    let (root_component, diag, _) =
         spin_on::spin_on(compile_syntax_node(syntax_node, diag, compiler_config));
 
     if diag.has_error() {

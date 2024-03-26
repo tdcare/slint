@@ -3,11 +3,80 @@
 # Changelog
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [1.6.0] - Unreleased
+
+## Slint Language
+
+ - Palette: Added `color-scheme` in-out property for accessing the
+   style's color scheme.
+
+## [1.5.1] - 2024-03-20
+
+ - Fix clipping with a border-radius. (#4854)
+ - Fix panic in the preview when showing a PopupWindow whose parent is optimized out. (#4884)
+ - Fix compiler panic when the `focus` function is called with arguments. (#4883)
+ - Fix panic when loading unsupported images.
+ - LSP: Fixed formatting of states, transitions, and functions.
+ - LSP preview: Avoid double scroll bar in the preview when showing errors.
+ - LSP preview: Don't handle delete shortcut when showing errors.
+ - LSP preview: Improved appearence of the element selection in the design mode.
+ - LSP preview: Never set the with or height to NaN. (#4848)
+
+## [1.5.0] - 2024-03-14
+
+## General
+
+ - Added support for Android via the `backend-android-activity-05` feature.
+ - Added API for maximized/minimized window.
+ - TextInput: Added undo/redo support.
+ - ListView: Fixed redraw when model changes. (#4538)
+ - Disabled Qt backend by default on Windows and Mac even when Qt is found.
+ - Qt: Explicitly hide PopupWindow instead of relying on destructor.
 
 ### Slint Language
 
-- Fixed edited callback of SpinBox for cupertino and material style
+ - Rectangle: Added `border-{top,bottom}-{left,right}-radius`
+ - Image: Added `ImageFit.preserve`
+ - Image: Added `horizontal-` and `vertical-alignment`
+ - Image: Added support for 9 slice scaling
+ - Image: Added `horizontal-` and `vertical-tiling`
+ - Flickable: Added `flicked` callback
+ - Slint: Expose `.red`, `.green`, `.blue`, and `.alpha` properties on `color`
+
+### Widgets
+
+ - Fixed edited callback of SpinBox for Cupertino and Material style.
+ - Cupertino TabWidget: Tweaked visual appearance
+
+### Rust
+
+ - Fixed ReverseModel and FilterModel model not always forwarding notification correctly.
+ - Re-export more type in the slint-interpreter crate.
+ - Added `SharedVector::pop`.
+ - Use const generics for construction of SharedVector from array.
+
+### C++
+
+ - Fixed binary package that used to require Qt.
+ - Added `Window::set_fullscreen`.
+ - Fixed error in generated code when struct or enum has an underscore. (#4659)
+ - Added `slint::interpreter::ComponentCompiler::set_translation_domain`.
+ - Added `NAMESPACE` modifier in the `slint_target_sources` cmake macro to generate in a namespace.
+
+### JavaScript
+
+ - Fixed MapModel rowData() calling map function even if the source model returned undefined.
+ - Better error reporting when the backend cannot be created.
+ - Reading model properties now always returns a `Model<T>`, regardless of whether an array was previously assigned.
+ - `Model<T>` now implements `Iterable<T>`.
+
+### LSP
+
+ - Added support for code formatting.
+ - Sort properties first in auto-completion.
+ - Fixed completion in two way bindings
+ - Preview: Design mode with drag and drop
+ - Fixed wasm embedded preview on Windows
 
 ## [1.4.1] - 2024-02-02
 
@@ -1191,3 +1260,5 @@ as well as the [Rust migration guide for the `sixtyfps` crate](api/rs/slint/migr
 [1.3.2]: https://github.com/slint-ui/slint/releases/tag/v1.3.2
 [1.4.0]: https://github.com/slint-ui/slint/releases/tag/v1.4.0
 [1.4.1]: https://github.com/slint-ui/slint/releases/tag/v1.4.1
+[1.5.0]: https://github.com/slint-ui/slint/releases/tag/v1.5.0
+[1.5.1]: https://github.com/slint-ui/slint/releases/tag/v1.5.1

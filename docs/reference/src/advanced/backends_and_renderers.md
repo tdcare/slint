@@ -20,11 +20,11 @@ The backend is selected as follows:
 The following table provides an overview over the built-in backends. For more information about the backend's
 capabilities and their configuration options, see the respective sub-pages.
 
-| Backend Name | Description                                                                                             | Built-in by Default   |
-|--------------|---------------------------------------------------------------------------------------------------------|-----------------------|
-| qt           | The Qt library is used for windowing system integration, rendering, and native widget styling.          | Yes (if Qt installed) |
-| winit        | The [winit](https://docs.rs/winit/latest/winit/) library is used to interact with the windowing system. | Yes                   |
-| linuxkms     | Linux's KMS/DRI infrastructure is used for rendering. No windowing system or compositor is required.    | No                    |
+| Backend Name | Description                                                                                             | Built-in by Default         |
+|--------------|---------------------------------------------------------------------------------------------------------|-----------------------------|
+| qt           | The Qt library is used for windowing system integration, rendering, and native widget styling.          | On Linux if Qt is installed |
+| winit        | The [winit](https://docs.rs/winit/latest/winit/) library is used to interact with the windowing system. | Yes                         |
+| linuxkms     | Linux's KMS/DRI infrastructure is used for rendering. No windowing system or compositor is required.    | No                          |
 
 A backend is also responsible for selecting a renderer. See the [Renderers](#renderers) section
 for an overview. Override the choice of renderer by adding the name to the `SLINT_BACKEND` environment variable, separated by a dash.
@@ -120,3 +120,19 @@ issues we're aware of and how to resolve them.
 
   For example, if you're building against a Yocto SDK, then you can find these flags in the
   `OECORE_TUNE_CCARGS` environment variable.
+
+* Compilation error when linking on Windows
+
+  You may see compiler errors that contain this message:
+
+  ```
+   error: linking with `link.exe` failed: exit code: 1120
+   |
+   ...
+  = note: skunicode.lib(icu.SkLoadICU.obj) : error LNK2019: unresolved external symbol __std_init_once_begin_initialize_clr referenced in function "bool __cdecl SkLoadICU(void)" (?SkLoadICU@@YA_NXZ)
+   ...
+    skia.lib(skia.SkNWayCanvas.obj) : error LNK2001: unresolved external symbol __std_find_trivial_8
+  ```
+
+  The Skia build requires the use of Microsoft Visual Studio 2022 as compiler. Make sure to have the latest patches
+  to the compiler installed.

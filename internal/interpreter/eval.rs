@@ -3,10 +3,9 @@
 
 use crate::api::{SetPropertyError, Struct, Value};
 use crate::dynamic_item_tree::InstanceRef;
-use core::convert::TryInto;
 use core::pin::Pin;
 use corelib::graphics::{GradientStop, LinearGradientBrush, PathElement, RadialGradientBrush};
-use corelib::items::{ItemRef, PropertyAnimation};
+use corelib::items::{ColorScheme, ItemRef, PropertyAnimation};
 use corelib::model::{Model, ModelRc};
 use corelib::rtti::AnimatedBindingKind;
 use corelib::{Brush, Color, PathData, SharedString, SharedVector};
@@ -271,8 +270,8 @@ pub fn eval_expression(expression: &Expression, local_context: &mut EvalLocalCon
                 (sub, op) => panic!("unsupported {} {:?}", op, sub),
             }
         }
-        Expression::ImageReference{ resource_ref, .. } => {
-            Value::Image(match resource_ref {
+        Expression::ImageReference{ resource_ref, nine_slice, .. } => {
+            let mut image = match resource_ref {
                 i_slint_compiler::expression_tree::ImageReference::None => {
                     Ok(Default::default())
                 }
@@ -309,7 +308,11 @@ pub fn eval_expression(expression: &Expression, local_context: &mut EvalLocalCon
             }.unwrap_or_else(|_| {
                 eprintln!("Could not load image {:?}",resource_ref );
                 Default::default()
-            }))
+            });
+            if let Some(n) = nine_slice {
+                image.set_nine_slice_edges(n[0], n[1], n[2], n[3]);
+            }
+            Value::Image(image)
         }
         Expression::Condition { condition, true_expr, false_expr } => {
             match eval_expression(condition, local_context).try_into()
@@ -736,6 +739,24 @@ fn call_builtin_function(
                 panic!("Argument not a string");
             }
         }
+        BuiltinFunction::ColorRgbaStruct => {
+            if arguments.len() != 1 {
+                panic!("internal error: incorrect argument count to ColorRGBAComponents")
+            }
+            if let Value::Brush(brush) = eval_expression(&arguments[0], local_context) {
+                let color = brush.color();
+                let values = IntoIterator::into_iter([
+                    ("red".to_string(), Value::Number(color.red().into())),
+                    ("green".to_string(), Value::Number(color.green().into())),
+                    ("blue".to_string(), Value::Number(color.blue().into())),
+                    ("alpha".to_string(), Value::Number(color.alpha().into())),
+                ])
+                .collect();
+                Value::Struct(values)
+            } else {
+                panic!("First argument not a color");
+            }
+        }
         BuiltinFunction::ColorBrighter => {
             if arguments.len() != 2 {
                 panic!("internal error: incorrect argument count to ColorBrighter")
@@ -863,13 +884,12 @@ fn call_builtin_function(
             let a: u8 = (255. * a).max(0.).min(255.) as u8;
             Value::Brush(Brush::SolidColor(Color::from_argb_u8(a, r, g, b)))
         }
-        BuiltinFunction::DarkColorScheme => match local_context.component_instance {
-            ComponentInstance::InstanceRef(component) => Value::Bool(
-                component
-                    .window_adapter()
-                    .internal(corelib::InternalToken)
-                    .map_or(false, |x| x.dark_color_scheme()),
-            ),
+        BuiltinFunction::ColorScheme => match local_context.component_instance {
+            ComponentInstance::InstanceRef(component) => component
+                .window_adapter()
+                .internal(corelib::InternalToken)
+                .map_or(ColorScheme::Unknown, |x| x.color_scheme())
+                .into(),
             ComponentInstance::GlobalComponent(_) => {
                 panic!("Cannot get the window from a global component")
             }

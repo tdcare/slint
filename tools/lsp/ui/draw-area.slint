@@ -1,11 +1,18 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-// cSpell: ignore Heade
+// cSpell: ignore resizer
 
 import { Button, ComboBox, HorizontalBox, ListView, ScrollView, Palette, VerticalBox } from "std-widgets.slint";
 import { Diagnostics, DiagnosticsOverlay } from "diagnostics-overlay.slint";
 import { Resizer } from "resizer.slint";
+
+export enum LayoutKind {
+    None,
+    Horizontal,
+    Vertical,
+    Grid,
+}
 
 enum SelectionKind {
     none,
@@ -13,88 +20,202 @@ enum SelectionKind {
     select_up_or_down,
 }
 
-export struct Selection {
+struct SelectionRectangle {
     x: length,
     y: length,
     width: length,
     height: length,
-    border-color: color,
+}
+
+export struct Selection {
+    geometry: SelectionRectangle,
+    layout-data: LayoutKind,
+    is-primary: bool,
+    is-moveable: bool,
+    is-resizable: bool,
+}
+
+component SelectionFrame {
+    in property <Selection> selection;
+    in property <bool> interactive: true;
+
+    function pick-selection-color(layout-kind: LayoutKind, is-primary: bool) -> color {
+        if layout-kind == LayoutKind.None {
+            if is-primary {
+                return #2379f4ff;
+            } else {
+                return #2379f480;  
+            }
+        } else {
+            if is-primary {
+                return #ff0000ff;
+            } else {
+                return #ff000080;
+            }
+        }
+    }
+
+    private property <color> selection-color: pick-selection-color(root.selection.layout-data, root.selection.is-primary);
+
+    x: root.selection.geometry.x;
+    y: root.selection.geometry.y;
+    width: root.selection.geometry.width;
+    height: root.selection.geometry.height;
+
+    callback update-geometry(/* x */ length, /* y */ length, /* width */ length, /* height */ length);
+    callback select-behind(/* x */ length, /* y */ length, /* enter component? */ bool, /* same file? */ bool);
+    callback selected-element-delete();
+
+    if !root.interactive || !selection.is-primary: Rectangle {
+        x: 0;
+        y: 0;
+        border-color: root.selection-color;
+        border-width: 1px;
+    }
+
+    if root.interactive && selection.is-primary: Resizer {
+        double-clicked(x, y, modifiers) => {
+            root.select-behind(self.absolute-position.x + x, self.absolute-position.y + y, modifiers.control, modifiers.shift);
+        }
+
+        is-moveable: root.selection.is-moveable;
+        is-resizable: root.selection.is-resizable;
+
+        x-position: root.x;
+        y-position: root.y;
+
+        color: root.selection-color;
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+
+        update-geometry(x, y, w, h, done) => {
+            root.x = x;
+            root.y = y;
+            root.width = w;
+            root.height = h;
+            if done {
+                root.update-geometry(x, y, w, h);
+            }
+        }
+
+        inner := Rectangle {
+            border-color: root.selection-color;
+            border-width: 1px;
+            background: parent.resizing || parent.moving ? root.selection-color.with-alpha(0.5) : root.selection-color.with-alpha(0.0);
+        }
+    }
+
+    // Size label:
+    if selection.is-resizable && root.selection.is-primary && interactive: Rectangle {
+        x: (root.width - label.width) * 0.5;
+        y: root.height + 3px;
+        width: label.width;
+        height: label.height;
+
+        label := Rectangle {
+            background: root.selection-color;
+            width: label-text.width * 1.2;
+            height: label-text.height * 1.2;
+            label-text := Text {
+                color: Colors.white;
+                text: Math.round(root.width/1px) + "x" + Math.round(root.height/1px);
+            }
+        }
+    }
+}
+
+export enum DrawAreaMode {
+    uninitialized,
+    viewing,
+    designing,
+    error,
 }
 
 export component DrawArea {
     in property <[Diagnostics]> diagnostics;
     in property <[Selection]> selections;
-    in property <bool> experimental: false;
     in property <component-factory> preview-area;
     in property <bool> design-mode;
 
-    out property <bool> preview-visible: i-preview-area-container.has-component && !diagnostics.diagnostics-open;
+    out property <bool> preview-visible: preview-area-container.has-component && !diagnostics.diagnostics-open;
+    out property <DrawAreaMode> mode: uninitialized;
 
-    out property <length> preview-area-position-x: i-preview-area-container.absolute-position.x;
-    out property <length> preview-area-position-y: i-preview-area-container.absolute-position.y;
-    out property <length> preview-area-width: preview-visible ? i-preview-area-container.width : 0px;
-    out property <length> preview-area-height: preview-visible ? i-preview-area-container.height : 0px;
+    out property <length> preview-area-position-x: preview-area-container.absolute-position.x;
+    out property <length> preview-area-position-y: preview-area-container.absolute-position.y;
+    out property <length> preview-area-width: preview-visible ? preview-area-container.width : 0px;
+    out property <length> preview-area-height: preview-visible ? preview-area-container.height : 0px;
 
     callback select-at(/* x */ length, /* y */ length, /* enter_component? */ bool);
     callback select-behind(/* x */ length, /* y */ length, /* enter_component? */ bool, /* reverse */ bool);
     callback show-document(/* url */ string, /* line */ int, /* column */ int);
+    callback reselect();
+    // Reselect element e.g. after changing the window size (which may move the element)
     callback unselect();
+    callback selected-element-update-geometry(/* x */ length, /* y */ length, /* width */ length, /* height */ length);
+    callback selected-element-delete();
 
-    preferred-height: max(i-preview-area-container.preferred-height, i-preview-area-container.min-height) + 2 * i-scroll-view.border;
-    preferred-width: max(i-preview-area-container.preferred-width, i-preview-area-container.min-width) + 2 * i-scroll-view.border;
+    preferred-height: max(preview-area-container.preferred-height, preview-area-container.min-height) + 2 * scroll-view.border;
+    preferred-width: max(preview-area-container.preferred-width, preview-area-container.min-width) + 2 * scroll-view.border;
 
-    i-scroll-view := ScrollView {
+    scroll-view := ScrollView {
         out property <length> border: 60px;
 
-        viewport-width: i-drawing-rect.width;
-        viewport-height: i-drawing-rect.height;
+        viewport-width: drawing-rect.width;
+        viewport-height: drawing-rect.height;
 
-        i-drawing-rect := Rectangle {
-            background: root.experimental ? Palette.alternate-background.mix(Colors.red, 0.9) : Palette.alternate-background;
+        drawing-rect := Rectangle {
+            background: Palette.alternate-background;
 
-            width: max(i-scroll-view.visible-width, i-resizer.width + i-scroll-view.border);
-            height: max(i-scroll-view.visible-height, i-resizer.height + i-scroll-view.border);
+            width: max(scroll-view.visible-width, main-resizer.width + scroll-view.border);
+            height: max(scroll-view.visible-height, main-resizer.height + scroll-view.border);
 
             unselect-area := TouchArea {
-                clicked => { root.unselect(); }
+                clicked => {
+                    root.unselect();
+                }
                 mouse-cursor: crosshair;
-                enabled <=> root.design-mode;
+                enabled: root.mode == DrawAreaMode.designing;
             }
 
-            i-content-border := Rectangle {
-                x: i-resizer.x + (i-resizer.width - self.width) / 2;
-                y: i-resizer.y + (i-resizer.height - self.height) / 2;
-                width: i-resizer.width + 2 * self.border-width;
-                height: i-resizer.height + 2 * self.border-width;
+            content-border := Rectangle {
+                x: main-resizer.x + (main-resizer.width - self.width) / 2;
+                y: main-resizer.y + (main-resizer.height - self.height) / 2;
+                width: main-resizer.width + 2 * self.border-width;
+                height: main-resizer.height + 2 * self.border-width;
                 border-width: 1px;
                 border-color: Palette.border;
             }
 
-            i-resizer := Resizer {
-                is-resizable <=> i-preview-area-container.is-resizable;
+            main-resizer := Resizer {
+                is-moveable: false;
+                is-resizable <=> preview-area-container.is-resizable;
 
-                resize(w, h) => {
-                    i-preview-area-container.width = clamp(w, i-preview-area-container.min-width, i-preview-area-container.max-width);
-                    i-preview-area-container.height = clamp(h, i-preview-area-container.min-height, i-preview-area-container.max-height);
+                x-position: parent.x;
+                y-position: parent.y;
+
+                update-geometry(_, _, w, h) => {
+                    preview-area-container.width = clamp(w, preview-area-container.min-width, preview-area-container.max-width);
+                    preview-area-container.height = clamp(h, preview-area-container.min-height, preview-area-container.max-height);
+                    reselect();
                 }
 
-                width: i-preview-area-container.width;
-                height: i-preview-area-container.height;
-
+                width: preview-area-container.width;
+                height: preview-area-container.height;
 
                 // Also make a condition that abuses the fact that the init callback
                 // is called every time the condition is dirty, to make sure that the size
                 // is within the bounds.
-                // Querty the preview-area to make sure this is evaluated when it changes
-                if i-preview-area-container.has-component && root.preview-area == i-preview-area-container.component-factory : Rectangle {
+                // Query the preview-area to make sure this is evaluated when it changes
+                if preview-area-container.has-component && root.preview-area == preview-area-container.component-factory: Rectangle {
                     init => {
-                        i-preview-area-container.width = clamp(i-preview-area-container.width, i-preview-area-container.min-width, i-preview-area-container.max-width);
-                        i-preview-area-container.height = clamp(i-preview-area-container.height, i-preview-area-container.min-height, i-preview-area-container.max-height);
+                        preview-area-container.width = clamp(preview-area-container.width, max(preview-area-container.min-width, 16px), max(preview-area-container.max-width, 16px));
+                        preview-area-container.height = clamp(preview-area-container.height, max(preview-area-container.min-height, 16px),  max(preview-area-container.max-height, 16px));
                     }
                 }
 
-                i-preview-area-container := ComponentContainer {
-
+                preview-area-container := ComponentContainer {
                     property <bool> is-resizable: (self.min-width != self.max-width && self.min-height != self.max-height) && self.has-component;
 
                     component-factory <=> root.preview-area;
@@ -104,13 +225,14 @@ export component DrawArea {
                     // Instead, we use a init function to initialize
                     width: 0px;
                     height: 0px;
+
                     init => {
                         self.width = max(self.preferred-width, self.min-width);
                         self.height = max(self.preferred-height, self.min-height);
                     }
                 }
 
-                i-selection-area := TouchArea {
+                selection-area := TouchArea {
                     private property <length> selection-x: 0px;
                     private property <length> selection-y: 0px;
                     private property <SelectionKind> selection-kind: SelectionKind.none;
@@ -130,7 +252,7 @@ export component DrawArea {
                         // This needs to fire AFTER clicked and double-clicked to work :-/
                         if (event.kind == PointerEventKind.up) {
                             if (self.selection-kind == SelectionKind.select_up_or_down) {
-                                root.select_behind(self.selection-x, self.selection-y, event.modifiers.control, event.modifiers.shift);
+                                root.select-behind(self.selection-x, self.selection-y, event.modifiers.control, event.modifiers.shift);
                             } else if (self.selection-kind == SelectionKind.select-at) {
                                 root.select-at(self.selection-x, self.selection-y, event.modifiers.control);
                             }
@@ -138,28 +260,52 @@ export component DrawArea {
                         self.selection-kind = SelectionKind.none;
                     }
                     mouse-cursor: crosshair;
-                    enabled <=> root.design-mode;
+                    enabled: root.mode == DrawAreaMode.designing;
                 }
 
-                i-selection-display-area := Rectangle {
-                    for s in root.selections: Rectangle {
-                        x: s.x;
-                        y: s.y;
-                        width: s.width;
-                        height: s.height;
-                        border-color: s.border-color;
-                        border-width: 1px;
+                selection-display-area := Rectangle {
+                    for s in root.selections: SelectionFrame {
+                        interactive: root.mode == DrawAreaMode.designing;
+                        selection: s;
+                        update-geometry(x, y, w, h) => {
+                            root.selected-element-update-geometry(x, y, w, h);
+                        }
+
+                        selected-element-delete() => {
+                            root.selected-element-delete();
+                        }
+
+                        select-behind(x, y, c, f) => {
+                            root.select-behind(x, y, c, f);
+                        }
                     }
                 }
             }
-
-            // Diagnostics overlay:
-            diagnostics := DiagnosticsOverlay {
-                width: 100%;
-                height: 100%;
-                diagnostics <=> root.diagnostics;
-                show-document(url, line, column) => { root.show-document(url, line, column); }
-            }
         }
     }
+
+    // Diagnostics overlay:
+    diagnostics := DiagnosticsOverlay {
+        width: 100%;
+        height: 100%;
+        diagnostics <=> root.diagnostics;
+        show-document(url, line, column) => {
+            root.show-document(url, line, column);
+        }
+    }
+
+    states [
+        uninitialized when !preview-area-container.has-component: {
+            root.mode: DrawAreaMode.uninitialized;
+        }
+        error when diagnostics.diagnostics-open && preview-area-container.has-component: {
+            root.mode: DrawAreaMode.error;
+        }
+        designing when root.design-mode && !diagnostics.diagnostics-open && preview-area-container.has-component: {
+            root.mode: DrawAreaMode.designing;
+        }
+        viewing when !root.design-mode && !diagnostics.diagnostics-open && preview-area-container.has-component: {
+            root.mode: DrawAreaMode.viewing;
+        }
+    ]
 }

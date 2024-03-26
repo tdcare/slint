@@ -227,7 +227,7 @@ macro_rules! for_each_enums {
                 /// The source image is scaled to cover into the [`Image`](elements.md#image) element's dimension while preserving the aspect ratio.
                 /// If the aspect ratio of the source image doesn't match the element's one, then the image will be clipped to fit.
                 Cover,
-                /// Preserves the size of the source image in logical pixel.
+                /// Preserves the size of the source image in logical pixels.
                 /// The source image will still be scaled by the scale factor that applies to all elements in the window.
                 /// Any extra space will be left blank.
                 Preserve,
@@ -259,6 +259,16 @@ macro_rules! for_each_enums {
                 Smooth,
                 /// The image is scaled with the nearest neighbor algorithm.
                 Pixelated,
+            }
+
+            /// This enum specifies how the source image will be tiled.
+            enum ImageTiling {
+                /// The source image will not be tiled.
+                None,
+                /// The source image will be repeated to fill the [`Image`](elements.md#image) element.
+                Repeat,
+                /// The source image will be repeated and scaled to fill the [`Image`](elements.md#image) element, ensuring an integer number of repetitions.
+                Round,
             }
 
             /// This enum is used to define the type of the input field.
@@ -325,16 +335,27 @@ macro_rules! for_each_enums {
                 Checkbox,
                 /// The element is a [`ComboBox`](../widgets/combobox.md) or behaves like one.
                 Combobox,
+                /// The element is a [`ListView`](../widgets/listview.md) or behaves like one.
+                List,
                 /// The element is a [`Slider`](../widgets/slider.md) or behaves like one.
                 Slider,
                 /// The element is a [`SpinBox`](../widgets/spinbox.md) or behaves like one.
                 Spinbox,
                 /// The element is a [`Tab`](../widgets/tabwidget.md) or behaves like one.
                 Tab,
+                /// The element is similar to the tab bar in a [`TabWidget`](../widgets/tabwidget.md).
+                TabList,
                 /// The role for a [`Text`](elements.md#text) element. It's automatically applied.
                 Text,
+                /// The role for a [`TableView`](../widgets/standardtableview.md ) or behaves like one.
+                Table,
+                /// The role for a TreeView or behaves like one. (Not provided yet)
+                Tree,
                 /// The element is a [`ProgressIndicator`](../widgets/progressindicator.md) or behaves like one.
                 ProgressIndicator,
+                /// The role for widget with editable text such as a
+                /// [`LineEdit`](../widgets/lineedit.md) or a [`TextEdit`](../widgets/textedit.md)
+                TextInput,
             }
 
             /// This enum represents the different values of the `sort-order` property.
@@ -356,6 +377,18 @@ macro_rules! for_each_enums {
                 Horizontal,
                 /// Element is oriented vertically.
                 Vertical,
+            }
+
+            /// This enum indicates the color scheme used by the widget style. Use this to explicitly switch
+            /// between dark and light schemes, or choose Unknown to fall back to the system default.
+            enum ColorScheme {
+                /// The scheme is not known and a system wide setting configures this. This could mean that
+                /// the widgets are shown in a dark or light scheme, but it could also be a custom color scheme.
+                Unknown,
+                /// The style chooses light colors for the background and dark for the foreground.
+                Dark,
+                /// The style chooses dark colors for the background and light for the foreground.
+                Light,
             }
         ];
     };

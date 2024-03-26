@@ -13,8 +13,8 @@ use android_activity::PollEvent;
 pub use android_activity::{self, AndroidApp};
 use androidwindowadapter::AndroidWindowAdapter;
 use core::ops::ControlFlow;
-use i_slint_core::api::{EventLoopError, PhysicalSize, PlatformError};
-use i_slint_core::platform::WindowAdapter;
+use i_slint_core::api::{EventLoopError, PlatformError};
+use i_slint_core::platform::{Clipboard, WindowAdapter};
 use i_slint_renderer_skia::SkiaRendererExt;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -114,15 +114,7 @@ impl i_slint_core::platform::Platform for AndroidPlatform {
                 return Ok(());
             }
             if self.window.pending_redraw.take() {
-                if let Some(win) = self.app.native_window() {
-                    let o = self.window.offset.get();
-                    self.window.renderer.render_transformed_with_post_callback(
-                        0.,
-                        (o.x as f32, o.y as f32),
-                        PhysicalSize { width: win.width() as _, height: win.height() as _ },
-                        None,
-                    )?;
-                }
+                self.window.do_render()?;
             }
         }
     }
@@ -132,6 +124,28 @@ impl i_slint_core::platform::Platform for AndroidPlatform {
             event_queue: self.window.event_queue.clone(),
             waker: self.app.create_waker(),
         }))
+    }
+
+    fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
+        if clipboard == Clipboard::DefaultClipboard {
+            self.window
+                .java_helper
+                .set_clipboard(text)
+                .unwrap_or_else(|e| javahelper::print_jni_error(&self.app, e));
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: Clipboard) -> Option<String> {
+        if clipboard == Clipboard::DefaultClipboard {
+            Some(
+                self.window
+                    .java_helper
+                    .get_clipboard()
+                    .unwrap_or_else(|e| javahelper::print_jni_error(&self.app, e)),
+            )
+        } else {
+            None
+        }
     }
 }
 

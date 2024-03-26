@@ -1,9 +1,9 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use alloc::boxed::Box;
 use alloc::rc::Rc;
-use alloc::string::String;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::String};
 use core::ffi::c_void;
 use i_slint_core::api::{
     LogicalSize, PhysicalPosition, PhysicalSize, Window, WindowPosition, WindowSize,
@@ -113,7 +113,17 @@ pub extern "C" fn slint_window_properties_get_background(
 
 #[no_mangle]
 pub extern "C" fn slint_window_properties_get_fullscreen(wp: &WindowProperties) -> bool {
-    wp.fullscreen()
+    wp.is_fullscreen()
+}
+
+#[no_mangle]
+pub extern "C" fn slint_window_properties_get_minimized(wp: &WindowProperties) -> bool {
+    wp.is_minimized()
+}
+
+#[no_mangle]
+pub extern "C" fn slint_window_properties_get_maximized(wp: &WindowProperties) -> bool {
+    wp.is_maximized()
 }
 
 #[repr(C)]

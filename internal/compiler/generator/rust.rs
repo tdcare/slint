@@ -1428,11 +1428,14 @@ fn generate_item_tree(
             #window_adapter_functions
         }
 
+        const _ : () = {
+            use slint::private_unstable_api::re_exports::*;
+            ItemTreeVTable_static!(static VT for self::#inner_component_id);
+        };
+
         impl sp::PinnedDrop for #inner_component_id {
             fn drop(self: core::pin::Pin<&mut #inner_component_id>) {
-                use slint::private_unstable_api::re_exports::*;
-                ItemTreeVTable_static!(static VT for self::#inner_component_id);
-                new_vref!(let vref : VRef<sp::ItemTreeVTable> for sp::ItemTree = self.as_ref().get_ref());
+                sp::vtable::new_vref!(let vref : VRef<sp::ItemTreeVTable> for sp::ItemTree = self.as_ref().get_ref());
                 if let Some(wa) = self.maybe_window_adapter_impl() {
                     sp::unregister_item_tree(self.as_ref(), vref, Self::item_array(), &wa);
                 }
@@ -1661,8 +1664,10 @@ fn property_set_value_tokens(
     let prop = access_member(property, ctx);
     let prop_type = ctx.property_ty(property);
     let value_tokens = set_primitive_property_value(prop_type, value_tokens);
-    if let Some(animation) = ctx.current_sub_component.and_then(|c| c.animations.get(property)) {
-        let animation_tokens = compile_expression(animation, ctx);
+    if let Some((animation, map)) = &ctx.property_info(property).animation {
+        let mut animation = (*animation).clone();
+        map.map_expression(&mut animation);
+        let animation_tokens = compile_expression(&animation, ctx);
         return quote!(#prop.set_animated_value(#value_tokens as _, #animation_tokens));
     }
     quote!(#prop.set(#value_tokens as _))
@@ -2113,25 +2118,33 @@ fn compile_expression(expr: &Expression, ctx: &EvaluationContext) -> TokenStream
             let op = proc_macro2::Punct::new(*op, proc_macro2::Spacing::Alone);
             quote!( #op #sub )
         }
-        Expression::ImageReference { resource_ref, .. } => match resource_ref {
-            crate::expression_tree::ImageReference::None => {
-                quote!(sp::Image::default())
+        Expression::ImageReference { resource_ref, nine_slice } => {
+            let image = match resource_ref {
+                crate::expression_tree::ImageReference::None => {
+                    quote!(sp::Image::default())
+                }
+                crate::expression_tree::ImageReference::AbsolutePath(path) => {
+                    quote!(sp::Image::load_from_path(::std::path::Path::new(#path)).unwrap_or_default())
+                }
+                crate::expression_tree::ImageReference::EmbeddedData { resource_id, extension } => {
+                    let symbol = format_ident!("SLINT_EMBEDDED_RESOURCE_{}", resource_id);
+                    let format = proc_macro2::Literal::byte_string(extension.as_bytes());
+                    quote!(sp::load_image_from_embedded_data(#symbol.into(), sp::Slice::from_slice(#format)))
+                }
+                crate::expression_tree::ImageReference::EmbeddedTexture { resource_id } => {
+                    let symbol = format_ident!("SLINT_EMBEDDED_RESOURCE_{}", resource_id);
+                    quote!(
+                        sp::Image::from(sp::ImageInner::StaticTextures(&#symbol))
+                    )
+                }
+            };
+            match &nine_slice {
+                Some([a, b, c, d]) => {
+                    quote! {{ let mut image = #image; image.set_nine_slice_edges(#a, #b, #c, #d); image }}
+                }
+                None => image,
             }
-            crate::expression_tree::ImageReference::AbsolutePath(path) => {
-                quote!(sp::Image::load_from_path(::std::path::Path::new(#path)).unwrap())
-            }
-            crate::expression_tree::ImageReference::EmbeddedData { resource_id, extension } => {
-                let symbol = format_ident!("SLINT_EMBEDDED_RESOURCE_{}", resource_id);
-                let format = proc_macro2::Literal::byte_string(extension.as_bytes());
-                quote!(sp::load_image_from_embedded_data(#symbol.into(), sp::Slice::from_slice(#format)))
-            }
-            crate::expression_tree::ImageReference::EmbeddedTexture { resource_id } => {
-                let symbol = format_ident!("SLINT_EMBEDDED_RESOURCE_{}", resource_id);
-                quote!(
-                    sp::Image::from(sp::ImageInner::StaticTextures(&#symbol))
-                )
-            }
-        },
+        }
         Expression::Condition { condition, true_expr, false_expr } => {
             let condition_code = compile_expression(condition, ctx);
             let true_code = compile_expression(true_expr, ctx);
@@ -2479,6 +2492,7 @@ fn compile_builtin_function_call(
             quote!(#(#a)*.as_str().parse::<f64>().unwrap_or_default())
         }
         BuiltinFunction::StringIsFloat => quote!(#(#a)*.as_str().parse::<f64>().is_ok()),
+        BuiltinFunction::ColorRgbaStruct => quote!( #(#a)*.to_argb_u8()),
         BuiltinFunction::ColorBrighter => {
             let x = a.next().unwrap();
             let factor = a.next().unwrap();
@@ -2524,9 +2538,9 @@ fn compile_builtin_function_call(
                 sp::Color::from_argb_u8(a, r, g, b)
             })
         }
-        BuiltinFunction::DarkColorScheme => {
+        BuiltinFunction::ColorScheme => {
             let window_adapter_tokens = access_window_adapter_field(ctx);
-            quote!(sp::WindowInner::from_pub(#window_adapter_tokens.window()).dark_color_scheme())
+            quote!(sp::WindowInner::from_pub(#window_adapter_tokens.window()).color_scheme())
         }
         BuiltinFunction::TextInputFocused => {
             let window_adapter_tokens = access_window_adapter_field(ctx);
@@ -2779,8 +2793,8 @@ fn generate_named_exports(doc: &Document) -> Vec<TokenStream> {
         })
         .filter(|(export_name, type_name)| export_name != type_name)
         .map(|(export_name, type_name)| {
-            let type_id = ident(&type_name);
-            let export_id = ident(&export_name);
+            let type_id = ident(type_name);
+            let export_id = ident(export_name);
             quote!(#type_id as #export_id)
         })
         .collect::<Vec<_>>()

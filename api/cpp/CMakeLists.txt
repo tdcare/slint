@@ -159,6 +159,7 @@ if (SLINT_BUILD_RUNTIME)
     if (SLINT_FEATURE_FREESTANDING)
         if (ESP_PLATFORM)
             list(APPEND features "esp-backtrace/${IDF_TARGET}")
+            list(APPEND features "esp-println/${IDF_TARGET}")
         endif()
     else (SLINT_FEATURE_FREESTANDING)
         list(APPEND features std)
@@ -413,7 +414,7 @@ if(SLINT_BUILD_RUNTIME)
 
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/lib/cmake/Slint/SlintConfigVersion.cmake
-        VERSION 1.4.1
+        VERSION 1.5.1
         COMPATIBILITY SameMinorVersion
     )
 
@@ -430,7 +431,7 @@ set(CPACK_PACKAGE_NAME "Slint-cpp")
 set(CPACK_PACKAGE_VENDOR "Slint")
 set(CPACK_VERBATIM_VARIABLES true)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
-set(CPACK_PACKAGE_VERSION_MINOR 4)
+set(CPACK_PACKAGE_VERSION_MINOR 5)
 set(CPACK_PACKAGE_VERSION_PATCH 1)
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://slint.dev")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/../../LICENSE.md")

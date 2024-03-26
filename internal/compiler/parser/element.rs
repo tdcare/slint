@@ -334,8 +334,9 @@ fn parse_callback_declaration(p: &mut impl Parser) {
         parse_type(&mut *p);
     }
 
-    if p.test(SyntaxKind::DoubleArrow) {
+    if p.peek().kind() == SyntaxKind::DoubleArrow {
         let mut p = p.start_node(SyntaxKind::TwoWayBinding);
+        p.expect(SyntaxKind::DoubleArrow);
         parse_expression(&mut *p);
     }
 
@@ -606,13 +607,14 @@ fn parse_function(p: &mut impl Parser) {
     }
     if p.expect(SyntaxKind::LParent) {
         while p.peek().kind() != SyntaxKind::RParent {
-            let mut p = p.start_node(SyntaxKind::ArgumentDeclaration);
+            let mut p_arg = p.start_node(SyntaxKind::ArgumentDeclaration);
             {
-                let mut p = p.start_node(SyntaxKind::DeclaredIdentifier);
+                let mut p = p_arg.start_node(SyntaxKind::DeclaredIdentifier);
                 p.expect(SyntaxKind::Identifier);
             }
-            p.expect(SyntaxKind::Colon);
-            parse_type(&mut *p);
+            p_arg.expect(SyntaxKind::Colon);
+            parse_type(&mut *p_arg);
+            drop(p_arg);
             if !p.test(SyntaxKind::Comma) {
                 break;
             }

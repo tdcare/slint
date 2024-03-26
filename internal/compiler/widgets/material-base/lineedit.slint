@@ -17,6 +17,8 @@ export component LineEdit {
 
     callback accepted <=> i-base.accepted;
     callback edited <=> i-base.edited;
+    accessible-role: text-input;
+    accessible-value <=> text;
 
     public function set-selection-offsets(start: int, end: int) {
         i-base.set-selection-offsets(start, end);
@@ -51,7 +53,6 @@ export component LineEdit {
         focused when root.has-focus : {
             i-background.border-width: 2px;
             i-background.border-color: MaterialPalette.accent-background;
-            i-base.text-color: MaterialPalette.accent-background;
         }
     ]
 

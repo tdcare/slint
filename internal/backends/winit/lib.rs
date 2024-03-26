@@ -107,9 +107,9 @@ fn try_create_window_with_fallback_renderer(
             feature = "renderer-skia-vulkan"
         ))]
         renderer::skia::WinitSkiaRenderer::new,
-        #[cfg(any(feature = "renderer-femtovg"))]
+        #[cfg(feature = "renderer-femtovg")]
         renderer::femtovg::GlutinFemtoVGRenderer::new,
-        #[cfg(any(feature = "renderer-software"))]
+        #[cfg(feature = "renderer-software")]
         renderer::sw::WinitSoftwareRenderer::new,
     ]
     .into_iter()
@@ -277,7 +277,7 @@ impl i_slint_core::platform::Platform for Backend {
                 if code == 0 {
                     Ok(core::ops::ControlFlow::Break(()))
                 } else {
-                    return Err(format!("Event loop exited with non-zero code {code}").into());
+                    Err(format!("Event loop exited with non-zero code {code}").into())
                 }
             }
         }
@@ -408,11 +408,15 @@ mod testui {
 // Sorry, can't test with rust test harness and multiple threads.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos", target_os = "ios")))]
 #[test]
-fn test_window_accessor() {
+fn test_window_accessor_and_rwh() {
     slint::platform::set_platform(Box::new(crate::Backend::new().unwrap())).unwrap();
 
     use testui::*;
     let app = App::new().unwrap();
     let slint_window = app.window();
     assert!(slint_window.has_winit_window());
+    let handle = slint_window.window_handle();
+    use raw_window_handle_06::{HasDisplayHandle, HasWindowHandle};
+    assert!(handle.window_handle().is_ok());
+    assert!(handle.display_handle().is_ok());
 }

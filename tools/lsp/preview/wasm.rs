@@ -55,8 +55,11 @@ impl PreviewConnector {
         lsp_notifier: SignalLspFunction,
         resource_url_mapper: ResourceUrlMapperFunction,
         style: String,
+        experimental: bool,
     ) -> Result<PreviewConnectorPromise, JsValue> {
         console_error_panic_hook::set_once();
+
+        i_slint_core::debug_log!("PreviewConnector: Enable experimental? {experimental}");
 
         WASM_CALLBACKS.set(Some(WasmCallbacks { lsp_notifier, resource_url_mapper }));
 
@@ -70,7 +73,7 @@ impl PreviewConnector {
                         reject_c.take().call1(&JsValue::UNDEFINED,
                             &JsValue::from("PreviewConnector already set up.")).unwrap_throw();
                     } else {
-                        match super::ui::create_ui(style) {
+                        match super::ui::create_ui(style, experimental) {
                             Ok(ui) => {
                                 preview_state.borrow_mut().ui = Some(ui);
                                 resolve.take().call1(&JsValue::UNDEFINED,
@@ -224,5 +227,5 @@ pub fn notify_diagnostics(diagnostics: &[slint_interpreter::Diagnostic]) -> Opti
 
 pub fn ask_editor_to_show_document(file: &str, selection: lsp_types::Range) {
     let Ok(file) = lsp_types::Url::from_file_path(file) else { return };
-    send_message_to_lsp(crate::common::PreviewToLspMessage::ShowDocument { file, selection })
+    send_message_to_lsp(crate::common::PreviewToLspMessage::ShowDocument { file, selection });
 }

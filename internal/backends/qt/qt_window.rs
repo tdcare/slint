@@ -16,7 +16,7 @@ use i_slint_core::item_rendering::{
 };
 use i_slint_core::item_tree::{ItemTreeRc, ItemTreeRef};
 use i_slint_core::items::{
-    self, FillRule, ImageRendering, ItemRc, ItemRef, Layer, MouseCursor, Opacity,
+    self, ColorScheme, FillRule, ImageRendering, ItemRc, ItemRef, Layer, MouseCursor, Opacity,
     PointerEventButton, RenderingResult, TextOverflow, TextWrap,
 };
 use i_slint_core::layout::Orientation;
@@ -84,12 +84,12 @@ cpp! {{
     };
 
     struct SlintWidget : QWidget {
-        void *rust_window;
+        void *rust_window = nullptr;
         bool isMouseButtonDown = false;
         QRect ime_position;
         QString ime_text;
-        int ime_cursor;
-        int ime_anchor;
+        int ime_cursor = 0;
+        int ime_anchor = 0;
 
         SlintWidget() {
             setMouseTracking(true);
@@ -113,10 +113,14 @@ cpp! {{
             });
         }
 
-        void resizeEvent(QResizeEvent *event) override {
+        void resizeEvent(QResizeEvent *) override {
             if (!rust_window)
                 return;
-            QSize size = event->size();
+
+            // On windows, the size in the event is not reliable during
+            // fullscreen changes. Querying the widget itself seems to work
+            // better, see: https://stackoverflow.com/questions/52157587/why-qresizeevent-qwidgetsize-gives-different-when-fullscreen
+            QSize size = this->size();
             rust!(Slint_resizeEvent [rust_window: &QtWindow as "void*", size: qttypes::QSize as "QSize"] {
                 rust_window.resize_event(size)
             });
@@ -233,7 +237,8 @@ cpp! {{
 
         void changeEvent(QEvent *event) override {
             if (!rust_window)
-                return;
+                return QWidget::changeEvent(event);
+
             if (event->type() == QEvent::ActivationChange) {
                 bool active = isActiveWindow();
                 rust!(Slint_updateWindowActivation [rust_window: &QtWindow as "void*", active: bool as "bool"] {
@@ -242,11 +247,27 @@ cpp! {{
             } else if (event->type() == QEvent::PaletteChange || event->type() == QEvent::StyleChange) {
                 bool dark_color_scheme = qApp->palette().color(QPalette::Window).valueF() < 0.5;
                 rust!(Slint_updateWindowDarkColorScheme [rust_window: &QtWindow as "void*", dark_color_scheme: bool as "bool"] {
-                    if let Some(ds) = rust_window.dark_color_scheme.get() {
-                        ds.as_ref().set(dark_color_scheme);
+                    if let Some(ds) = rust_window.color_scheme.get() {
+                        ds.as_ref().set(if dark_color_scheme {
+                            ColorScheme::Dark
+                        } else {
+                            ColorScheme::Light
+                        });
                     }
                 });
             }
+
+            // Entering fullscreen, maximizing or minimizing the window will
+            // trigger a change event. We need to update the internal window
+            // state to match the actual window state.
+            if (event->type() == QEvent::WindowStateChange)
+            {
+                rust!(Slint_syncWindowState [rust_window: &QtWindow as "void*"]{
+                    rust_window.window_state_event();
+                });
+            }
+
+
             QWidget::changeEvent(event);
         }
 
@@ -1222,6 +1243,7 @@ impl QtItemRenderer<'_> {
                             IntRect::from_size(origin.cast()),
                             scale_factor,
                             Default::default(), // We only care about the size, so alignments don't matter
+                            image.tiling(),
                         )
                         .size
                         .cast(),
@@ -1253,40 +1275,77 @@ impl QtItemRenderer<'_> {
         let source_rect = source_rect
             .unwrap_or_else(|| euclid::rect(0, 0, image_size.width as _, image_size.height as _));
         let scale_factor = ScaleFactor::new(self.scale_factor());
-        let fit = i_slint_core::graphics::fit(
-            image.image_fit(),
-            size * scale_factor,
-            source_rect,
-            scale_factor,
-            image.alignment(),
-        );
 
-        let dest_rect = qttypes::QRectF {
-            x: fit.offset.x as _,
-            y: fit.offset.y as _,
-            width: fit.size.width as _,
-            height: fit.size.height as _,
-        };
-        let source_rect = qttypes::QRectF {
-            x: fit.clip_rect.origin.x as _,
-            y: fit.clip_rect.origin.y as _,
-            width: fit.clip_rect.size.width as _,
-            height: fit.clip_rect.size.height as _,
+        let fit = if let &i_slint_core::ImageInner::NineSlice(ref nine) = (&image.source()).into() {
+            i_slint_core::graphics::fit9slice(
+                nine.0.size(),
+                nine.1,
+                size * scale_factor,
+                scale_factor,
+                image.alignment(),
+                image.tiling(),
+            )
+            .collect::<Vec<_>>()
+        } else {
+            vec![i_slint_core::graphics::fit(
+                image.image_fit(),
+                size * scale_factor,
+                source_rect,
+                scale_factor,
+                image.alignment(),
+                image.tiling(),
+            )]
         };
 
-        let painter: &mut QPainterPtr = &mut self.painter;
-        let smooth: bool = image.rendering() == ImageRendering::Smooth;
-        cpp! { unsafe [
-                painter as "QPainterPtr*",
-                pixmap as "QPixmap",
-                source_rect as "QRectF",
-                dest_rect as "QRectF",
-                smooth as "bool"] {
-            (*painter)->save();
-            (*painter)->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
-            (*painter)->drawPixmap(dest_rect, pixmap, source_rect);
-            (*painter)->restore();
-        }};
+        for fit in fit {
+            let dest_rect = qttypes::QRectF {
+                x: fit.offset.x as _,
+                y: fit.offset.y as _,
+                width: fit.size.width as _,
+                height: fit.size.height as _,
+            };
+            let source_rect = qttypes::QRectF {
+                x: fit.clip_rect.origin.x as _,
+                y: fit.clip_rect.origin.y as _,
+                width: fit.clip_rect.size.width as _,
+                height: fit.clip_rect.size.height as _,
+            };
+
+            let painter: &mut QPainterPtr = &mut self.painter;
+            let smooth: bool = image.rendering() == ImageRendering::Smooth;
+            if let Some(offset) = fit.tiled {
+                let scale_x: f32 = fit.source_to_target_x;
+                let scale_y: f32 = fit.source_to_target_y;
+                let offset = qttypes::QPoint { x: offset.x as _, y: offset.y as _ };
+                cpp! { unsafe [
+                    painter as "QPainterPtr*", pixmap as "QPixmap", source_rect as "QRectF",
+                    dest_rect as "QRectF", smooth as "bool", scale_x as "float", scale_y as "float",
+                    offset as "QPoint"
+                    ] {
+                        (*painter)->save();
+                        (*painter)->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
+                        auto transform = QTransform::fromScale(1 / scale_x, 1 / scale_y);
+                        auto scaled_destination = (dest_rect * transform).boundingRect();
+                        QPixmap source_pixmap = pixmap.copy(source_rect.toRect());
+                        (*painter)->scale(scale_x, scale_y);
+                        (*painter)->drawTiledPixmap(scaled_destination, source_pixmap, offset);
+                        (*painter)->restore();
+                    }
+                };
+            } else {
+                cpp! { unsafe [
+                        painter as "QPainterPtr*",
+                        pixmap as "QPixmap",
+                        source_rect as "QRectF",
+                        dest_rect as "QRectF",
+                        smooth as "bool"] {
+                    (*painter)->save();
+                    (*painter)->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
+                    (*painter)->drawPixmap(dest_rect, pixmap, source_rect);
+                    (*painter)->restore();
+                }};
+            }
+        }
     }
 
     fn draw_rectangle_impl(
@@ -1458,7 +1517,7 @@ pub struct QtWindow {
 
     tree_structure_changed: RefCell<bool>,
 
-    dark_color_scheme: OnceCell<Pin<Box<Property<bool>>>>,
+    color_scheme: OnceCell<Pin<Box<Property<ColorScheme>>>>,
 }
 
 impl Drop for QtWindow {
@@ -1492,7 +1551,7 @@ impl QtWindow {
                 rendering_metrics_collector: Default::default(),
                 cache: Default::default(),
                 tree_structure_changed: RefCell::new(false),
-                dark_color_scheme: Default::default(),
+                color_scheme: Default::default(),
             }
         });
         let widget_ptr = rc.widget_ptr();
@@ -1585,6 +1644,40 @@ impl QtWindow {
     fn close_popup_on_click(&self) -> bool {
         WindowInner::from_pub(&self.window).close_popup_on_click()
     }
+
+    fn window_state_event(&self) {
+        let widget_ptr = self.widget_ptr();
+
+        // This function is called from the changeEvent slot which triggers whenever
+        // one of these properties changes. To prevent recursive call issues (e.g.,
+        // set_fullscreen -> update_window_properties -> changeEvent ->
+        // window_state_event -> set_fullscreen), we avoid resetting the internal state
+        // when it already matches the Qt state.
+
+        let minimized = cpp! { unsafe [widget_ptr as "QWidget*"] -> bool as "bool" {
+            return widget_ptr->isMinimized();
+        }};
+
+        if minimized != self.window().is_minimized() {
+            self.window().set_minimized(minimized);
+        }
+
+        let maximized = cpp! { unsafe [widget_ptr as "QWidget*"] -> bool as "bool" {
+            return widget_ptr->isMaximized();
+        }};
+
+        if maximized != self.window().is_maximized() {
+            self.window().set_maximized(maximized);
+        }
+
+        let fullscreen = cpp! { unsafe [widget_ptr as "QWidget*"] -> bool as "bool" {
+            return widget_ptr->isFullScreen();
+        }};
+
+        if fullscreen != self.window().is_fullscreen() {
+            self.window().set_fullscreen(fullscreen);
+        }
+    }
 }
 
 impl WindowAdapter for QtWindow {
@@ -1660,6 +1753,7 @@ impl WindowAdapter for QtWindow {
         let logical_size = size.to_logical(self.window().scale_factor());
         let widget_ptr = self.widget_ptr();
         let sz: qttypes::QSize = into_qsize(logical_size);
+
         // Qt uses logical units!
         cpp! {unsafe [widget_ptr as "QWidget*", sz as "QSize"] {
             widget_ptr->resize(sz);
@@ -1695,6 +1789,7 @@ impl WindowAdapter for QtWindow {
             width: window_item.width().get().ceil() as _,
             height: window_item.height().get().ceil() as _,
         };
+
         if size.width == 0 || size.height == 0 {
             let existing_size = cpp!(unsafe [widget_ptr as "QWidget*"] -> qttypes::QSize as "QSize" {
                 return widget_ptr->size();
@@ -1723,25 +1818,36 @@ impl WindowAdapter for QtWindow {
             }
         };
 
-        let fullscreen: bool = properties.fullscreen();
+        let fullscreen: bool = properties.is_fullscreen();
+        let minimized: bool = properties.is_minimized();
+        let maximized: bool = properties.is_maximized();
 
         cpp! {unsafe [widget_ptr as "QWidget*",  title as "QString", size as "QSize", background as "QBrush", no_frame as "bool", always_on_top as "bool",
-                      fullscreen as "bool"] {
+                      fullscreen as "bool", minimized as "bool", maximized as "bool"] {
+
             if (size != widget_ptr->size()) {
                 widget_ptr->resize(size.expandedTo({1, 1}));
             }
+
             widget_ptr->setWindowFlag(Qt::FramelessWindowHint, no_frame);
             widget_ptr->setWindowFlag(Qt::WindowStaysOnTopHint, always_on_top);
 
             {
-                // Depending on the request, we either set or clear the fullscreen bits.
+                // Depending on the request, we either set or clear the bits.
                 // See also: https://doc.qt.io/qt-6/qt.html#WindowState-enum
-                const auto state = widget_ptr->windowState();
-                if (fullscreen) {
-                    widget_ptr->setWindowState(state | Qt::WindowFullScreen);
-                } else {
-                    widget_ptr->setWindowState(state & ~Qt::WindowFullScreen);
+                auto state = widget_ptr->windowState();
+
+                if (fullscreen != widget_ptr->isFullScreen()) {
+                    state = state ^ Qt::WindowFullScreen;
                 }
+                if (minimized != widget_ptr->isMinimized()) {
+                    state = state ^ Qt::WindowMinimized;
+                }
+                if (maximized != widget_ptr->isMaximized()) {
+                    state = state ^ Qt::WindowMaximized;
+                }
+
+                widget_ptr->setWindowState(state);
             }
 
             widget_ptr->setWindowTitle(title);
@@ -1769,10 +1875,10 @@ impl WindowAdapter for QtWindow {
             into_qsize,
         );
 
-        let widget_size_max: u32 = 16_777_215;
+        const WIDGET_SIZE_MAX: u32 = 16_777_215;
 
         let max_size: qttypes::QSize = constraints.max.map_or_else(
-            || qttypes::QSize { width: widget_size_max, height: widget_size_max },
+            || qttypes::QSize { width: WIDGET_SIZE_MAX, height: WIDGET_SIZE_MAX },
             into_qsize,
         );
 
@@ -1921,11 +2027,17 @@ impl WindowAdapterInternal for QtWindow {
         }
     }
 
-    fn dark_color_scheme(&self) -> bool {
-        let ds = self.dark_color_scheme.get_or_init(|| {
-            Box::pin(Property::new(cpp! {unsafe [] -> bool as "bool" {
-                return qApp->palette().color(QPalette::Window).valueF() < 0.5;
-            }}))
+    fn color_scheme(&self) -> ColorScheme {
+        let ds = self.color_scheme.get_or_init(|| {
+            Box::pin(Property::new(
+                if cpp! {unsafe [] -> bool as "bool" {
+                    return qApp->palette().color(QPalette::Window).valueF() < 0.5;
+                }} {
+                    ColorScheme::Dark
+                } else {
+                    ColorScheme::Light
+                },
+            ))
         });
         ds.as_ref().get()
     }

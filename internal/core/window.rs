@@ -17,11 +17,12 @@ use crate::input::{
 };
 use crate::item_tree::ItemRc;
 use crate::item_tree::{ItemTreeRc, ItemTreeRef, ItemTreeVTable, ItemTreeWeak};
-use crate::items::{InputType, ItemRef, MouseCursor};
+use crate::items::{ColorScheme, InputType, ItemRef, MouseCursor};
 use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, SizeLengths};
 use crate::properties::{Property, PropertyTracker};
 use crate::renderer::Renderer;
 use crate::{Callback, Coord, SharedString};
+#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
 use core::cell::{Cell, RefCell};
@@ -136,6 +137,22 @@ pub trait WindowAdapter {
     fn internal(&self, _: crate::InternalToken) -> Option<&dyn WindowAdapterInternal> {
         None
     }
+
+    /// Re-implement this to support exposing raw window handles (version 0.6).
+    #[cfg(feature = "raw-window-handle-06")]
+    fn window_handle_06(
+        &self,
+    ) -> Result<raw_window_handle_06::WindowHandle<'_>, raw_window_handle_06::HandleError> {
+        Err(raw_window_handle_06::HandleError::NotSupported)
+    }
+
+    /// Re-implement this to support exposing raw display handles (version 0.6).
+    #[cfg(feature = "raw-window-handle-06")]
+    fn display_handle_06(
+        &self,
+    ) -> Result<raw_window_handle_06::DisplayHandle<'_>, raw_window_handle_06::HandleError> {
+        Err(raw_window_handle_06::HandleError::NotSupported)
+    }
 }
 
 /// Implementation details behind [`WindowAdapter`], but since this
@@ -183,9 +200,9 @@ pub trait WindowAdapterInternal {
     // used for accessibility
     fn handle_focus_change(&self, _old: Option<ItemRc>, _new: Option<ItemRc>) {}
 
-    /// returns wether a dark theme is used
-    fn dark_color_scheme(&self) -> bool {
-        true
+    /// returns the color scheme used
+    fn color_scheme(&self) -> ColorScheme {
+        ColorScheme::Unknown
     }
 }
 
@@ -225,6 +242,8 @@ pub struct InputMethodProperties {
     pub cursor_rect_origin: LogicalPosition,
     /// The size of the cursor rectangle.
     pub cursor_rect_size: crate::api::LogicalSize,
+    /// The position of the anchor (bottom). Only meaningful if anchor_position is Some
+    pub anchor_point: LogicalPosition,
     /// The type of input for the text edit.
     pub input_type: InputType,
 }
@@ -279,8 +298,24 @@ impl<'a> WindowProperties<'a> {
     }
 
     /// Returns true if the window should be shown fullscreen; false otherwise.
+    #[deprecated(note = "Please use `is_fullscreen` instead")]
     pub fn fullscreen(&self) -> bool {
+        self.is_fullscreen()
+    }
+
+    /// Returns true if the window should be shown fullscreen; false otherwise.
+    pub fn is_fullscreen(&self) -> bool {
         self.0.fullscreen.get()
+    }
+
+    /// true if the window is in a maximized state, otherwise false
+    pub fn is_maximized(&self) -> bool {
+        self.0.maximized.get()
+    }
+
+    /// true if the window is in a minimized state, otherwise false
+    pub fn is_minimized(&self) -> bool {
+        self.0.minimized.get()
     }
 }
 
@@ -355,7 +390,7 @@ pub struct WindowInner {
     mouse_input_state: Cell<MouseInputState>,
     pub(crate) modifiers: Cell<InternalKeyboardModifierState>,
 
-    /// itemRC will retrieve on wasms
+    /// ItemRC that currently have the focus. (possibly a, instance of TextInput)
     pub focus_item: RefCell<crate::item_tree::ItemWeak>,
     /// The last text that was sent to the input method
     pub(crate) last_ime_text: RefCell<SharedString>,
@@ -368,6 +403,9 @@ pub struct WindowInner {
 
     pinned_fields: Pin<Box<WindowPinnedFields>>,
     fullscreen: Cell<bool>,
+    maximized: Cell<bool>,
+    minimized: Cell<bool>,
+
     active_popup: RefCell<Option<PopupWindow>>,
     had_popup_on_press: Cell<bool>,
     close_requested: Callback<(), CloseRequestResponse>,
@@ -424,6 +462,8 @@ impl WindowInner {
             fullscreen: Cell::new(std::env::var("SLINT_FULLSCREEN").is_ok()),
             #[cfg(not(feature = "std"))]
             fullscreen: Cell::new(false),
+            maximized: Cell::new(false),
+            minimized: Cell::new(false),
             focus_item: Default::default(),
             last_ime_text: Default::default(),
             cursor_blinker: Default::default(),
@@ -866,11 +906,11 @@ impl WindowInner {
         result
     }
 
-    /// returns wether a dark theme is used
-    pub fn dark_color_scheme(&self) -> bool {
+    /// returns the color theme used
+    pub fn color_scheme(&self) -> ColorScheme {
         self.window_adapter()
             .internal(crate::InternalToken)
-            .map_or(false, |x| x.dark_color_scheme())
+            .map_or(ColorScheme::Unknown, |x| x.color_scheme())
     }
 
     /// Show a popup at the given position relative to the item
@@ -984,12 +1024,12 @@ impl WindowInner {
         self.pinned_fields.scale_factor.set(factor)
     }
 
-    /// Returns the scale factor set on the window, as provided by the windowing system.
+    /// Reads the global property `TextInputInterface.text-input-focused`
     pub fn text_input_focused(&self) -> bool {
         self.pinned_fields.as_ref().project_ref().text_input_focused.get()
     }
 
-    /// Sets the scale factor for the window. This is set by the backend or for testing.
+    /// Sets the global property `TextInputInterface.text-input-focused`
     pub fn set_text_input_focused(&self, value: bool) {
         self.pinned_fields.text_input_focused.set(value)
     }
@@ -1035,9 +1075,36 @@ impl WindowInner {
         }
     }
 
+    /// Returns if the window is currently maximized
+    pub fn is_fullscreen(&self) -> bool {
+        self.fullscreen.get()
+    }
+
     /// Set or unset the window to display fullscreen.
     pub fn set_fullscreen(&self, enabled: bool) {
         self.fullscreen.set(enabled);
+        self.update_window_properties()
+    }
+
+    /// Returns if the window is currently maximized
+    pub fn is_maximized(&self) -> bool {
+        self.maximized.get()
+    }
+
+    /// Set the window as maximized or unmaximized
+    pub fn set_maximized(&self, maximized: bool) {
+        self.maximized.set(maximized);
+        self.update_window_properties()
+    }
+
+    /// Returns if the window is currently minimized
+    pub fn is_minimized(&self) -> bool {
+        self.minimized.get()
+    }
+
+    /// Set the window as minimized or unminimized
+    pub fn set_minimized(&self, minimized: bool) {
+        self.minimized.set(minimized);
         self.update_window_properties()
     }
 
@@ -1061,6 +1128,7 @@ pub type WindowAdapterRc = Rc<dyn WindowAdapter>;
 pub mod ffi {
     #![allow(unsafe_code)]
     #![allow(clippy::missing_safety_doc)]
+    #![allow(missing_docs)]
 
     use super::*;
     use crate::api::{RenderingNotifier, RenderingState, SetRenderingNotifierError};
@@ -1380,11 +1448,13 @@ pub mod ffi {
 
     /// Return wether the style is using a dark theme
     #[no_mangle]
-    pub unsafe extern "C" fn slint_windowrc_dark_color_scheme(
+    pub unsafe extern "C" fn slint_windowrc_color_scheme(
         handle: *const WindowAdapterRcOpaque,
-    ) -> bool {
+    ) -> ColorScheme {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
-        window_adapter.internal(crate::InternalToken).map_or(false, |x| x.dark_color_scheme())
+        window_adapter
+            .internal(crate::InternalToken)
+            .map_or(ColorScheme::Unknown, |x| x.color_scheme())
     }
 
     /// Dispatch a key pressed or release event
@@ -1422,6 +1492,57 @@ pub mod ffi {
     ) {
         let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
         window_adapter.window().dispatch_event(event.clone());
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_is_fullscreen(
+        handle: *const WindowAdapterRcOpaque,
+    ) -> bool {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().is_fullscreen()
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_is_minimized(
+        handle: *const WindowAdapterRcOpaque,
+    ) -> bool {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().is_minimized()
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_is_maximized(
+        handle: *const WindowAdapterRcOpaque,
+    ) -> bool {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().is_maximized()
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_set_fullscreen(
+        handle: *const WindowAdapterRcOpaque,
+        value: bool,
+    ) {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().set_fullscreen(value)
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_set_minimized(
+        handle: *const WindowAdapterRcOpaque,
+        value: bool,
+    ) {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().set_minimized(value)
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn slint_windowrc_set_maximized(
+        handle: *const WindowAdapterRcOpaque,
+        value: bool,
+    ) {
+        let window_adapter = &*(handle as *const Rc<dyn WindowAdapter>);
+        window_adapter.window().set_maximized(value)
     }
 }
 

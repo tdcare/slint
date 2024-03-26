@@ -34,15 +34,25 @@ impl<'a> ToPyObject for PyValueRef<'a> {
             slint_interpreter::Value::Number(num) => num.into_py(py),
             slint_interpreter::Value::String(str) => str.into_py(py),
             slint_interpreter::Value::Bool(b) => b.into_py(py),
-            slint_interpreter::Value::Image(_) => todo!(),
-            slint_interpreter::Value::Model(_) => todo!(),
+            slint_interpreter::Value::Image(image) => {
+                crate::image::PyImage::from(image).into_py(py)
+            }
+            slint_interpreter::Value::Model(model) => {
+                crate::models::PyModelShared::rust_into_js_model(model)
+                    .unwrap_or_else(|| crate::models::ReadOnlyRustModel::from(model).into_py(py))
+            }
             slint_interpreter::Value::Struct(structval) => structval
                 .iter()
                 .map(|(name, val)| (name.to_string().into_py(py), PyValueRef(val).into_py(py)))
                 .into_py_dict(py)
                 .into_py(py),
-            slint_interpreter::Value::Brush(_) => todo!(),
-            _ => todo!(),
+            slint_interpreter::Value::Brush(brush) => {
+                crate::brush::PyBrush::from(brush.clone()).into_py(py)
+            }
+            v @ _ => {
+                eprintln!("Python: conversion from slint to python needed for {:#?} and not implemented yet", v);
+                ().into_py(py)
+            }
         }
     }
 }
@@ -60,6 +70,26 @@ impl FromPyObject<'_> for PyValue {
                 ob.extract::<&'_ str>().map(|s| slint_interpreter::Value::String(s.into()))
             })
             .or_else(|_| ob.extract::<f64>().map(|num| slint_interpreter::Value::Number(num)))
+            .or_else(|_| {
+                ob.extract::<PyRef<'_, crate::image::PyImage>>()
+                    .map(|pyimg| slint_interpreter::Value::Image(pyimg.image.clone()))
+            })
+            .or_else(|_| {
+                ob.extract::<PyRef<'_, crate::brush::PyBrush>>()
+                    .map(|pybrush| slint_interpreter::Value::Brush(pybrush.brush.clone()))
+            })
+            .or_else(|_| {
+                ob.extract::<PyRef<'_, crate::brush::PyColor>>()
+                    .map(|pycolor| slint_interpreter::Value::Brush(pycolor.color.clone().into()))
+            })
+            .or_else(|_| {
+                ob.extract::<PyRef<'_, crate::models::PyModelBase>>()
+                    .map(|pymodel| slint_interpreter::Value::Model(pymodel.as_model()))
+            })
+            .or_else(|_| {
+                ob.extract::<PyRef<'_, crate::models::ReadOnlyRustModel>>()
+                    .map(|rustmodel| slint_interpreter::Value::Model(rustmodel.0.clone()))
+            })
             .or_else(|_| {
                 ob.extract::<&PyDict>().and_then(|dict| {
                     let dict_items: Result<Vec<(String, slint_interpreter::Value)>, PyErr> = dict

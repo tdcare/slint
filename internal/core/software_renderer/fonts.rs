@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
 use alloc::rc::Rc;
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
@@ -123,13 +124,13 @@ pub fn match_font(request: &FontRequest, scale_factor: ScaleFactor) -> Font {
     pixelfont::PixelFont { bitmap_font: font, glyphs: matching_glyphs }.into()
 }
 
-pub fn text_layout_for_font<'a, Font: crate::textlayout::AbstractFont>(
+pub fn text_layout_for_font<'a, Font>(
     font: &'a Font,
     font_request: &FontRequest,
     scale_factor: ScaleFactor,
 ) -> TextLayout<'a, Font>
 where
-    Font: crate::textlayout::TextShaper<Length = PhysicalLength>,
+    Font: crate::textlayout::AbstractFont + crate::textlayout::TextShaper<Length = PhysicalLength>,
 {
     let letter_spacing =
         font_request.letter_spacing.map(|spacing| (spacing.cast() * scale_factor).cast());

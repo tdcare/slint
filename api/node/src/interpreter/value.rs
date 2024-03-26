@@ -1,12 +1,16 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use crate::{JsModel, RgbaColor, SlintBrush, SlintImageData};
+use crate::{
+    js_into_rust_model, rust_into_js_model, ReadOnlyRustModel, RgbaColor, SlintBrush,
+    SlintImageData,
+};
 use i_slint_compiler::langtype::Type;
 use i_slint_core::graphics::{Image, Rgba8Pixel, SharedPixelBuffer};
-use i_slint_core::model::{Model, ModelRc, SharedVectorModel};
+use i_slint_core::model::{ModelRc, SharedVectorModel};
 use i_slint_core::{Brush, Color, SharedVector};
-use napi::{bindgen_prelude::*, Env, JsBoolean, JsNumber, JsObject, JsString, JsUnknown, Result};
+use napi::bindgen_prelude::*;
+use napi::{Env, JsBoolean, JsNumber, JsObject, JsString, JsUnknown, Result};
 use napi_derive::napi;
 use slint_interpreter::Value;
 
@@ -67,17 +71,11 @@ pub fn to_js_unknown(env: &Env, value: &Value) -> Result<JsUnknown> {
             Ok(SlintBrush::from(brush.clone()).into_instance(*env)?.as_object(*env).into_unknown())
         }
         Value::Model(model) => {
-            if let Some(js_model) = model.as_any().downcast_ref::<JsModel>() {
-                let model: Object = js_model.model().get()?;
-                Ok(model.into_unknown())
+            if let Some(maybe_js_model) = rust_into_js_model(model) {
+                maybe_js_model
             } else {
-                let mut vec = vec![];
-
-                for i in 0..model.row_count() {
-                    vec.push(to_js_unknown(env, &model.row_data(i).unwrap())?);
-                }
-
-                Ok(Array::from_vec(env, vec)?.coerce_to_object()?.into_unknown())
+                let model_wrapper: ReadOnlyRustModel = model.clone().into();
+                model_wrapper.into_js(env)
             }
         }
         _ => env.get_undefined().map(|v| v.into_unknown()),
@@ -249,11 +247,9 @@ pub fn to_value(env: &Env, unknown: JsUnknown, typ: &Type) -> Result<Value> {
                     &vec,
                 )))))
             } else {
-                let model = unknown.coerce_to_object()?;
-                let _: JsFunction = model.get("rowCount")?.unwrap();
-                let _: JsFunction = model.get("rowData")?.unwrap();
-
-                Ok(Value::Model(ModelRc::new(JsModel::new(*env, model, *a.to_owned())?)))
+                let rust_model =
+                    unknown.coerce_to_object().and_then(|obj| js_into_rust_model(env, &obj, &a))?;
+                Ok(Value::Model(rust_model))
             }
         }
         Type::Enumeration(_) => todo!(),

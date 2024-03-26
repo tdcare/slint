@@ -804,13 +804,10 @@ impl LookupObject for SlintInternal {
         f: &mut impl FnMut(&str, LookupResult) -> Option<R>,
     ) -> Option<R> {
         f(
-            "dark-color-scheme",
+            "color-scheme",
             Expression::FunctionCall {
-                function: Expression::BuiltinFunctionReference(
-                    BuiltinFunction::DarkColorScheme,
-                    None,
-                )
-                .into(),
+                function: Expression::BuiltinFunctionReference(BuiltinFunction::ColorScheme, None)
+                    .into(),
                 arguments: vec![],
                 source_location: ctx.current_token.as_ref().map(|t| t.to_source_location()),
             }
@@ -996,7 +993,29 @@ impl<'a> LookupObject for ColorExpression<'a> {
                 )),
             })
         };
-        None.or_else(|| f("brighter", member_function(BuiltinFunction::ColorBrighter)))
+        let field_access = |f: &str| {
+            let base = if self.0.ty() == Type::Brush {
+                Expression::Cast { from: Box::new(self.0.clone()), to: Type::Color }
+            } else {
+                self.0.clone()
+            };
+            LookupResult::from(Expression::StructFieldAccess {
+                base: Box::new(Expression::FunctionCall {
+                    function: Box::new(Expression::BuiltinFunctionReference(
+                        BuiltinFunction::ColorRgbaStruct,
+                        ctx.current_token.as_ref().map(|t| t.to_source_location()),
+                    )),
+                    source_location: ctx.current_token.as_ref().map(|t| t.to_source_location()),
+                    arguments: vec![base],
+                }),
+                name: f.into(),
+            })
+        };
+        None.or_else(|| f("red", field_access("red")))
+            .or_else(|| f("green", field_access("green")))
+            .or_else(|| f("blue", field_access("blue")))
+            .or_else(|| f("alpha", field_access("alpha")))
+            .or_else(|| f("brighter", member_function(BuiltinFunction::ColorBrighter)))
             .or_else(|| f("darker", member_function(BuiltinFunction::ColorDarker)))
             .or_else(|| f("transparentize", member_function(BuiltinFunction::ColorTransparentize)))
             .or_else(|| f("with-alpha", member_function(BuiltinFunction::ColorWithAlpha)))

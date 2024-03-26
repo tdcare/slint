@@ -4,14 +4,21 @@
 idf_component_register(
     SRCS "src/slint-esp.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES "esp_lcd" "esp_lcd_touch"
-    PRIV_REQUIRES "esp_timer")
+    REQUIRES "esp_lcd" "esp_lcd_touch")
 
 if (CONFIG_IDF_TARGET_ARCH_XTENSA)
     set(Rust_CARGO_TARGET "xtensa-${IDF_TARGET}-none-elf")
-else(CONFIG_IDF_TARGET_ARCH_XTENSA)
+elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
+    if (CONFIG_IDF_TARGET_ESP32C6 OR CONFIG_IDF_TARGET_ESP32C5 OR CONFIG_IDF_TARGET_ESP32H2)
+        set(Rust_CARGO_TARGET "riscv32imac-esp-espidf")
+    elseif (CONFIG_IDF_TARGET_ESP32P4)
+        set(Rust_CARGO_TARGET "riscv32imafc-esp-espidf")
+    else ()
+        set(Rust_CARGO_TARGET "riscv32imc-esp-espidf")
+    endif()
+else()
     message(FATAL_ERROR "Architecture currently not supported")
-endif(CONFIG_IDF_TARGET_ARCH_XTENSA)
+endif()
 
 set(SLINT_FEATURE_FREESTANDING ON)
 set(SLINT_FEATURE_RENDERER_SOFTWARE ON)
@@ -28,7 +35,7 @@ else(SLINT_ESP_LOCAL_EXAMPLE)
     FetchContent_Declare(
         Slint
         GIT_REPOSITORY https://github.com/slint-ui/slint
-        GIT_TAG v1.4.1
+        GIT_TAG v1.5.1
         SOURCE_SUBDIR api/cpp
     )
     FetchContent_MakeAvailable(Slint)

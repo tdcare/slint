@@ -9,24 +9,28 @@
 */
 use crate::winitwindowadapter::WinitWindowAdapter;
 use crate::SlintUserEvent;
+#[cfg(not(target_arch = "wasm32"))]
 use copypasta::ClipboardProvider;
 use corelib::api::EventLoopError;
 use corelib::graphics::euclid;
 use corelib::input::{KeyEvent, KeyEventType, MouseEvent};
-use corelib::items::PointerEventButton;
+use corelib::items::{ColorScheme, PointerEventButton};
 use corelib::lengths::LogicalPoint;
 use corelib::platform::PlatformError;
 use corelib::window::*;
 use i_slint_core as corelib;
+#[allow(unused_imports)]
 use std::cell::{RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The Default, and the selection clippoard
 type ClipboardPair = (Box<dyn ClipboardProvider>, Box<dyn ClipboardProvider>);
 
 struct NotRunningEventLoop {
+    #[cfg(not(target_arch = "wasm32"))]
     clipboard: RefCell<ClipboardPair>,
     instance: winit::event_loop::EventLoop<SlintUserEvent>,
     event_loop_proxy: winit::event_loop::EventLoopProxy<SlintUserEvent>,
@@ -58,20 +62,24 @@ impl NotRunningEventLoop {
         let instance =
             builder.build().map_err(|e| format!("Error initializing winit event loop: {e}"))?;
         let event_loop_proxy = instance.create_proxy();
-        let clipboard = RefCell::new(create_clipboard(&instance));
-        Ok(Self { clipboard, instance, event_loop_proxy })
+        Ok(Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            clipboard: RefCell::new(create_clipboard(&instance)),
+            instance,
+            event_loop_proxy,
+        })
     }
 }
 
 struct RunningEventLoop<'a> {
     event_loop_target: &'a winit::event_loop::EventLoopWindowTarget<SlintUserEvent>,
-    event_loop_proxy: &'a winit::event_loop::EventLoopProxy<SlintUserEvent>,
+    #[cfg(not(target_arch = "wasm32"))]
     clipboard: &'a RefCell<ClipboardPair>,
 }
 
 pub(crate) trait EventLoopInterface {
     fn event_loop_target(&self) -> &winit::event_loop::EventLoopWindowTarget<SlintUserEvent>;
-    fn event_loop_proxy(&self) -> &winit::event_loop::EventLoopProxy<SlintUserEvent>;
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard(
         &self,
         _: i_slint_core::platform::Clipboard,
@@ -83,10 +91,7 @@ impl EventLoopInterface for NotRunningEventLoop {
         &self.instance
     }
 
-    fn event_loop_proxy(&self) -> &winit::event_loop::EventLoopProxy<SlintUserEvent> {
-        &self.event_loop_proxy
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard(
         &self,
         clipboard: i_slint_core::platform::Clipboard,
@@ -108,10 +113,7 @@ impl<'a> EventLoopInterface for RunningEventLoop<'a> {
         self.event_loop_target
     }
 
-    fn event_loop_proxy(&self) -> &winit::event_loop::EventLoopProxy<SlintUserEvent> {
-        self.event_loop_proxy
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard(
         &self,
         clipboard: i_slint_core::platform::Clipboard,
@@ -251,9 +253,19 @@ impl EventLoopState {
     fn process_window_event(&mut self, window: Rc<WinitWindowAdapter>, event: WindowEvent) {
         let runtime_window = WindowInner::from_pub(window.window());
         match event {
-            WindowEvent::RedrawRequested => self.loop_error = window.draw().err(),
+            WindowEvent::RedrawRequested => {
+                self.loop_error = window.draw().err();
+            }
             WindowEvent::Resized(size) => {
                 self.loop_error = window.resize_event(size).err();
+
+                // Entering fullscreen, maximizing or minimizing the window will
+                // trigger a resize event. We need to update the internal window
+                // state to match the actual window state. We simulate a "window
+                // state event" since there is not an official event for it yet.
+                // Because we don't always get a Resized event (eg, minimized), also handle Occluded
+                // See: https://github.com/rust-windowing/winit/issues/2334
+                window.window_state_event();
             }
             WindowEvent::CloseRequested => {
                 window.window().dispatch_event(corelib::platform::WindowEvent::CloseRequested);
@@ -411,11 +423,15 @@ impl EventLoopState {
                     //window.resize_event(inner_size_writer.???)?;
                 }
             }
-            WindowEvent::ThemeChanged(theme) => {
-                window.set_dark_color_scheme(theme == winit::window::Theme::Dark)
-            }
+            WindowEvent::ThemeChanged(theme) => window.set_color_scheme(match theme {
+                winit::window::Theme::Dark => ColorScheme::Dark,
+                winit::window::Theme::Light => ColorScheme::Light,
+            }),
             WindowEvent::Occluded(x) => {
                 window.renderer.occluded(x);
+
+                // In addition to the hack done for WindowEvent::Resize, also do it for Occluded so we handle Minimized change
+                window.window_state_event();
             }
             _ => {}
         }
@@ -524,18 +540,17 @@ impl EventLoopState {
         });
 
         let mut winit_loop = not_running_loop_instance.instance;
-        let clipboard = not_running_loop_instance.clipboard;
 
         #[cfg(not(target_arch = "wasm32"))]
         {
             use winit::platform::run_on_demand::EventLoopExtRunOnDemand as _;
+            let clipboard = not_running_loop_instance.clipboard;
             winit_loop
             .run_on_demand(
                 |event: Event<SlintUserEvent>,
                  event_loop_target: &EventLoopWindowTarget<SlintUserEvent>| {
                     let running_instance = RunningEventLoop {
                         event_loop_target,
-                        event_loop_proxy: &event_loop_proxy,
                         clipboard: &clipboard,
                     };
                     CURRENT_WINDOW_TARGET.set(&running_instance, || {
@@ -566,8 +581,6 @@ impl EventLoopState {
                       event_loop_target: &EventLoopWindowTarget<SlintUserEvent>| {
                     let running_instance = RunningEventLoop {
                         event_loop_target,
-                        event_loop_proxy: &event_loop_proxy,
-                        clipboard: &clipboard,
                     };
                     CURRENT_WINDOW_TARGET.set(&running_instance, || {
                         self.process_event(event, event_loop_target)
@@ -611,11 +624,8 @@ impl EventLoopState {
             timeout,
             |event: Event<SlintUserEvent>,
              event_loop_target: &EventLoopWindowTarget<SlintUserEvent>| {
-                let running_instance = RunningEventLoop {
-                    event_loop_target,
-                    event_loop_proxy: &event_loop_proxy,
-                    clipboard: &clipboard,
-                };
+                let running_instance =
+                    RunningEventLoop { event_loop_target, clipboard: &clipboard };
                 CURRENT_WINDOW_TARGET
                     .set(&running_instance, || self.process_event(event, event_loop_target))
             },
@@ -653,17 +663,12 @@ pub fn spawn() -> Result<(), corelib::platform::PlatformError> {
             .set_proxy(event_loop_proxy.clone())
     });
 
-    let clipboard = not_running_loop_instance.clipboard;
     let mut loop_state = EventLoopState::default();
 
     not_running_loop_instance.instance.spawn(
         move |event: Event<SlintUserEvent>,
               event_loop_target: &EventLoopWindowTarget<SlintUserEvent>| {
-            let running_instance = RunningEventLoop {
-                event_loop_target,
-                event_loop_proxy: &event_loop_proxy,
-                clipboard: &clipboard,
-            };
+            let running_instance = RunningEventLoop { event_loop_target };
             CURRENT_WINDOW_TARGET
                 .set(&running_instance, || loop_state.process_event(event, event_loop_target))
         },
@@ -672,6 +677,7 @@ pub fn spawn() -> Result<(), corelib::platform::PlatformError> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn create_clipboard<T>(_event_loop: &winit::event_loop::EventLoopWindowTarget<T>) -> ClipboardPair {
     // Provide a truly silent no-op clipboard context, as copypasta's NoopClipboard spams stdout with
     // println.

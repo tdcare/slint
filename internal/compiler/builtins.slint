@@ -63,6 +63,11 @@ export component ClippedImage inherits ImageItem {
 
     in property <ImageHorizontalAlignment> horizontal-alignment;
     in property <ImageVerticalAlignment> vertical-alignment;
+    in property <ImageTiling> horizontal-tiling;
+    in property <ImageTiling> vertical-tiling;
+    // TODO: sets both horizontal-tiling and vertical-tiling at the same time.
+    // in property <ImageTiling> tiling;
+
 }
 
 export { ClippedImage as Image }
@@ -133,6 +138,7 @@ export component Flickable inherits Empty {
     in-out property <length> viewport-x;
     in-out property <length> viewport-y;
     in property <bool> interactive: true;
+    callback flicked();
     //-default_size_binding:expands_to_parent_geometry
 }
 
@@ -203,7 +209,6 @@ export component TextInput {
 }
 
 export component Clip {
-    in property <length> border-radius;
     in property <length> border-top-left-radius;
     in property <length> border-top-right-radius;
     in property <length> border-bottom-left-radius;
@@ -418,12 +423,15 @@ export component NativeSpinBox {
 
 export component NativeSlider {
     in property <bool> enabled: true;
+    out property <bool> has-focus;
     in-out property <float> value;
     in property <float> minimum;
     in property <float> maximum: 100;
     in property <Orientation> orientation: Orientation.horizontal;
     callback changed(float);
+    callback released(float);
     //-is_internal
+    //-accepts_focus
 }
 
 export component NativeProgressIndicator {
@@ -571,6 +579,7 @@ export global NativePalette {
     out property <brush> selection-background;
     out property <brush> selection-foreground;
     out property <brush> border;
+    in-out property <ColorScheme> color-scheme;
 
     //-is_non_item_type
     //-is_internal

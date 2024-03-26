@@ -12,7 +12,9 @@ pub use crate::future::*;
 use crate::input::{KeyEventType, MouseEvent};
 use crate::item_tree::ItemTreeVTable;
 use crate::window::{WindowAdapter, WindowInner};
+#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
 use alloc::string::String;
 
 /// A position represented in the coordinate space of logical pixels. That is the space before applying
@@ -322,6 +324,34 @@ pub enum SetRenderingNotifierError {
     AlreadySet,
 }
 
+/// This struct represents a persistent handle to a window and implements the
+/// [`raw_window_handle_06::HasWindowHandle`] and [`raw_window_handle_06::HasDisplayHandle`]
+/// traits for accessing exposing raw window and display handles.
+/// Obtain an instance of this by calling [`Window::window_handle()`].
+#[cfg(feature = "raw-window-handle-06")]
+#[derive(Clone)]
+pub struct WindowHandle {
+    adapter: alloc::rc::Rc<dyn WindowAdapter>,
+}
+
+#[cfg(feature = "raw-window-handle-06")]
+impl raw_window_handle_06::HasWindowHandle for WindowHandle {
+    fn window_handle<'a>(
+        &'a self,
+    ) -> Result<raw_window_handle_06::WindowHandle<'a>, raw_window_handle_06::HandleError> {
+        self.adapter.window_handle_06()
+    }
+}
+
+#[cfg(feature = "raw-window-handle-06")]
+impl raw_window_handle_06::HasDisplayHandle for WindowHandle {
+    fn display_handle<'a>(
+        &'a self,
+    ) -> Result<raw_window_handle_06::DisplayHandle<'a>, raw_window_handle_06::HandleError> {
+        self.adapter.display_handle_06()
+    }
+}
+
 /// This type represents a window towards the windowing system, that's used to render the
 /// scene of a component. It provides API to control windowing system specific aspects such
 /// as the position on the screen.
@@ -446,9 +476,34 @@ impl Window {
         crate::window::WindowAdapter::set_size(&*self.0.window_adapter(), size);
     }
 
+    /// Returns if the window is currently fullscreen
+    pub fn is_fullscreen(&self) -> bool {
+        self.0.is_fullscreen()
+    }
+
     /// Set or unset the window to display fullscreen.
     pub fn set_fullscreen(&self, fullscreen: bool) {
         self.0.set_fullscreen(fullscreen);
+    }
+
+    /// Returns if the window is currently maximized
+    pub fn is_maximized(&self) -> bool {
+        self.0.is_maximized()
+    }
+
+    /// Maximize or unmaximize the window.
+    pub fn set_maximized(&self, maximized: bool) {
+        self.0.set_maximized(maximized);
+    }
+
+    /// Returns if the window is currently minimized
+    pub fn is_minimized(&self) -> bool {
+        self.0.is_minimized()
+    }
+
+    /// Minimize or unminimze the window.
+    pub fn set_minimized(&self, minimized: bool) {
+        self.0.set_minimized(minimized);
     }
 
     /// Dispatch a window event to the scene.
@@ -543,6 +598,13 @@ impl Window {
     /// on it, for example if the user minimized the window.
     pub fn is_visible(&self) -> bool {
         self.0.is_visible()
+    }
+
+    /// Returns a struct that implements the raw window handle traits to access the windowing system specific window
+    /// and display handles. This function is only accessible if you enable the `raw-window-handle-06` crate feature.
+    #[cfg(feature = "raw-window-handle-06")]
+    pub fn window_handle(&self) -> WindowHandle {
+        WindowHandle { adapter: self.0.window_adapter() }
     }
 }
 

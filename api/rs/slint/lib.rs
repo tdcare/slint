@@ -71,11 +71,11 @@ build = "build.rs"
 edition = "2021"
 
 [dependencies]
-slint = "1.4.0"
+slint = "1.5.0"
 ...
 
 [build-dependencies]
-slint-build = "1.4.0"
+slint-build = "1.5.0"
 ```
 
 Use the API of the slint-build crate in the `build.rs` file:
@@ -318,10 +318,13 @@ pub mod platform {
     }
 }
 
+#[cfg(any(doc, all(target_os = "android", feature = "backend-android-activity-05")))]
+pub mod android;
+
 /// Helper type that helps checking that the generated code is generated for the right version
 #[doc(hidden)]
 #[allow(non_camel_case_types)]
-pub struct VersionCheck_1_4_1;
+pub struct VersionCheck_1_5_1;
 
 #[cfg(doctest)]
 mod compile_fail_tests;

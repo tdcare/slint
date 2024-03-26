@@ -3,24 +3,26 @@
 
 [package]
 name = "todo"
-version = "1.4.1"
+version = "1.5.1"
 authors = ["Slint Developers <info@slint.dev>"]
 edition = "2021"
 build = "build.rs"
 publish = false
 license = "MIT"
 
+[lib]
+crate-type = ["lib", "cdylib"]
+path = "lib.rs"
+name = "todo_lib"
+
 [[bin]]
 path = "main.rs"
 name = "todo"
 
 [dependencies]
-slint = { path = "../../../api/rs/slint", features = ["serde"] }
+slint = { path = "../../../api/rs/slint", features = ["serde", "backend-android-activity-05"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-[target.'cfg(target_os = "android")'.dependencies]
-i-slint-backend-android-activity = { workspace = true, features = ["native-activity"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2" }
@@ -29,11 +31,4 @@ console_error_panic_hook = "0.1.5"
 [build-dependencies]
 slint-build = { path = "../../../api/rs/build" }
 
-# Remove the `#wasm#` to uncomment the wasm and android build.
-# This is commented out by default because we don't want to build it as a library by default
-# The CI has a script that does sed "s/#wasm# //" to generate the wasm build.
-
-#wasm# [lib]
-#wasm# crate-type = ["cdylib"]
-#wasm# path = "main.rs"
 

@@ -37,7 +37,7 @@ pub fn goto_definition(
                     let doc = document_cache.documents.get_document(node.source_file.path())?;
                     match doc.local_registry.lookup_element(&qual.to_string()) {
                         Ok(ElementType::Component(c)) => {
-                            goto_node(c.root_element.borrow().node.first()?)
+                            goto_node(&c.root_element.borrow().debug.first()?.0)
                         }
                         _ => None,
                     }
@@ -46,7 +46,7 @@ pub fn goto_definition(
                     if token.kind() != SyntaxKind::Identifier {
                         return None;
                     }
-                    let lr = with_lookup_ctx(document_cache, node, |ctx| {
+                    let lr = with_lookup_ctx(&document_cache.documents, node, |ctx| {
                         let mut it = n
                             .children_with_tokens()
                             .filter_map(|t| t.into_token())
@@ -68,7 +68,7 @@ pub fn goto_definition(
                         LookupResult::Expression {
                             expression: Expression::ElementReference(e),
                             ..
-                        } => e.upgrade()?.borrow().node.first()?.clone().into(),
+                        } => e.upgrade()?.borrow().debug.first()?.0.clone().into(),
                         LookupResult::Expression {
                             expression:
                                 Expression::CallbackReference(nr, _)
@@ -107,7 +107,9 @@ pub fn goto_definition(
             let doc = document_cache.documents.get_document(node.source_file.path())?;
             let imp_name = i_slint_compiler::typeloader::ImportedName::from_node(n);
             return match doc.local_registry.lookup_element(&imp_name.internal_name) {
-                Ok(ElementType::Component(c)) => goto_node(c.root_element.borrow().node.first()?),
+                Ok(ElementType::Component(c)) => {
+                    goto_node(&c.root_element.borrow().debug.first()?.0)
+                }
                 _ => None,
             };
         } else if let Some(n) = syntax_nodes::ImportSpecifier::new(node.clone()) {

@@ -1,15 +1,16 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use crate::common::{
-    ComponentInformation, LspToPreviewMessage, PreviewComponent, PreviewConfig, VersionedUrl,
-};
+use crate::common::{self, ComponentInformation, ElementRcNode, PreviewComponent, PreviewConfig};
 use crate::lsp_ext::Health;
-use i_slint_compiler::object_tree::{ElementRc, ElementWeak};
+use crate::preview::element_selection::ElementSelection;
+use crate::util;
+use i_slint_compiler::object_tree::ElementRc;
+use i_slint_compiler::parser::{syntax_nodes::Element, SyntaxKind};
+use i_slint_core::component_factory::FactoryContext;
+use i_slint_core::lengths::{LogicalLength, LogicalPoint};
 use i_slint_core::model::VecModel;
-use i_slint_core::{component_factory::FactoryContext, lengths::LogicalRect};
-use lsp_types::{notification::Notification, Url};
-use slint_interpreter::highlight::{ComponentKind, ComponentPositions};
+use lsp_types::Url;
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -21,8 +22,11 @@ use std::sync::Mutex;
 use crate::wasm_prelude::*;
 
 mod debug;
+mod drop_location;
 mod element_selection;
-mod ui;
+mod ext;
+use ext::ElementRcNodeExt;
+pub mod ui;
 #[cfg(all(target_arch = "wasm32", feature = "preview-external"))]
 mod wasm;
 #[cfg(all(target_arch = "wasm32", feature = "preview-external"))]
@@ -47,7 +51,7 @@ enum PreviewFutureState {
 
 #[derive(Default)]
 struct ContentCache {
-    source_code: HashMap<Url, String>,
+    source_code: HashMap<Url, (common::UrlVersion, String)>,
     dependency: HashSet<Url>,
     current: Option<PreviewComponent>,
     config: PreviewConfig,
@@ -62,16 +66,18 @@ static CONTENT_CACHE: std::sync::OnceLock<Mutex<ContentCache>> = std::sync::Once
 struct PreviewState {
     ui: Option<ui::PreviewUi>,
     handle: Rc<RefCell<Option<slint_interpreter::ComponentInstance>>>,
-    selected_element: Option<ElementWeak>,
+    selected: Option<element_selection::ElementSelection>,
+    notify_editor_about_selection_after_update: bool,
+    known_components: Vec<ComponentInformation>,
 }
 thread_local! {static PREVIEW_STATE: std::cell::RefCell<PreviewState> = Default::default();}
 
-pub fn set_contents(url: &VersionedUrl, content: String) {
+pub fn set_contents(url: &common::VersionedUrl, content: String) {
     let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
-    let old = cache.source_code.insert(url.url.clone(), content.clone());
-    if cache.dependency.contains(&url.url) {
-        if let Some(old) = old {
-            if content == old {
+    let old = cache.source_code.insert(url.url().clone(), (*url.version(), content.clone()));
+    if cache.dependency.contains(url.url()) {
+        if let Some((old_version, old)) = old {
+            if content == old && old_version == *url.version() {
                 return;
             }
         }
@@ -88,15 +94,191 @@ pub fn set_contents(url: &VersionedUrl, content: String) {
     }
 }
 
-// triggered from the UI, running in UI thread
-fn can_drop_component(component_name: slint::SharedString, x: f32, y: f32) -> bool {
-    i_slint_core::debug_log!("can drop? {} at {x}x{y}", component_name.as_str());
-    ((x.round() as i32) / 10) % 2 == 0 && ((y.round() as i32) / 10) % 2 == 0
+/// Try to find the parent of element `child` below `root`.
+fn search_for_parent_element(root: &ElementRc, child: &ElementRc) -> Option<ElementRc> {
+    for c in &root.borrow().children {
+        if std::rc::Rc::ptr_eq(c, child) {
+            return Some(root.clone());
+        }
+
+        if let Some(parent) = search_for_parent_element(c, child) {
+            return Some(parent);
+        }
+    }
+    None
 }
 
 // triggered from the UI, running in UI thread
-fn drop_component(component_name: slint::SharedString, x: f32, y: f32) {
-    i_slint_core::debug_log!("drop! {} at {x}x{y}", component_name.as_str());
+fn can_drop_component(component_type: slint::SharedString, x: f32, y: f32) -> bool {
+    let component_type = component_type.to_string();
+
+    PREVIEW_STATE.with(move |preview_state| {
+        let preview_state = preview_state.borrow();
+
+        let component_index = &preview_state
+            .known_components
+            .binary_search_by_key(&component_type.as_str(), |ci| ci.name.as_str())
+            .unwrap_or(usize::MAX);
+
+        let Some(component) = preview_state.known_components.get(*component_index) else {
+            return false;
+        };
+
+        drop_location::can_drop_at(x, y, component)
+    })
+}
+
+// triggered from the UI, running in UI thread
+fn drop_component(component_type: slint::SharedString, x: f32, y: f32) {
+    let component_type = component_type.to_string();
+
+    let drop_result = PREVIEW_STATE.with(|preview_state| {
+        let preview_state = preview_state.borrow();
+
+        let component_index = &preview_state
+            .known_components
+            .binary_search_by_key(&component_type.as_str(), |ci| ci.name.as_str())
+            .unwrap_or(usize::MAX);
+
+        drop_location::drop_at(x, y, preview_state.known_components.get(*component_index)?)
+    });
+
+    if let Some((edit, drop_data)) = drop_result {
+        element_selection::select_element_at_source_code_position(
+            drop_data.path,
+            drop_data.selection_offset,
+            None,
+            true,
+        );
+
+        send_message_to_lsp(crate::common::PreviewToLspMessage::SendWorkspaceEdit {
+            label: Some(format!("Add element {}", component_type)),
+            edit,
+        });
+    };
+}
+
+// triggered from the UI, running in UI thread
+fn delete_selected_element() {
+    let Some(selected) = selected_element() else {
+        return;
+    };
+
+    let Ok(url) = Url::from_file_path(&selected.path) else {
+        return;
+    };
+
+    let cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
+    let Some((version, _)) = cache.source_code.get(&url).cloned() else {
+        return;
+    };
+
+    let Some(range) = selected.as_element_node().and_then(|en| {
+        en.with_element_node(|n| {
+            if let Some(parent) = &n.parent() {
+                if parent.kind() == SyntaxKind::SubElement {
+                    return util::map_node(parent);
+                }
+            }
+            util::map_node(n)
+        })
+    }) else {
+        return;
+    };
+
+    let edit = common::create_workspace_edit(
+        url,
+        version,
+        vec![lsp_types::TextEdit { range, new_text: "".into() }],
+    );
+
+    send_message_to_lsp(crate::common::PreviewToLspMessage::SendWorkspaceEdit {
+        label: Some("Delete element".to_string()),
+        edit,
+    });
+}
+
+// triggered from the UI, running in UI thread
+fn change_geometry_of_selected_element(x: f32, y: f32, width: f32, height: f32) {
+    let Some(selected) = selected_element() else {
+        return;
+    };
+    let Some(selected_element_node) = selected.as_element_node() else {
+        return;
+    };
+    let Some(component_instance) = component_instance() else {
+        return;
+    };
+
+    let Some(geometry) = component_instance
+        .element_positions(&selected_element_node.element)
+        .get(selected.instance_index)
+        .cloned()
+    else {
+        return;
+    };
+
+    let click_position = LogicalPoint::from_lengths(LogicalLength::new(x), LogicalLength::new(y));
+    let root_element = element_selection::root_element(&component_instance);
+
+    let (parent_x, parent_y) =
+        search_for_parent_element(&root_element, &selected_element_node.element)
+            .and_then(|parent_element| {
+                component_instance
+                    .element_positions(&parent_element)
+                    .iter()
+                    .find(|g| g.contains(click_position))
+                    .map(|g| (g.origin.x, g.origin.y))
+            })
+            .unwrap_or_default();
+
+    let (properties, op) = {
+        let mut p = Vec::with_capacity(4);
+        let mut op = "";
+        if geometry.origin.x != x && x.is_finite() {
+            p.push(crate::common::PropertyChange::new(
+                "x",
+                format!("{}px", (x - parent_x).round()),
+            ));
+            op = "Moving";
+        }
+        if geometry.origin.y != y && y.is_finite() {
+            p.push(crate::common::PropertyChange::new(
+                "y",
+                format!("{}px", (y - parent_y).round()),
+            ));
+            op = "Moving";
+        }
+        if geometry.size.width != width && width.is_finite() {
+            p.push(crate::common::PropertyChange::new("width", format!("{}px", width.round())));
+            op = "Resizing";
+        }
+        if geometry.size.height != height && height.is_finite() {
+            p.push(crate::common::PropertyChange::new("height", format!("{}px", height.round())));
+            op = "Resizing";
+        }
+        (p, op)
+    };
+
+    if !properties.is_empty() {
+        let Ok(url) = Url::from_file_path(&selected.path) else {
+            return;
+        };
+
+        let cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
+        let Some((version, _)) = cache.source_code.get(&url).cloned() else {
+            return;
+        };
+
+        send_message_to_lsp(crate::common::PreviewToLspMessage::UpdateElement {
+            label: Some(format!("{op} element")),
+            position: common::VersionedPosition::new(
+                common::VersionedUrl::new(url, version),
+                selected.offset,
+            ),
+            properties,
+        });
+    }
 }
 
 fn change_style() {
@@ -152,14 +334,14 @@ pub fn config_changed(config: PreviewConfig) {
 
 /// If the file is in the cache, returns it.
 /// In any way, register it as a dependency
-fn get_url_from_cache(url: &Url) -> Option<String> {
+fn get_url_from_cache(url: &Url) -> Option<(common::UrlVersion, String)> {
     let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
     let r = cache.source_code.get(url).cloned();
     cache.dependency.insert(url.to_owned());
     r
 }
 
-fn get_path_from_cache(path: &Path) -> Option<String> {
+fn get_path_from_cache(path: &Path) -> Option<(common::UrlVersion, String)> {
     let url = Url::from_file_path(path).ok()?;
     get_url_from_cache(&url)
 }
@@ -184,6 +366,13 @@ pub fn load_preview(preview_component: PreviewComponent) {
     };
 
     run_in_ui_thread(move || async move {
+        let (selected, notify_editor) = PREVIEW_STATE.with(|preview_state| {
+            let mut preview_state = preview_state.borrow_mut();
+            let notify_editor = preview_state.notify_editor_about_selection_after_update;
+            preview_state.notify_editor_about_selection_after_update = false;
+            (preview_state.selected.take(), notify_editor)
+        });
+
         loop {
             let (preview_component, config) = {
                 let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
@@ -213,7 +402,7 @@ pub fn load_preview(preview_component: PreviewComponent) {
             match cache.loading_state {
                 PreviewFutureState::Loading => {
                     cache.loading_state = PreviewFutureState::Pending;
-                    return;
+                    break;
                 }
                 PreviewFutureState::Pending => unreachable!(),
                 PreviewFutureState::PreLoading => unreachable!(),
@@ -223,19 +412,52 @@ pub fn load_preview(preview_component: PreviewComponent) {
                 }
             };
         }
+
+        if let Some(se) = selected {
+            element_selection::select_element_at_source_code_position(
+                se.path.clone(),
+                se.offset,
+                None,
+                false,
+            );
+
+            if notify_editor {
+                if let Some(component_instance) = component_instance() {
+                    if let Some((element, debug_index)) = component_instance
+                        .element_node_at_source_code_position(&se.path, se.offset)
+                        .first()
+                    {
+                        let Some(element_node) = ElementRcNode::new(element.clone(), *debug_index)
+                        else {
+                            return;
+                        };
+                        let (path, pos) = element_node.with_element_node(|node| {
+                            let sf = &node.source_file;
+                            (sf.path().to_owned(), util::map_position(sf, se.offset.into()))
+                        });
+                        ask_editor_to_show_document(
+                            &path.to_string_lossy(),
+                            lsp_types::Range::new(pos, pos),
+                        );
+                    }
+                }
+            }
+        }
     });
 }
 
-// Most be inside the thread running the slint event loop
-async fn reload_preview_impl(
-    preview_component: PreviewComponent,
+async fn parse_source(
+    include_paths: Vec<PathBuf>,
+    library_paths: HashMap<String, PathBuf>,
+    path: PathBuf,
+    source_code: String,
     style: String,
-    config: PreviewConfig,
-) {
-    let component = PreviewComponent { style: String::new(), ..preview_component };
-
-    start_parsing();
-
+    file_loader_fallback: impl Fn(
+            &Path,
+        ) -> core::pin::Pin<
+            Box<dyn core::future::Future<Output = Option<std::io::Result<String>>>>,
+        > + 'static,
+) -> (Vec<i_slint_compiler::diagnostics::Diagnostic>, Option<ComponentDefinition>) {
     let mut builder = slint_interpreter::ComponentCompiler::default();
 
     #[cfg(target_arch = "wasm32")]
@@ -245,32 +467,47 @@ async fn reload_preview_impl(
     }
 
     if !style.is_empty() {
-        builder.set_style(style.clone());
+        builder.set_style(style);
     }
-    builder.set_include_paths(config.include_paths);
-    builder.set_library_paths(config.library_paths);
+    builder.set_include_paths(include_paths);
+    builder.set_library_paths(library_paths);
+    builder.set_file_loader(file_loader_fallback);
 
-    builder.set_file_loader(|path| {
-        let path = path.to_owned();
-        Box::pin(async move { get_path_from_cache(&path).map(Result::Ok) })
-    });
+    let compiled = builder.build_from_source(source_code, path).await;
 
-    // to_file_path on a WASM Url just returns the URL as the path!
+    (builder.diagnostics().clone(), compiled)
+}
+
+// Must be inside the thread running the slint event loop
+async fn reload_preview_impl(
+    preview_component: PreviewComponent,
+    style: String,
+    config: PreviewConfig,
+) {
+    let component = PreviewComponent { style: String::new(), ..preview_component };
+
+    start_parsing();
+
     let path = component.url.to_file_path().unwrap_or(PathBuf::from(&component.url.to_string()));
-
-    let compiled = if let Some(mut from_cache) = get_url_from_cache(&component.url) {
+    let source = {
+        let (_, from_cache) = get_url_from_cache(&component.url).unwrap_or_default();
         if let Some(component_name) = &component.component {
-            from_cache = format!(
-                "{from_cache}\nexport component _SLINT_LivePreview inherits {component_name} {{ /* {} */ }}\n",
-                crate::common::NODE_IGNORE_COMMENT,
-            );
+            format!(
+                "{from_cache}\nexport component _SLINT_LivePreview inherits {component_name} {{ /* {NODE_IGNORE_COMMENT} */ }}\n",
+            )
+        } else {
+            from_cache
         }
-        builder.build_from_source(from_cache, path).await
-    } else {
-        builder.build_from_path(path).await
     };
 
-    notify_diagnostics(builder.diagnostics());
+    let (diagnostics, compiled) =
+        parse_source(config.include_paths, config.library_paths, path, source, style, |path| {
+            let path = path.to_owned();
+            Box::pin(async move { get_path_from_cache(&path).map(|(_, c)| Result::Ok(c)) })
+        })
+        .await;
+
+    notify_diagnostics(&diagnostics);
 
     let success = compiled.is_some();
     update_preview_area(compiled);
@@ -309,7 +546,7 @@ fn set_preview_factory(
 /// Highlight the element pointed at the offset in the path.
 /// When path is None, remove the highlight.
 pub fn highlight(url: Option<Url>, offset: u32) {
-    let highlight = url.clone().map(|x| (x, offset));
+    let highlight = url.clone().map(|u| (u, offset));
     let mut cache = CONTENT_CACHE.get_or_init(Default::default).lock().unwrap();
 
     if cache.highlight == highlight {
@@ -317,55 +554,39 @@ pub fn highlight(url: Option<Url>, offset: u32) {
     }
     cache.highlight = highlight;
 
+    let selected = selected_element();
+
     if cache.highlight.as_ref().map_or(true, |(url, _)| cache.dependency.contains(url)) {
         run_in_ui_thread(move || async move {
-            let handle = PREVIEW_STATE.with(|preview_state| {
-                let preview_state = preview_state.borrow();
-                let result = preview_state.handle.borrow().as_ref().map(|h| h.clone_strong());
-                result
-            });
+            let Some(path) = url.and_then(|u| Url::to_file_path(&u).ok()) else {
+                return;
+            };
 
-            if let Some(handle) = handle {
-                let element_positions =
-                    if let Some(path) = url.as_ref().and_then(|u| u.to_file_path().ok()) {
-                        handle.component_positions(path, offset)
-                    } else {
-                        ComponentPositions::default()
-                    };
-
-                set_selected_element(None, element_positions);
+            if Some((path.clone(), offset)) == selected.map(|s| (s.path, s.offset)) {
+                // Already selected!
+                return;
             }
+            element_selection::select_element_at_source_code_position(path, offset, None, false);
         })
     }
 }
 
-/// Highlight the element pointed at the offset in the path.
-/// When path is None, remove the highlight.
-pub fn known_components(_url: &Option<VersionedUrl>, components: Vec<ComponentInformation>) {
+pub fn known_components(
+    _url: &Option<common::VersionedUrl>,
+    mut components: Vec<ComponentInformation>,
+) {
+    components.sort_unstable_by_key(|ci| ci.name.clone());
+
     run_in_ui_thread(move || async move {
         PREVIEW_STATE.with(|preview_state| {
-            let preview_state = preview_state.borrow();
+            let mut preview_state = preview_state.borrow_mut();
+            preview_state.known_components = components;
+
             if let Some(ui) = &preview_state.ui {
-                ui::ui_set_known_components(ui, &components)
+                ui::ui_set_known_components(ui, &preview_state.known_components)
             }
         })
     });
-}
-
-pub fn show_document_request_from_element_callback(
-    uri: Url,
-    range: lsp_types::Range,
-) -> Option<lsp_types::ShowDocumentParams> {
-    if range.start.character == 0 || range.end.character == 0 {
-        return None;
-    }
-
-    Some(lsp_types::ShowDocumentParams {
-        uri,
-        external: Some(false),
-        take_focus: Some(true),
-        selection: Some(range),
-    })
 }
 
 fn convert_diagnostics(
@@ -384,32 +605,6 @@ fn convert_diagnostics(
     result
 }
 
-pub fn notify_lsp_diagnostics(
-    sender: &crate::ServerNotifier,
-    uri: lsp_types::Url,
-    diagnostics: Vec<lsp_types::Diagnostic>,
-) -> Option<()> {
-    sender
-        .send_notification(
-            "textDocument/publishDiagnostics".into(),
-            lsp_types::PublishDiagnosticsParams { uri, diagnostics, version: None },
-        )
-        .ok()
-}
-
-pub fn send_status_notification(sender: &crate::ServerNotifier, message: &str, health: Health) {
-    sender
-        .send_notification(
-            crate::lsp_ext::ServerStatusNotification::METHOD.into(),
-            crate::lsp_ext::ServerStatusParams {
-                health,
-                quiescent: false,
-                message: Some(message.into()),
-            },
-        )
-        .unwrap_or_else(|e| eprintln!("Error sending notification: {:?}", e));
-}
-
 fn reset_selections(ui: &ui::PreviewUi) {
     let model = Rc::new(slint::VecModel::from(Vec::new()));
     ui.set_selections(slint::ModelRc::from(model));
@@ -417,74 +612,70 @@ fn reset_selections(ui: &ui::PreviewUi) {
 
 fn set_selections(
     ui: Option<&ui::PreviewUi>,
-    element_position: Option<(&ElementRc, LogicalRect)>,
-    positions: ComponentPositions,
+    main_index: usize,
+    layout_kind: ui::LayoutKind,
+    is_moveable: bool,
+    is_resizable: bool,
+    positions: &[i_slint_core::lengths::LogicalRect],
 ) {
     let Some(ui) = ui else {
         return;
     };
 
-    let values = {
-        let mut tmp = Vec::with_capacity(
-            positions.geometries.len() + if element_position.is_some() { 1 } else { 0 },
-        );
-
-        if let Some((e, primary_position)) = element_position.as_ref() {
-            let border_color = if e.borrow().layout.is_some() {
-                i_slint_core::Color::from_argb_encoded(0xffff0000)
-            } else {
-                i_slint_core::Color::from_argb_encoded(0xff0000ff)
-            };
-
-            tmp.push(ui::Selection {
-                width: primary_position.size.width,
-                height: primary_position.size.height,
-                x: primary_position.origin.x,
-                y: primary_position.origin.y,
-                border_color,
-            });
-        }
-        let secondary_border_color = match positions.kind {
-            Some(ComponentKind::Layout) => i_slint_core::Color::from_argb_encoded(0x80ff0000),
-            _ => i_slint_core::Color::from_argb_encoded(0x800000ff),
-        };
-
-        tmp.extend(positions.geometries.iter().map(|geometry| ui::Selection {
-            width: geometry.size.width,
-            height: geometry.size.height,
-            x: geometry.origin.x,
-            y: geometry.origin.y,
-            border_color: secondary_border_color,
-        }));
-        tmp
-    };
+    let values = positions
+        .iter()
+        .enumerate()
+        .map(|(i, g)| ui::Selection {
+            geometry: ui::SelectionRectangle {
+                width: g.size.width,
+                height: g.size.height,
+                x: g.origin.x,
+                y: g.origin.y,
+            },
+            layout_data: layout_kind,
+            is_primary: i == main_index,
+            is_moveable,
+            is_resizable,
+        })
+        .collect::<Vec<_>>();
     let model = Rc::new(slint::VecModel::from(values));
     ui.set_selections(slint::ModelRc::from(model));
 }
 
 fn set_selected_element(
-    element_position: Option<(&ElementRc, LogicalRect)>,
-    secondary: slint_interpreter::highlight::ComponentPositions,
+    selection: Option<element_selection::ElementSelection>,
+    positions: &[i_slint_core::lengths::LogicalRect],
+    notify_editor_about_selection_after_update: bool,
 ) {
+    let (layout_kind, is_in_layout) = selection
+        .as_ref()
+        .and_then(|s| s.as_element_node())
+        .map(|en| (en.layout_kind(), element_selection::is_element_node_in_layout(&en)))
+        .unwrap_or((ui::LayoutKind::None, false));
+
     PREVIEW_STATE.with(move |preview_state| {
         let mut preview_state = preview_state.borrow_mut();
-        if let Some((e, _)) = element_position {
-            preview_state.selected_element = Some(Rc::downgrade(e));
-        } else {
-            preview_state.selected_element = None;
-        }
 
-        set_selections(preview_state.ui.as_ref(), element_position, secondary);
+        let is_layout = layout_kind != ui::LayoutKind::None;
+        set_selections(
+            preview_state.ui.as_ref(),
+            selection.as_ref().map(|s| s.instance_index).unwrap_or_default(),
+            layout_kind,
+            !is_in_layout && !is_layout,
+            !is_in_layout && !is_layout,
+            positions,
+        );
+
+        preview_state.selected = selection;
+        preview_state.notify_editor_about_selection_after_update =
+            notify_editor_about_selection_after_update;
     })
 }
 
-fn selected_element() -> Option<ElementRc> {
+fn selected_element() -> Option<ElementSelection> {
     PREVIEW_STATE.with(move |preview_state| {
         let preview_state = preview_state.borrow();
-        let Some(weak) = &preview_state.selected_element else {
-            return None;
-        };
-        weak.upgrade()
+        preview_state.selected.clone()
     })
 }
 
@@ -582,26 +773,73 @@ fn update_preview_area(compiled: Option<ComponentDefinition>) {
 }
 
 pub fn lsp_to_preview_message(
-    message: LspToPreviewMessage,
+    message: crate::common::LspToPreviewMessage,
     #[cfg(not(target_arch = "wasm32"))] sender: &crate::ServerNotifier,
 ) {
+    use crate::common::LspToPreviewMessage as M;
     match message {
-        LspToPreviewMessage::SetContents { url, contents } => {
+        M::SetContents { url, contents } => {
             set_contents(&url, contents);
         }
-        LspToPreviewMessage::SetConfiguration { config } => {
+        M::SetConfiguration { config } => {
             config_changed(config);
         }
-        LspToPreviewMessage::ShowPreview(pc) => {
+        M::ShowPreview(pc) => {
             #[cfg(not(target_arch = "wasm32"))]
             native::open_ui(sender);
             load_preview(pc);
         }
-        LspToPreviewMessage::HighlightFromEditor { url, offset } => {
+        M::HighlightFromEditor { url, offset } => {
             highlight(url, offset);
         }
-        LspToPreviewMessage::KnownComponents { url, components } => {
+        M::KnownComponents { url, components } => {
             known_components(&url, components);
         }
+    }
+}
+
+/// Use this in nodes you want the language server and preview to
+/// ignore a node for code analysis purposes.
+const NODE_IGNORE_COMMENT: &str = "@lsp:ignore-node";
+
+/// Check whether a node is marked to be ignored in the LSP/live preview
+/// using a comment containing `@lsp:ignore-node`
+fn is_element_node_ignored(node: &Element) -> bool {
+    node.children_with_tokens().any(|nt| {
+        nt.as_token()
+            .map(|t| t.kind() == SyntaxKind::Comment && t.text().contains(NODE_IGNORE_COMMENT))
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(test)]
+mod test {
+    use slint_interpreter::ComponentInstance;
+
+    #[track_caller]
+    pub fn compile_test(style: &str, source_code: &str) -> ComponentInstance {
+        i_slint_backend_testing::init();
+
+        let path = std::path::PathBuf::from("/test_data.slint");
+        let (diagnostics, component_definition) = spin_on::spin_on(super::parse_source(
+            vec![],
+            std::collections::HashMap::new(),
+            path,
+            source_code.to_string(),
+            style.to_string(),
+            |_path| {
+                Box::pin(async move {
+                    Some(Result::Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "Not supported in tests",
+                    )))
+                })
+            },
+        ));
+
+        i_slint_core::debug_log!("Test source diagnostics:\n{diagnostics:?}");
+        assert!(diagnostics.is_empty());
+
+        component_definition.unwrap().create().unwrap()
     }
 }

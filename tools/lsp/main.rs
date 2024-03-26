@@ -14,7 +14,7 @@ pub mod lsp_ext;
 mod preview;
 pub mod util;
 
-use common::{LspToPreviewMessage, Result, VersionedUrl};
+use common::Result;
 use language::*;
 
 use i_slint_compiler::CompilerConfiguration;
@@ -95,8 +95,21 @@ type OutgoingRequestQueue = Arc<Mutex<HashMap<RequestId, OutgoingRequest>>>;
 pub struct ServerNotifier {
     sender: crossbeam_channel::Sender<Message>,
     queue: OutgoingRequestQueue,
-    use_external_preview: std::cell::Cell<bool>,
+    use_external_preview: Arc<atomic::AtomicBool>,
+    #[cfg(feature = "preview-engine")]
+    preview_to_lsp_sender: crossbeam_channel::Sender<crate::common::PreviewToLspMessage>,
 }
+
+impl ServerNotifier {
+    pub fn use_external_preview(&self) -> bool {
+        self.use_external_preview.load(atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_use_external_preview(&self, is_external: bool) {
+        self.use_external_preview.store(is_external, atomic::Ordering::Release);
+    }
+}
+
 impl ServerNotifier {
     pub fn send_notification(&self, method: String, params: impl serde::Serialize) -> Result<()> {
         self.sender.send(Message::Notification(lsp_server::Notification::new(method, params)))?;
@@ -135,13 +148,18 @@ impl ServerNotifier {
         }))
     }
 
-    pub fn send_preview_message(&self, message: LspToPreviewMessage) {
-        if self.use_external_preview.get() {
+    pub fn send_message_to_preview(&self, message: common::LspToPreviewMessage) {
+        if self.use_external_preview() {
             let _ = self.send_notification("slint/lsp_to_preview".to_string(), message);
         } else {
             #[cfg(feature = "preview-builtin")]
             preview::lsp_to_preview_message(message, self);
         }
+    }
+
+    #[cfg(feature = "preview-engine")]
+    pub fn send_message_to_lsp(&self, message: common::PreviewToLspMessage) {
+        let _ = self.preview_to_lsp_sender.send(message);
     }
 }
 
@@ -244,10 +262,16 @@ fn main_loop(connection: Connection, init_param: InitializeParams, cli_args: Cli
     register_request_handlers(&mut rh);
 
     let request_queue = OutgoingRequestQueue::default();
+    #[cfg_attr(not(feature = "preview-engine"), allow(unused))]
+    let (preview_to_lsp_sender, preview_to_lsp_receiver) =
+        crossbeam_channel::unbounded::<crate::common::PreviewToLspMessage>();
+
     let server_notifier = ServerNotifier {
         sender: connection.sender.clone(),
         queue: request_queue.clone(),
         use_external_preview: Default::default(),
+        #[cfg(feature = "preview-engine")]
+        preview_to_lsp_sender,
     };
 
     let mut compiler_config =
@@ -263,14 +287,12 @@ fn main_loop(connection: Connection, init_param: InitializeParams, cli_args: Cli
             let contents = std::fs::read_to_string(&path);
             if let Ok(contents) = &contents {
                 if let Ok(url) = Url::from_file_path(&path) {
-                    server_notifier.send_preview_message(LspToPreviewMessage::SetContents {
-                        url: VersionedUrl { url, version: None },
-                        contents: contents.clone(),
-                    })
-                } else {
-                    i_slint_core::debug_log!(
-                        "Could not sent contents of file {path:?}: NOT AN URL"
-                    );
+                    server_notifier.send_message_to_preview(
+                        common::LspToPreviewMessage::SetContents {
+                            url: common::VersionedUrl::new(url, None),
+                            contents: contents.clone(),
+                        },
+                    )
                 }
             }
             Some(contents)
@@ -302,33 +324,42 @@ fn main_loop(connection: Connection, init_param: InitializeParams, cli_args: Cli
         Poll::Pending => futures.push(first_future),
     };
 
-    for msg in &connection.receiver {
-        match msg {
-            Message::Request(req) => {
-                // ignore errors when shutdown
-                if connection.handle_shutdown(&req).unwrap_or(false) {
-                    return Ok(());
-                }
-                futures.push(Box::pin(rh.handle_request(req, &ctx)));
-            }
-            Message::Response(resp) => {
-                if let Some(q) = request_queue.lock().unwrap().get_mut(&resp.id) {
-                    match q {
-                        OutgoingRequest::Done(_) => {
-                            return Err("Response to unknown request".into())
+    loop {
+        crossbeam_channel::select! {
+            recv(connection.receiver) -> msg => {
+                match msg? {
+                    Message::Request(req) => {
+                        // ignore errors when shutdown
+                        if connection.handle_shutdown(&req).unwrap_or(false) {
+                            return Ok(());
                         }
-                        OutgoingRequest::Start => { /* nothing to do */ }
-                        OutgoingRequest::Pending(x) => x.wake_by_ref(),
-                    };
-                    *q = OutgoingRequest::Done(resp)
-                } else {
-                    return Err("Response to unknown request".into());
+                        futures.push(Box::pin(rh.handle_request(req, &ctx)));
+                    }
+                    Message::Response(resp) => {
+                        if let Some(q) = request_queue.lock().unwrap().get_mut(&resp.id) {
+                            match q {
+                                OutgoingRequest::Done(_) => {
+                                    return Err("Response to unknown request".into())
+                                }
+                                OutgoingRequest::Start => { /* nothing to do */ }
+                                OutgoingRequest::Pending(x) => x.wake_by_ref(),
+                            };
+                            *q = OutgoingRequest::Done(resp)
+                        } else {
+                            return Err("Response to unknown request".into());
+                        }
+                    }
+                    Message::Notification(notification) => {
+                        futures.push(Box::pin(handle_notification(notification, &ctx)))
+                    }
                 }
-            }
-            Message::Notification(notification) => {
-                futures.push(Box::pin(handle_notification(notification, &ctx)))
-            }
-        }
+             },
+             recv(preview_to_lsp_receiver) -> _msg => {
+                // Messages from the native preview come in here:
+                #[cfg(feature = "preview-engine")]
+                futures.push(Box::pin(handle_preview_to_lsp_message(_msg?, &ctx)))
+             },
+        };
 
         let mut result = Ok(());
         futures.retain_mut(|f| {
@@ -345,7 +376,6 @@ fn main_loop(connection: Connection, init_param: InitializeParams, cli_args: Cli
         });
         result?;
     }
-    Ok(())
 }
 
 async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -> Result<()> {
@@ -359,7 +389,7 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
                 Some(params.text_document.version),
                 &mut ctx.document_cache.borrow_mut(),
             )
-            .await?;
+            .await
         }
         DidChangeTextDocument::METHOD => {
             let mut params: DidChangeTextDocumentParams = serde_json::from_value(req.params)?;
@@ -370,65 +400,92 @@ async fn handle_notification(req: lsp_server::Notification, ctx: &Rc<Context>) -
                 Some(params.text_document.version),
                 &mut ctx.document_cache.borrow_mut(),
             )
-            .await?;
+            .await
         }
-        DidChangeConfiguration::METHOD => {
-            load_configuration(ctx).await?;
-        }
+        DidChangeConfiguration::METHOD => load_configuration(ctx).await,
 
         #[cfg(any(feature = "preview-builtin", feature = "preview-external"))]
         "slint/showPreview" => {
-            language::show_preview_command(
-                req.params.as_array().map_or(&[], |x| x.as_slice()),
-                ctx,
-            )?;
+            language::show_preview_command(req.params.as_array().map_or(&[], |x| x.as_slice()), ctx)
         }
 
-        #[cfg(all(feature = "preview-external", feature = "preview-engine"))]
+        // Messages from the WASM preview come in as notifications sent by the "editor":
+        #[cfg(any(feature = "preview-external", feature = "preview-engine"))]
         "slint/preview_to_lsp" => {
-            use common::PreviewToLspMessage as M;
-            let params: M = serde_json::from_value(req.params)?;
-            match params {
-                M::Status { message, health } => {
-                    crate::preview::send_status_notification(
-                        &ctx.server_notifier,
-                        &message,
-                        health,
-                    );
-                }
-                M::Diagnostics { uri, diagnostics } => {
-                    crate::preview::notify_lsp_diagnostics(&ctx.server_notifier, uri, diagnostics);
-                }
-                M::ShowDocument { file, selection } => {
-                    send_show_document_to_editor(ctx.server_notifier.clone(), file, selection)
-                        .await;
-                }
-                M::PreviewTypeChanged { is_external } => {
-                    ctx.server_notifier.use_external_preview.set(is_external);
-                }
-                M::RequestState { .. } => {
-                    crate::language::request_state(ctx);
-                }
-            }
+            handle_preview_to_lsp_message(serde_json::from_value(req.params)?, ctx).await
         }
-        _ => (),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(any(feature = "preview-external", feature = "preview-engine"))]
+async fn send_workspace_edit(
+    server_notifier: ServerNotifier,
+    label: Option<String>,
+    edit: Result<lsp_types::WorkspaceEdit>,
+) -> Result<()> {
+    let edit = edit?;
+
+    let response = server_notifier
+        .send_request::<lsp_types::request::ApplyWorkspaceEdit>(
+            lsp_types::ApplyWorkspaceEditParams { label, edit },
+        )?
+        .await?;
+    if !response.applied {
+        return Err(response
+            .failure_reason
+            .unwrap_or("Operation failed, no specific reason given".into())
+            .into());
     }
     Ok(())
 }
 
-#[cfg(feature = "preview-engine")]
-pub async fn send_show_document_to_editor(
-    sender: ServerNotifier,
-    file: Url,
-    range: lsp_types::Range,
-) {
-    let Some(params) = crate::preview::show_document_request_from_element_callback(file, range)
-    else {
-        return;
-    };
-    let Ok(fut) = sender.send_request::<lsp_types::request::ShowDocument>(params) else {
-        return;
-    };
-
-    let _ = fut.await;
+#[cfg(any(feature = "preview-external", feature = "preview-engine"))]
+async fn handle_preview_to_lsp_message(
+    message: crate::common::PreviewToLspMessage,
+    ctx: &Rc<Context>,
+) -> Result<()> {
+    use crate::common::PreviewToLspMessage as M;
+    match message {
+        M::Status { message, health } => {
+            crate::common::lsp_to_editor::send_status_notification(
+                &ctx.server_notifier,
+                &message,
+                health,
+            );
+        }
+        M::Diagnostics { uri, diagnostics } => {
+            crate::common::lsp_to_editor::notify_lsp_diagnostics(
+                &ctx.server_notifier,
+                uri,
+                diagnostics,
+            );
+        }
+        M::ShowDocument { file, selection } => {
+            crate::common::lsp_to_editor::send_show_document_to_editor(
+                ctx.server_notifier.clone(),
+                file,
+                selection,
+            )
+            .await;
+        }
+        M::PreviewTypeChanged { is_external } => {
+            ctx.server_notifier.set_use_external_preview(is_external);
+        }
+        M::RequestState { .. } => {
+            crate::language::request_state(ctx);
+        }
+        M::UpdateElement { label, position, properties } => {
+            let _ = send_workspace_edit(
+                ctx.server_notifier.clone(),
+                label,
+                properties::update_element_properties(ctx, position, properties),
+            )
+            .await;
+        }
+        M::SendWorkspaceEdit { label, edit } => {
+            let _ = send_workspace_edit(ctx.server_notifier.clone(), label, Ok(edit)).await;
+        }
+    }
+    Ok(())
 }

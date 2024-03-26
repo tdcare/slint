@@ -8,6 +8,12 @@
 
 use std::fmt::Write;
 
+/// The configuration for the C++ code generator
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Config {
+    pub namespace: Option<String>,
+}
+
 fn ident(ident: &str) -> String {
     if ident.contains('-') {
         ident.replace('-', "_")
@@ -76,6 +82,7 @@ mod cpp_ast {
     pub struct File {
         pub includes: Vec<String>,
         pub after_includes: String,
+        pub namespace: Option<String>,
         pub declarations: Vec<Declaration>,
         pub definitions: Vec<Declaration>,
     }
@@ -85,6 +92,11 @@ mod cpp_ast {
             for i in &self.includes {
                 writeln!(f, "#include {}", i)?;
             }
+            if let Some(namespace) = &self.namespace {
+                writeln!(f, "namespace {} {{", namespace)?;
+                INDENTATION.with(|x| x.set(x.get() + 1));
+            }
+
             write!(f, "{}", self.after_includes)?;
             for d in &self.declarations {
                 write!(f, "\n{}", d)?;
@@ -92,6 +104,11 @@ mod cpp_ast {
             for d in &self.definitions {
                 write!(f, "\n{}", d)?;
             }
+            if let Some(namespace) = &self.namespace {
+                writeln!(f, "}} // namespace {}", namespace)?;
+                INDENTATION.with(|x| x.set(x.get() - 1));
+            }
+
             Ok(())
         }
     }
@@ -429,8 +446,10 @@ fn property_set_value_code(
     ctx: &EvaluationContext,
 ) -> String {
     let prop = access_member(property, ctx);
-    if let Some(animation) = ctx.current_sub_component.and_then(|c| c.animations.get(property)) {
-        let animation_code = compile_expression(animation, ctx);
+    if let Some((animation, map)) = &ctx.property_info(property).animation {
+        let mut animation = (*animation).clone();
+        map.map_expression(&mut animation);
+        let animation_code = compile_expression(&animation, ctx);
         return format!("{}.set_animated_value({}, {})", prop, value_expr, animation_code);
     }
     format!("{}.set({})", prop, value_expr)
@@ -513,8 +532,8 @@ fn handle_property_init(
 }
 
 /// Returns the text of the C++ code produced by the given root component
-pub fn generate(doc: &Document) -> impl std::fmt::Display {
-    let mut file = File::default();
+pub fn generate(doc: &Document, config: Config) -> impl std::fmt::Display {
+    let mut file = File { namespace: config.namespace.clone(), ..Default::default() };
 
     file.includes.push("<array>".into());
     file.includes.push("<limits>".into());
@@ -810,6 +829,7 @@ fn generate_struct(
     fields: &BTreeMap<String, Type>,
     node: &syntax_nodes::ObjectType,
 ) {
+    let name = ident(name);
     let mut members = node
         .ObjectTypeMember()
         .map(|n| crate::parser::identifier_text(&n).unwrap())
@@ -836,11 +856,7 @@ fn generate_struct(
         }),
     ));
 
-    file.declarations.push(Declaration::Struct(Struct {
-        name: name.into(),
-        members,
-        ..Default::default()
-    }))
+    file.declarations.push(Declaration::Struct(Struct { name, members, ..Default::default() }))
 }
 
 fn generate_enum(file: &mut File, en: &std::rc::Rc<Enumeration>) {
@@ -1115,7 +1131,7 @@ fn generate_item_tree(
     });
 
     let mut visit_children_statements = vec![
-        "static const auto dyn_visit = [] (const uint8_t *base,  [[maybe_unused]] slint::private_api::TraversalOrder order, [[maybe_unused]] slint::private_api::ItemVisitorRefMut visitor, [[maybe_unused]] uint32_t dyn_index) -> uint64_t {".to_owned(),
+        "static const auto dyn_visit = [] (const void *base,  [[maybe_unused]] slint::private_api::TraversalOrder order, [[maybe_unused]] slint::private_api::ItemVisitorRefMut visitor, [[maybe_unused]] uint32_t dyn_index) -> uint64_t {".to_owned(),
         format!("    [[maybe_unused]] auto self = reinterpret_cast<const {}*>(base);", item_tree_class_name)];
     let mut subtree_range_statement = vec!["    std::abort();".into()];
     let mut subtree_component_statement = vec!["    std::abort();".into()];
@@ -1825,7 +1841,7 @@ fn generate_sub_component(
                                       code: Vec<String>| {
         let mut code = ["[[maybe_unused]] auto self = this;".into()]
             .into_iter()
-            .chain(code.into_iter())
+            .chain(code)
             .collect::<Vec<_>>();
 
         let mut else_ = "";
@@ -2749,8 +2765,8 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
         Expression::UnaryOp { sub, op } => {
             format!("({op} {sub})", sub = compile_expression(sub, ctx), op = op,)
         }
-        Expression::ImageReference { resource_ref, .. }  => {
-            match resource_ref {
+        Expression::ImageReference { resource_ref, nine_slice }  => {
+            let image = match resource_ref {
                 crate::expression_tree::ImageReference::None => r#"slint::Image()"#.to_string(),
                 crate::expression_tree::ImageReference::AbsolutePath(path) => format!(r#"slint::Image::load_from_path(slint::SharedString(u8"{}"))"#, escape_string(path.as_str())),
                 crate::expression_tree::ImageReference::EmbeddedData { resource_id, extension } => {
@@ -2760,6 +2776,12 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
                 crate::expression_tree::ImageReference::EmbeddedTexture{resource_id} => {
                     format!("slint::private_api::image_from_embedded_textures(&slint_embedded_resource_{resource_id})")
                 },
+            };
+            match &nine_slice {
+                Some([a, b, c, d]) => {
+                    format!("([&] {{ auto image = {image}; image.set_nine_slice_edges({a}, {b}, {c}, {d}); return image; }})()")
+                }
+                None => image,
             }
         }
         Expression::Condition { condition, true_expr, false_expr } => {
@@ -2858,7 +2880,7 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
             let prefix = if value.enumeration.node.is_some() { "" } else {"slint::cbindgen_private::"};
             format!(
                 "{prefix}{}::{}",
-                value.enumeration.name,
+                ident(&value.enumeration.name),
                 ident(&value.to_pascal_case()),
             )
         }
@@ -3026,6 +3048,9 @@ fn compile_builtin_function_call(
             ctx.generator_state.conditional_includes.cstdlib.set(true);
             format!("[](const auto &a){{ auto e1 = std::end(a); auto e2 = const_cast<char*>(e1); auto r = std::strtod(std::begin(a), &e2); return e1 == e2 ? r : 0; }}({})", a.next().unwrap())
         }
+        BuiltinFunction::ColorRgbaStruct => {
+            format!("{}.to_argb_uint()", a.next().unwrap())
+        }
         BuiltinFunction::ColorBrighter => {
             format!("{}.brighter({})", a.next().unwrap(), a.next().unwrap())
         }
@@ -3055,8 +3080,8 @@ fn compile_builtin_function_call(
                 a = a.next().unwrap(),
             )
         }
-        BuiltinFunction::DarkColorScheme => {
-            format!("{}.dark_color_scheme()", access_window_field(ctx))
+        BuiltinFunction::ColorScheme => {
+            format!("{}.color_scheme()", access_window_field(ctx))
         }
         BuiltinFunction::SetTextInputFocused => {
             format!("{}.set_text_input_focused({})", access_window_field(ctx), a.next().unwrap())
@@ -3298,8 +3323,8 @@ fn generate_type_aliases(file: &mut File, doc: &Document) {
         .filter(|(export_name, type_name)| export_name != type_name)
         .map(|(export_name, type_name)| {
             Declaration::TypeAlias(TypeAlias {
-                old_name: ident(&type_name),
-                new_name: ident(&export_name),
+                old_name: ident(type_name),
+                new_name: ident(export_name),
             })
         });
 

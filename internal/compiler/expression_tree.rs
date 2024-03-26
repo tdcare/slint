@@ -47,6 +47,7 @@ pub enum BuiltinFunction {
     StringToFloat,
     /// the "42".is_float()
     StringIsFloat,
+    ColorRgbaStruct,
     ColorBrighter,
     ColorDarker,
     ColorTransparentize,
@@ -55,7 +56,7 @@ pub enum BuiltinFunction {
     ImageSize,
     ArrayLength,
     Rgb,
-    DarkColorScheme,
+    ColorScheme,
     TextInputFocused,
     SetTextInputFocused,
     ImplicitLayoutInfo(Orientation),
@@ -153,6 +154,21 @@ impl BuiltinFunction {
                 return_type: Box::new(crate::layout::layout_info_type()),
                 args: vec![Type::ElementReference],
             },
+            BuiltinFunction::ColorRgbaStruct => Type::Function {
+                return_type: Box::new(Type::Struct {
+                    fields: IntoIterator::into_iter([
+                        ("red".to_string(), Type::Int32),
+                        ("green".to_string(), Type::Int32),
+                        ("blue".to_string(), Type::Int32),
+                        ("alpha".to_string(), Type::Int32),
+                    ])
+                    .collect(),
+                    name: Some("Color".into()),
+                    node: None,
+                    rust_attributes: None,
+                }),
+                args: vec![Type::Color],
+            },
             BuiltinFunction::ColorBrighter => Type::Function {
                 return_type: Box::new(Type::Brush),
                 args: vec![Type::Brush, Type::Float32],
@@ -193,9 +209,12 @@ impl BuiltinFunction {
                 return_type: Box::new(Type::Color),
                 args: vec![Type::Int32, Type::Int32, Type::Int32, Type::Float32],
             },
-            BuiltinFunction::DarkColorScheme => {
-                Type::Function { return_type: Box::new(Type::Bool), args: vec![] }
-            }
+            BuiltinFunction::ColorScheme => Type::Function {
+                return_type: Box::new(Type::Enumeration(
+                    crate::typeregister::BUILTIN_ENUMS.with(|e| e.ColorScheme.clone()),
+                )),
+                args: vec![],
+            },
             BuiltinFunction::TextInputFocused => {
                 Type::Function { return_type: Box::new(Type::Bool), args: vec![] }
             }
@@ -234,7 +253,7 @@ impl BuiltinFunction {
             BuiltinFunction::GetWindowScaleFactor => false,
             BuiltinFunction::GetWindowDefaultFontSize => false,
             BuiltinFunction::AnimationTick => false,
-            BuiltinFunction::DarkColorScheme => false,
+            BuiltinFunction::ColorScheme => false,
             // Even if it is not pure, we optimize it away anyway
             BuiltinFunction::Debug => true,
             BuiltinFunction::Mod
@@ -256,7 +275,8 @@ impl BuiltinFunction {
             BuiltinFunction::SetSelectionOffsets => false,
             BuiltinFunction::ItemMemberFunction(..) => false,
             BuiltinFunction::StringToFloat | BuiltinFunction::StringIsFloat => true,
-            BuiltinFunction::ColorBrighter
+            BuiltinFunction::ColorRgbaStruct
+            | BuiltinFunction::ColorBrighter
             | BuiltinFunction::ColorDarker
             | BuiltinFunction::ColorTransparentize
             | BuiltinFunction::ColorMix
@@ -288,7 +308,7 @@ impl BuiltinFunction {
             BuiltinFunction::GetWindowScaleFactor => true,
             BuiltinFunction::GetWindowDefaultFontSize => true,
             BuiltinFunction::AnimationTick => true,
-            BuiltinFunction::DarkColorScheme => true,
+            BuiltinFunction::ColorScheme => true,
             // Even if it has technically side effect, we still consider it as pure for our purpose
             BuiltinFunction::Debug => true,
             BuiltinFunction::Mod
@@ -310,7 +330,8 @@ impl BuiltinFunction {
             BuiltinFunction::SetSelectionOffsets => false,
             BuiltinFunction::ItemMemberFunction(..) => false,
             BuiltinFunction::StringToFloat | BuiltinFunction::StringIsFloat => true,
-            BuiltinFunction::ColorBrighter
+            BuiltinFunction::ColorRgbaStruct
+            | BuiltinFunction::ColorBrighter
             | BuiltinFunction::ColorDarker
             | BuiltinFunction::ColorTransparentize
             | BuiltinFunction::ColorMix
@@ -393,7 +414,7 @@ macro_rules! declare_units {
 declare_units! {
     /// No unit was given
     None = "" -> Float32,
-    ///
+    /// Percent value
     Percent = "%" -> Percent,
 
     // Lengths or Coord
@@ -457,7 +478,7 @@ pub enum Expression {
     StringLiteral(String),
     /// Number
     NumberLiteral(f64, Unit),
-    ///
+    /// Bool
     BoolLiteral(bool),
 
     /// Reference to the callback `<name>` in the `<element>`
@@ -580,6 +601,7 @@ pub enum Expression {
     ImageReference {
         resource_ref: ImageReference,
         source_location: Option<SourceLocation>,
+        nine_slice: Option<[u16; 4]>,
     },
 
     Condition {
@@ -1250,6 +1272,7 @@ impl Expression {
             Type::Image => Expression::ImageReference {
                 resource_ref: ImageReference::None,
                 source_location: None,
+                nine_slice: None,
             },
             Type::Bool => Expression::BoolLiteral(false),
             Type::Model => Expression::Invalid,

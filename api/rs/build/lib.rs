@@ -17,11 +17,11 @@ In your Cargo.toml:
 build = "build.rs"
 
 [dependencies]
-slint = "1.4.0"
+slint = "1.5.0"
 ...
 
 [build-dependencies]
-slint-build = "1.4.0"
+slint-build = "1.5.0"
 ```
 
 In the `build.rs` file:
@@ -374,7 +374,7 @@ pub fn compile_with_config(
     let syntax_node = syntax_node.expect("diags contained no compilation errors");
 
     // 'spin_on' is ok here because the compiler in single threaded and does not block if there is no blocking future
-    let (doc, diag) =
+    let (doc, diag, _) =
         spin_on::spin_on(i_slint_compiler::compile_syntax_node(syntax_node, diag, compiler_config));
 
     if diag.has_error() {
@@ -434,7 +434,7 @@ pub fn print_rustc_flags() -> std::io::Result<()> {
         std::env::var_os("DEP_MCU_BOARD_SUPPORT_BOARD_CONFIG_PATH").map(std::path::PathBuf::from)
     {
         let config = std::fs::read_to_string(board_config_path.as_path())?;
-        let toml = config.parse::<toml_edit::Document>().expect("invalid board config toml");
+        let toml = config.parse::<toml_edit::DocumentMut>().expect("invalid board config toml");
 
         for link_arg in
             toml.get("link_args").and_then(toml_edit::Item::as_array).into_iter().flatten()

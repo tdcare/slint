@@ -1,7 +1,6 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-1.1 OR LicenseRef-Slint-commercial
 
-use core::convert::TryFrom;
 use i_slint_compiler::diagnostics::SourceFileVersion;
 use i_slint_compiler::langtype::Type as LangType;
 use i_slint_core::component_factory::ComponentFactory;
@@ -13,7 +12,6 @@ use i_slint_core::window::WindowInner;
 use i_slint_core::{PathData, SharedVector};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -890,6 +888,15 @@ impl ComponentDefinition {
         let guard = unsafe { generativity::Guard::new(generativity::Id::new()) };
         self.inner.unerase(guard).original.clone()
     }
+
+    /// Return the `TypeLoader` used when parsing the code in the interpreter.
+    ///
+    /// WARNING: this is not part of the public API
+    #[cfg(feature = "highlight")]
+    pub fn type_loader(&self) -> std::rc::Rc<i_slint_compiler::typeloader::TypeLoader> {
+        let guard = unsafe { generativity::Guard::new(generativity::Id::new()) };
+        self.inner.unerase(guard).type_loader.get().unwrap().clone()
+    }
 }
 
 /// Print the diagnostics to stderr
@@ -1193,9 +1200,9 @@ impl ComponentInstance {
     #[cfg(feature = "highlight")]
     pub fn component_positions(
         &self,
-        path: PathBuf,
+        path: &Path,
         offset: u32,
-    ) -> crate::highlight::ComponentPositions {
+    ) -> Vec<i_slint_core::lengths::LogicalRect> {
         crate::highlight::component_positions(&self.inner, path, offset)
     }
 
@@ -1203,11 +1210,23 @@ impl ComponentInstance {
     ///
     /// WARNING: this is not part of the public API
     #[cfg(feature = "highlight")]
-    pub fn element_position(
+    pub fn element_positions(
         &self,
         element: &i_slint_compiler::object_tree::ElementRc,
     ) -> Vec<i_slint_core::lengths::LogicalRect> {
-        crate::highlight::element_position(&self.inner, element)
+        crate::highlight::element_positions(&self.inner, element)
+    }
+
+    /// Find the the `element` that was defined at the text position.
+    ///
+    /// WARNING: this is not part of the public API
+    #[cfg(feature = "highlight")]
+    pub fn element_node_at_source_code_position(
+        &self,
+        path: &Path,
+        offset: u32,
+    ) -> Vec<(i_slint_compiler::object_tree::ElementRc, usize)> {
+        crate::highlight::element_node_at_source_code_position(&self.inner, path, offset)
     }
 }
 

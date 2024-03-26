@@ -14,7 +14,7 @@ This module has different sub modules with the actual parser functions
 
 use crate::diagnostics::{BuildDiagnostics, SourceFile, SourceFileVersion, Spanned};
 pub use smol_str::SmolStr;
-use std::{convert::TryFrom, fmt::Display};
+use std::fmt::Display;
 
 mod document;
 mod element;
@@ -549,11 +549,24 @@ mod parser_trait {
 
         /// consume everything until reaching a token of this kind
         fn until(&mut self, kind: SyntaxKind) {
-            // FIXME! match {} () []
-            while {
-                let k = self.nth(0).kind();
-                k != kind && k != SyntaxKind::Eof
-            } {
+            let mut parens = 0;
+            let mut braces = 0;
+            let mut brackets = 0;
+            loop {
+                match self.nth(0).kind() {
+                    k @ _ if k == kind && parens == 0 && braces == 0 && brackets == 0 => break,
+                    SyntaxKind::Eof => break,
+                    SyntaxKind::LParent => parens += 1,
+                    SyntaxKind::LBrace => braces += 1,
+                    SyntaxKind::LBracket => brackets += 1,
+                    SyntaxKind::RParent if parens == 0 => break,
+                    SyntaxKind::RParent => parens -= 1,
+                    SyntaxKind::RBrace if braces == 0 => break,
+                    SyntaxKind::RBrace => braces -= 1,
+                    SyntaxKind::RBracket if brackets == 0 => break,
+                    SyntaxKind::RBracket => brackets -= 1,
+                    _ => {}
+                };
                 self.consume();
             }
             self.expect(kind);
@@ -992,7 +1005,7 @@ pub fn parse(
 ) -> SyntaxNode {
     let mut p = DefaultParser::new(&source, build_diagnostics);
     p.source_file = std::rc::Rc::new(crate::diagnostics::SourceFileInner::new(
-        path.map(|p| crate::pathutils::clean_path(p)).unwrap_or_default(),
+        path.map(crate::pathutils::clean_path).unwrap_or_default(),
         source,
         version,
     ));
